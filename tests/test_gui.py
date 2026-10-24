@@ -113,7 +113,8 @@ class GuiTests(unittest.TestCase):
         return values
 
     def test_initial_refresh_populates_models(self):
-        self.assertIs(self.window.centralWidget(), self.window.mods_tab)
+        self.assertIs(self.window.centralWidget(), self.window.workspace)
+        self.assertIs(self.window.workspace.stack.currentWidget(), self.window.mods_tab)
         self.assertFalse(hasattr(self.window, "tabs"))
         self.assertEqual(self.window.mods_model.rowCount(), 2)
         self.assertEqual(self.window.mods_model.data(self.window.mods_model.index(0, 0)), "")
@@ -145,25 +146,12 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(header.sectionSize(0), self.cfg["placeholder_image_col_width"])
 
-    def test_manage_section_opens_secondary_dialogs(self):
-        manage = self.window.mods_toolbar.sections["manage"]
-        self.assertEqual(manage.title, "Manage")
-        self.assertEqual(
-            [button.accessibleName() for button in manage.widgets()],
-            ["Open presets", "Open settings", "Open broken links cleanup"],
-        )
-
-        self.window._open_presets_dialog()
-        self.assertTrue(self.window.presets_dialog.isVisible())
-        self.window.presets_dialog.close()
-
-        self.window._open_settings_dialog()
-        self.assertTrue(self.window.settings_dialog.isVisible())
-        self.window.settings_dialog.close()
-
-        self.window._open_broken_dialog()
-        self.assertTrue(self.window.broken_dialog.isVisible())
-        self.window.broken_dialog.close()
+    def test_navigation_opens_secondary_pages(self):
+        for key in ("presets", "settings", "cleanup", "games", "library"):
+            self.window.workspace.navigation[key].click()
+            self.assertEqual(self.window.workspace.current_page, key)
+            self.assertTrue(self.window.workspace.navigation[key].isChecked())
+        self.assertEqual(self.window._dialogs(), [])
 
     def test_duplicate_manage_menu_is_not_built(self):
         self.assertIsNone(self.window.menuWidget())
@@ -214,12 +202,12 @@ class GuiTests(unittest.TestCase):
     def test_single_mod_detail_exposes_favorite_action(self):
         self.window.current_mod_favorites = set()
         self.window._refresh_mod_detail(self.mods[0])
-        labels = [button.text() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
+        labels = [button.toolTip() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
         self.assertIn("Add to favorites", labels)
 
         self.window.current_mod_favorites = {"combat.pak"}
         self.window._refresh_mod_detail(self.mods[0])
-        labels = [button.text() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
+        labels = [button.toolTip() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
         self.assertIn("Remove from favorites", labels)
 
     def test_filter_boxes_use_popup_completion_without_inline_autofill(self):
@@ -378,7 +366,7 @@ class GuiTests(unittest.TestCase):
         with patch("mod_manager.ui.app.save_config") as save_config:
             self.window._set_view_mode("tiles")
 
-        self.assertEqual(self.window.mods_stack.currentWidget(), self.window.tile_splitter)
+        self.assertEqual(self.window.mods_stack.currentWidget(), self.window.tiles_view)
         self.assertEqual(self.window.tiles_view.model(), self.window.mods_model)
         self.assertTrue(self.window.view_tiles_button.isChecked())
         self.assertFalse(self.window.view_list_button.isChecked())
@@ -476,7 +464,7 @@ class GuiTests(unittest.TestCase):
         self.window._refresh_mod_detail(self.mods[1])
 
         texts = self.widget_texts(self.window.detail_frame)
-        self.assertEqual(texts.count("Name"), 1)
+        self.assertEqual(texts.count("ui.pak"), 1)
         self.assertIn("ui.pak", texts)
         self.assertNotIn("combat.pak", texts)
         self.assertEqual(self.window.detail_layout.alignment(), QtCore.Qt.AlignTop)
@@ -689,7 +677,7 @@ class GuiTests(unittest.TestCase):
             self.assertTrue(button.toolTip())
             self.assertTrue(button.accessibleName())
             self.assertEqual(button.iconSize(), QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
-            self.assertEqual(button.property("variant"), "acrylic")
+            self.assertIn(button.property("variant"), {"acrylic", "navigation"})
 
         self.assertEqual(self.window.order_direction_button.property("variant"), "acrylic")
         self.assertFalse(self.window.order_direction_button.icon().isNull())
@@ -698,14 +686,14 @@ class GuiTests(unittest.TestCase):
         uninstall = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.text() == "Uninstall"][0]
         self.assertFalse(uninstall.icon().isNull())
         self.assertTrue(uninstall.toolTip())
-        import_button = self.window.mods_actions.button("import_files")
+        import_button = self.window.mods_toolbar.button("import_files")
         self.assertFalse(import_button.icon().isNull())
         self.assertEqual(import_button.toolTip(), "Import mod files")
-        self.assertEqual(import_button.accessibleName(), "Import mod files")
+        self.assertEqual(import_button.accessibleName(), "Import files")
 
     def test_save_settings_converts_numeric_values_and_refreshes_ui(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["page_size"].setText("25")
         self.window.setting_widgets["ui_scale_percent"].setText("150")
         self.window.setting_widgets["mod_view_mode"].setCurrentText("tiles")
@@ -725,7 +713,7 @@ class GuiTests(unittest.TestCase):
         save_config.assert_called_once()
         refresh_all.assert_called_once_with()
         self.assertEqual(self.window.context.status_text, "Settings saved.")
-        self.assertFalse(self.window.settings_dialog.isVisible())
+        self.assertEqual(self.window.workspace.current_page, "settings")
 
     def test_game_profile_dialog_owns_the_per_game_fields(self):
         with patch.object(QtWidgets.QDialog, "exec", return_value=QtWidgets.QDialog.Accepted):
@@ -760,7 +748,7 @@ class GuiTests(unittest.TestCase):
 
     def test_save_theme_setting_applies_live_without_restart(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["gui_theme"].setCurrentText("dark")
 
         with patch.object(self.window, "_apply_button_style") as apply_style:
@@ -772,7 +760,7 @@ class GuiTests(unittest.TestCase):
 
     def test_accent_color_mode_defaults_to_system_with_color_row_hidden(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "system")
         self.assertEqual(self.window.setting_widgets["gui_accent_color"].text(), "#2563eb")
@@ -780,7 +768,7 @@ class GuiTests(unittest.TestCase):
 
     def test_selecting_custom_accent_mode_reveals_color_row_and_updates_preview(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
         self.window.setting_widgets["gui_accent_color_mode"].setCurrentText("custom")
 
@@ -789,7 +777,7 @@ class GuiTests(unittest.TestCase):
 
     def test_choose_accent_color_updates_field_and_preview(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["gui_accent_color_mode"].setCurrentText("custom")
 
         with patch("mod_manager.ui.dialogs.prompts.choose_color", return_value=QtGui.QColor("#ff0000")):
@@ -801,7 +789,7 @@ class GuiTests(unittest.TestCase):
 
     def test_save_custom_accent_color_applies_live(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["gui_accent_color_mode"].setCurrentText("custom")
         self.window.setting_widgets["gui_accent_color"].setText("#ff0000")
 
@@ -815,7 +803,7 @@ class GuiTests(unittest.TestCase):
 
     def test_clicking_accent_preview_badge_toggles_color_mode(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "system")
         self.assertFalse(self.window.settings_form.is_row_visible("gui_accent_color"))
@@ -830,7 +818,7 @@ class GuiTests(unittest.TestCase):
 
     def test_save_settings_without_accent_change_does_not_require_restart(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["page_size"].setText("25")
 
         with patch("mod_manager.storage.save_config"):
@@ -840,7 +828,7 @@ class GuiTests(unittest.TestCase):
 
     def test_text_color_mode_defaults_to_system_with_color_row_hidden(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
         self.assertEqual(self.window.setting_widgets["gui_text_color_mode"].currentText(), "system")
         self.assertEqual(self.window.setting_widgets["gui_text_color"].text(), "#111827")
@@ -848,7 +836,7 @@ class GuiTests(unittest.TestCase):
 
     def test_clicking_text_preview_badge_toggles_color_mode(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
         self.window.text_preview_badge.click()
         self.assertEqual(self.window.setting_widgets["gui_text_color_mode"].currentText(), "custom")
@@ -860,7 +848,7 @@ class GuiTests(unittest.TestCase):
 
     def test_choose_text_color_updates_field_and_preview(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["gui_text_color_mode"].setCurrentText("custom")
 
         with patch("mod_manager.ui.dialogs.prompts.choose_color", return_value=QtGui.QColor("#00ff00")):
@@ -872,7 +860,7 @@ class GuiTests(unittest.TestCase):
 
     def test_save_custom_text_color_applies_live(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.window.setting_widgets["gui_text_color_mode"].setCurrentText("custom")
         self.window.setting_widgets["gui_text_color"].setText("#00ff00")
 
@@ -901,7 +889,7 @@ class GuiTests(unittest.TestCase):
 
     def test_preset_and_broken_actions_dispatch_selected_rows(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_presets_dialog()
+        self.window._open_presets_page()
         preset_selection = self.window.presets_table.selectionModel()
         preset_selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         preset_selection.select(self.window.presets_model.index(1, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
@@ -913,9 +901,9 @@ class GuiTests(unittest.TestCase):
 
         toggle.assert_called_once_with(self.window.cfg, ["core", "ui"], {"combat.pak"}, True)
         self.assertEqual(self.window.context.status_text, "Preset toggled")
-        self.assertFalse(self.window.presets_dialog.isVisible())
+        self.assertEqual(self.window.workspace.current_page, "presets")
 
-        self.window._open_broken_dialog()
+        self.window._open_broken_page()
         broken_selection = self.window.broken_table.selectionModel()
         broken_selection.select(self.window.broken_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         outcome = OperationItem(self.broken[0].name, "uninstalled", True, "OK")
@@ -924,11 +912,11 @@ class GuiTests(unittest.TestCase):
 
         deactivate.assert_called_once_with(self.broken[0])
         self.assertEqual(self.window.context.status_text, "Removed broken links: 1. Errors: 0.")
-        self.assertFalse(self.window.broken_dialog.isVisible())
+        self.assertEqual(self.window.workspace.current_page, "cleanup")
 
     def test_preset_double_click_toggles_clicked_preset(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_presets_dialog()
+        self.window._open_presets_page()
         with patch("mod_manager.ui.app.toggle_presets_result", return_value=("Preset toggled", OperationResult())) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
@@ -936,17 +924,17 @@ class GuiTests(unittest.TestCase):
 
         toggle.assert_called_once_with(self.window.cfg, ["ui"], {"combat.pak"}, True)
         self.assertEqual(self.window.context.status_text, "Preset toggled")
-        self.assertFalse(self.window.presets_dialog.isVisible())
+        self.assertEqual(self.window.workspace.current_page, "presets")
 
     def test_preset_save_and_delete_keep_dialog_open(self):
         self.window._run_action = self.run_action_inline
-        self.window._open_presets_dialog()
+        self.window._open_presets_page()
         self.window.preset_name.setText("new")
 
         with patch("mod_manager.ui.app.save_preset_from_installed", return_value=(True, "Saved")):
             self.window._save_preset()
 
-        self.assertTrue(self.window.presets_dialog.isVisible())
+        self.assertTrue(self.window.workspace.current_page == "presets")
 
         selection = self.window.presets_table.selectionModel()
         selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
@@ -954,8 +942,8 @@ class GuiTests(unittest.TestCase):
             self.window._delete_selected_presets()
 
         delete_presets.assert_called_once_with(["core"])
-        self.assertTrue(self.window.presets_dialog.isVisible())
-        self.window.presets_dialog.close()
+        self.assertTrue(self.window.workspace.current_page == "presets")
+        self.window._navigate("library")
 
     def test_refresh_presets_suspends_table_updates_and_preserves_selection(self):
         selection = self.window.presets_table.selectionModel()

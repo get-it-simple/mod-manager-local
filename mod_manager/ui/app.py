@@ -8,7 +8,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from app_paths import APP_NAME, APP_VERSION
 
-from ..folder_actions import ensure_paths, open_folder, select_in_explorer
+from ..folder_actions import ensure_paths, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
@@ -20,7 +20,6 @@ from ..mods import (
     change_mods_page,
     deactivate_mod_result,
     existing_targets,
-    import_mod_file,
     is_copy_install,
     is_image_file,
     is_mod_file,
@@ -49,8 +48,10 @@ from ..storage import (
     normalize_game_profiles,
     save_config,
 )
-from .. import settings_schema
 from . import icons
+from .pages.library import build_mods, build_mods_toolbar, build_mods_actions
+from .pages.collections import build_presets, build_broken
+from .widgets.workspace import Workspace, WorkspacePage, PROFILE_PAGES
 from .context import AppContext
 from .controllers import ACTIONS, SELECTION, WidgetRegistry
 from .controllers.settings_controller import SAVED_MESSAGE as SETTINGS_SAVED
@@ -60,44 +61,21 @@ from .controllers.archive_import_controller import ArchiveImportController
 from .controllers.preview_controller import PreviewController
 from .controllers.error_history_controller import ErrorHistoryController
 from .dialogs import prompts
-from .dialogs.base import close_dialog, show_dialog, themed_dialog
 from .dialogs.game_profile import GameProfileDialog
 from .dialogs.prompts import show_error
 from .localization import system_action_text as _sys_str
-from .pages.toolbar_specs import (
-    BROKEN_TOOLBAR_SECTIONS,
-    MODS_ACTION_SECTIONS,
-    MODS_TOOLBAR_SECTIONS,
-    PRESETS_TOOLBAR_SECTIONS,
-    SELECTION_ACTIONS,
-    SETTINGS_TOOLBAR_SECTIONS,
-)
-from .models import (
-    BrokenTableModel,
-    FavoriteDelegate,
-    ModListView,
-    ModTableModel,
-    PresetTableModel,
-    TileDelegate,
-    configure_header,
-)
 from .theme import colors, tokens
 from .task_runner import TaskRunner
 from .theme.manager import ThemeManager
 from .widgets import (
     DetailImageLabel,
-    IconToolbar,
-    PageControl,
     QtWindowsDropTarget,
     apply_margins,
-    attach_completer,
     clear_layout,
     complete,
     configure_completer,
     configure_filter_box,
     detail_name_label,
-    dropped_paths,
-    expanding_size_policy,
     fixed_size_policy,
     icon_button,
     owns_event_source,
@@ -136,18 +114,6 @@ class _Var:
 
 
 
-THEME_KEYS = (
-    "gui_theme",
-    "gui_accent_color_mode",
-    "gui_accent_color",
-    "gui_text_color_mode",
-    "gui_text_color",
-    "gui_font_family",
-    "gui_font_size",
-)
-
-
-_check_icon = icons.check_icon
 _sort_direction_icon = icons.sort_direction_icon
 
 
@@ -281,6 +247,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.mods_model.refresh_accent(palette.accent)
             self.presets_model.set_palette(palette)
             self.tile_delegate.set_palette(palette)
+            self.workspace.refresh_icons()
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tiles_view.viewport().update()
             for button in self.action_widgets:
@@ -304,8 +271,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._applying_theme = False
 
     def _dialogs(self) -> list[QtWidgets.QDialog]:
-        names = ("games_dialog", "presets_dialog", "settings_dialog", "broken_dialog")
-        dialogs = [dialog for dialog in (getattr(self, name, None) for name in names) if dialog is not None]
+        dialogs = []
         if hasattr(self, "errors") and self.errors.dialog is not None:
             dialogs.append(self.errors.dialog)
         return dialogs
@@ -340,7 +306,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() in (QtCore.QEvent.ShortcutOverride, QtCore.QEvent.KeyPress) and event.matches(QtGui.QKeySequence.Paste):
-            if isinstance(obj, QtWidgets.QWidget) and obj.window() in (self, self.archive_import.dialog) and clipboard_has_files():
+            archive_active = self.archive_import.dialog is not None and isinstance(obj, QtWidgets.QWidget) and obj.window() is self.archive_import.dialog
+            library_active = isinstance(obj, QtWidgets.QWidget) and obj.window() is self and self._is_mods_tab_active()
+            if (archive_active or library_active) and not self.busy and clipboard_has_files():
                 event.accept()
                 if event.type() == QtCore.QEvent.KeyPress:
                     self._handle_paste()
@@ -367,13 +335,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
                     self._toggle_label_filter(label)
                     event.accept()
                     return True
-            if event.button() == QtCore.Qt.XButton1:
+            if isinstance(obj, QtWidgets.QWidget) and obj.window() is self and event.button() == QtCore.Qt.XButton1:
                 return self._nav_back() == "break"
-            if event.button() == QtCore.Qt.XButton2:
+            if isinstance(obj, QtWidgets.QWidget) and obj.window() is self and event.button() == QtCore.Qt.XButton2:
                 return self._nav_forward() == "break"
-        detail_scroll = getattr(self, "detail_scroll", None)
-        if detail_scroll and obj is detail_scroll.viewport() and event.type() == QtCore.QEvent.Resize:
-            self._update_detail_image_size()
         return super().eventFilter(obj, event)
 
     def _bind_navigation_events(self) -> None:
@@ -393,34 +358,47 @@ class ModManagerGui(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence.Paste, self, activated=self._handle_paste)
 
     def _is_mods_tab_active(self) -> bool:
-        return self.isActiveWindow()
+        return self.workspace.current_page == "library" and not self.busy
+
+    def _editing_text(self) -> bool:
+        return isinstance(QtWidgets.QApplication.focusWidget(), (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit, QtWidgets.QAbstractSpinBox))
 
     def _is_tile_view(self) -> bool:
         return self.mod_view_mode.get() == "tiles"
 
     def _nav_back(self, event=None):
-        if self._is_mods_tab_active():
+        if self._is_mods_tab_active() and not self._editing_text():
             self._change_mod_page(-1)
             return "break"
         return None
 
     def _nav_forward(self, event=None):
-        if self._is_mods_tab_active():
+        if self._is_mods_tab_active() and not self._editing_text():
             self._change_mod_page(1)
             return "break"
         return None
 
     def _build(self) -> None:
-        self.games_page = QtWidgets.QWidget()
-        self.mods_tab = QtWidgets.QWidget()
-        self.setCentralWidget(self.mods_tab)
-        self.statusBar().showMessage("")
+        self.workspace = Workspace(self)
+        self.setCentralWidget(self.workspace)
+        self.workspace.pageRequested.connect(self._navigate)
+        self.workspace.profileRequested.connect(self._select_game_profile)
+        self.game_button = self.workspace.game_button
+        self.games_page = WorkspacePage("Game profiles", "Choose a game or add a profile to get started.")
+        self.mods_tab = WorkspacePage("Library")
+        self.statusBar().showMessage("Ready")
+        self.selection_status = QtWidgets.QLabel("0 selected")
+        self.statusBar().addPermanentWidget(self.selection_status)
         self._apply_button_style()
         self._build_games_page()
         self._build_mods()
         self._build_presets()
         self._build_settings()
         self._build_broken()
+        for key, page in (("library", self.mods_tab), ("games", self.games_page), ("presets", self.presets_page), ("settings", self.settings.page), ("cleanup", self.broken_page)):
+            self.workspace.add_page(key, page)
+        self.registry.extend(ACTIONS, self.workspace.navigation.values())
+        self.registry.extend(ACTIONS, (self.workspace.profile_box, self.game_button))
         self._show_start_page()
 
     def _apply_button_style(self) -> None:
@@ -430,36 +408,35 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _build_games_page(self) -> None:
         self.games = GamesController(self, self.games_page)
         self.games_list = self.games.page_list
-        self.games_dialog = self.games.dialog
-        self.games_dialog_list = self.games.dialog_list
         self.games_page_toolbar = self.games.page_toolbar
-        self.games_dialog_toolbar = self.games.dialog_toolbar
 
-    def _dialog(self, title: str, width: int | None = None, height: int | None = None) -> QtWidgets.QDialog:
-        size = tokens.DIALOG_SIZE if width is None or height is None else (width, height)
-        return themed_dialog(self, title, size)
+    def _open_presets_page(self) -> None:
+        self._navigate("presets")
 
-    def _show_dialog(self, dialog: QtWidgets.QDialog) -> None:
-        show_dialog(dialog)
+    def _open_settings_page(self) -> None:
+        self._navigate("settings")
 
-    def _close_dialog(self, dialog: QtWidgets.QDialog | None) -> None:
-        if dialog and dialog.isVisible():
-            dialog.accept()
+    def _open_broken_page(self) -> None:
+        self._navigate("cleanup")
 
-    def _open_presets_dialog(self) -> None:
-        self.refresh_presets()
-        self._show_dialog(self.presets_dialog)
+    def _open_games_page(self) -> None:
+        self._navigate("games")
 
-    def _open_settings_dialog(self) -> None:
-        self._show_dialog(self.settings_dialog)
+    def _navigate(self, key: str) -> None:
+        if self.busy or (key in PROFILE_PAGES and not active_game_profile(self.cfg)):
+            return
+        if key == "presets":
+            self.refresh_presets()
+        elif key == "cleanup":
+            self.refresh_broken()
+        elif key == "games":
+            self._refresh_games_lists()
+        self.workspace.show_page(key)
 
-    def _open_broken_dialog(self) -> None:
-        self.refresh_broken()
-        self._show_dialog(self.broken_dialog)
-
-    def _open_games_dialog(self) -> None:
-        self._refresh_games_lists()
-        self._show_dialog(self.games_dialog)
+    def _sync_workspace(self) -> None:
+        profile = active_game_profile(self.cfg)
+        self.workspace.set_profiles(self.cfg.get("game_profiles", []), profile.get("id", "") if profile else "", self.busy)
+        self.mods_tab.set_subtitle(f"{profile.get('name', 'Game')} · {len(self.current_mod_items)} mods" if profile else "")
 
     def _show_start_page(self) -> None:
         self._refresh_games_lists()
@@ -470,11 +447,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._set_main_page(self.games_page)
 
     def _set_main_page(self, widget: QtWidgets.QWidget) -> None:
-        if self.centralWidget() is widget:
-            return
-        if self.centralWidget() is not None:
-            self.takeCentralWidget()
-        self.setCentralWidget(widget)
+        key = next(key for key, page in self.workspace.pages.items() if page is widget)
+        self.workspace.show_page(key)
 
     def _update_game_button(self) -> None:
         self.games.update_game_button()
@@ -483,7 +457,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.games.refresh_lists()
 
     def _select_game_profile(self, profile_id: str) -> None:
-        self.games.select(profile_id)
+        if not self.busy:
+            self.games.select(profile_id)
 
     def _add_game_profile(self) -> None:
         self.games.add()
@@ -536,183 +511,25 @@ class ModManagerGui(QtWidgets.QMainWindow):
         box.lineEdit().returnPressed.connect(self._mods_search)
         return configure_filter_box(box)
 
-    def _build_mods_toolbar(self) -> IconToolbar:
-        toolbar = IconToolbar(self.mods_tab)
-        toolbar.build(MODS_TOOLBAR_SECTIONS)
+    def _build_mods_toolbar(self):
+        return build_mods_toolbar(self)
 
-        self.game_button = toolbar.sections["game"].add_text_action(
-            "games", "Game", "menu", "Manage and switch game profiles"
-        )
-        self.game_button.setMinimumWidth(tokens.GAME_BUTTON_MIN_WIDTH)
-
-        self.search_box = self._filter_box("Search")
-        self.label_filter_box = self._filter_box("Label")
-        self.filter_boxes = (self.search_box, self.label_filter_box)
-        filter_section = toolbar.sections["filter"]
-        filter_section.add_widget(self.search_box, 2)
-        filter_section.add_widget(self.label_filter_box, 1)
-        self.favorite_filter_button = toolbar.button("favorite_filter")
-        self.favorite_filter_button.setCheckable(True)
-
-        self.order_box = select_box()
-        self.order_box.addItems(list(MOD_ORDER_OPTIONS))
-        self.order_box.setCurrentText(order_label_for_key(self.mod_sort_key))
-        self.order_box.activated.connect(self._activate_mod_order)
-        order_section = toolbar.sections["order"]
-        order_section.add_widget(self.order_box)
-        self.order_direction_button = order_section.add_action(
-            "order_direction", "toggle", "Sort ascending", self._toggle_mod_order_direction
-        )
-
-        self.view_list_button = toolbar.button("view_list")
-        self.view_tiles_button = toolbar.button("view_tiles")
-        for button in (self.view_list_button, self.view_tiles_button):
-            button.setCheckable(True)
-        self._set_icon_button_checked(self.view_list_button, not self._is_tile_view())
-        self._set_icon_button_checked(self.view_tiles_button, self._is_tile_view())
-
-        toolbar.connect({
-            "games": self._open_games_dialog,
-            "search": self._mods_search,
-            "clear": self._mods_clear,
-            "favorite_filter": self._toggle_favorite_filter,
-            "view_list": lambda: self._set_view_mode("list"),
-            "view_tiles": lambda: self._set_view_mode("tiles"),
-            "presets": self._open_presets_dialog,
-            "settings": self._open_settings_dialog,
-            "broken": self._open_broken_dialog,
-        })
-        self.registry.extend(ACTIONS, toolbar.buttons.values())
-        toolbar.add_stretch()
-        self._update_mod_order_direction_button()
-        return toolbar
-
-    def _build_mods_actions(self) -> IconToolbar:
-        toolbar = IconToolbar(self.mods_tab)
-        toolbar.build(MODS_ACTION_SECTIONS)
-
-        page_section = toolbar.sections["page"]
-        page_section.add_action("prev_page", "back", "Previous mods page", lambda: self._change_mod_page(-1))
-        self.page_control = page_section.add_widget(PageControl())
-        self.page_control.pageRequested.connect(self._set_mod_page)
-        self.page_label = self.page_control
-        page_section.add_action("next_page", "forward", "Next mods page", lambda: self._change_mod_page(1))
-
-        self.label_edit = QtWidgets.QLineEdit()
-        self.label_edit.setPlaceholderText("Label")
-        self.label_edit.setMaximumWidth(tokens.LABEL_EDIT_MAX_WIDTH)
-        fixed_size_policy(self.label_edit)
-        self.label_edit_model = QtCore.QStringListModel(self.label_edit)
-        attach_completer(self.label_edit, self.label_edit_model)
-        label_section = toolbar.sections["label"]
-        label_section._actions_layout.insertWidget(0, self.label_edit)
-        self.label_edit.setParent(label_section)
-
-        toolbar.button("install_page").setAccessibleName(_sys_str("install"))
-        toolbar.button("uninstall_page").setAccessibleName(_sys_str("uninstall"))
-
-        toolbar.connect({
-            "install_page": self._install_page,
-            "uninstall_page": self._uninstall_page,
-            "toggle_selected": self._toggle_selected_mods,
-            "add_label": self._add_label_selected,
-            "remove_label": self._remove_label_selected,
-            "favorite_selected": self._toggle_favorite_selected,
-            "import_files": self._import_mod_files,
-            "import_folder": self._import_mod_folder,
-            "set_image": self._set_mod_image,
-        })
-        self.registry.extend(ACTIONS, toolbar.buttons.values())
-        for key in SELECTION_ACTIONS:
-            button = toolbar.button(key)
-            button.setEnabled(False)
-            self.registry.add(SELECTION, button)
-        toolbar.add_stretch()
-        return toolbar
+    def _build_mods_actions(self):
+        return build_mods_actions(self)
 
     def _apply_state_column_width(self) -> None:
         width = tokens.to_int(self.cfg.get("placeholder_image_col_width"), 0)
         if width > 0:
             self.mods_table.horizontalHeader().resizeSection(0, width)
 
-    def _build_mods(self) -> None:
-        layout = QtWidgets.QVBoxLayout(self.mods_tab)
-        self.mods_toolbar = self._build_mods_toolbar()
-        layout.addWidget(self.mods_toolbar)
-
-        self.mods_model = ModTableModel(self.theme.palette.accent, self)
-        self.mods_stack = QtWidgets.QStackedWidget()
-        self.mods_table = QtWidgets.QTableView()
-        self.mods_table.setModel(self.mods_model)
-        self.mods_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.mods_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        self.mods_table.setMouseTracking(True)
-        self.mods_table.setAcceptDrops(True)
-        self.mods_table.viewport().setAcceptDrops(True)
-        self.mods_table.viewport().installEventFilter(self)
-        configure_header(self.mods_table, ModTableModel.COLUMNS)
-        self._apply_state_column_width()
-        mods_header = self.mods_table.horizontalHeader()
-        mods_header.setSectionsClickable(True)
-        mods_header.sectionClicked.connect(self._sort_mods_by_section)
-        self.mods_table.doubleClicked.connect(lambda _idx: self._toggle_selected_mods())
-        self.mods_table.selectionModel().selectionChanged.connect(lambda _a, _b: self._on_mod_selection_changed())
-        self.favorite_delegate = FavoriteDelegate(self.mods_table)
-        self.favorite_delegate.favoriteToggled.connect(self._toggle_favorite_name)
-        self.mods_table.setItemDelegateForColumn(1, self.favorite_delegate)
-
-        self.tile_delegate = TileDelegate(self.cfg, self.theme.palette, self)
-        self.tiles_view = ModListView()
-        self.tiles_view.setModel(self.mods_model)
-        self.tiles_view.setItemDelegate(self.tile_delegate)
-        self.tiles_view.setViewMode(QtWidgets.QListView.IconMode)
-        self.tiles_view.setResizeMode(QtWidgets.QListView.Adjust)
-        self.tiles_view.setMovement(QtWidgets.QListView.Static)
-        self.tiles_view.setUniformItemSizes(True)
-        self.tiles_view.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        self.tiles_view.setMouseTracking(True)
-        self.tiles_view.setAcceptDrops(True)
-        self.tiles_view.viewport().setAcceptDrops(True)
-        self.tiles_view.viewport().installEventFilter(self)
-        self.tiles_view.zoomRequested.connect(self._zoom_tiles)
-        self.tiles_view.doubleClicked.connect(lambda _idx: self._toggle_selected_mods())
-        self.tiles_view.selectionModel().selectionChanged.connect(lambda _a, _b: self._on_mod_selection_changed())
-        self.tile_delegate.favoriteToggled.connect(self._toggle_favorite_name)
-
-        self.detail_frame = QtWidgets.QWidget()
-        self.detail_frame.setAutoFillBackground(True)
-        self.detail_frame.setStyleSheet("background: palette(base);")
-        self.detail_layout = QtWidgets.QVBoxLayout(self.detail_frame)
-        self.detail_layout.setContentsMargins(12, 12, 12, 12)
-        self.detail_layout.setSpacing(8)
-        self.detail_layout.setAlignment(QtCore.Qt.AlignTop)
-        self.detail_scroll = QtWidgets.QScrollArea()
-        self.detail_scroll.setMinimumWidth(tokens.DETAIL_PANEL_MIN_WIDTH)
-        self.detail_scroll.setWidgetResizable(True)
-        self.detail_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.detail_scroll.setWidget(self.detail_frame)
-        self.detail_scroll.viewport().installEventFilter(self)
-        self.tile_splitter = QtWidgets.QSplitter()
-        self.tile_splitter.addWidget(self.tiles_view)
-        self.tile_splitter.addWidget(self.detail_scroll)
-        self.tile_splitter.setStretchFactor(0, tokens.TILE_LIST_STRETCH)
-        self.tile_splitter.setStretchFactor(1, tokens.TILE_DETAIL_STRETCH)
-        self.tile_splitter.splitterMoved.connect(lambda _pos, _index: self._save_tile_splitter_sizes())
-        QtCore.QTimer.singleShot(tokens.IMMEDIATE_MS, self._restore_tile_splitter_sizes)
-
-        self.mods_stack.addWidget(self.mods_table)
-        self.mods_stack.addWidget(self.tile_splitter)
-        layout.addWidget(self.mods_stack, 1)
-
-        self.mods_actions = self._build_mods_actions()
-        layout.addWidget(self.mods_actions)
-        self._show_mod_view()
+    def _build_mods(self):
+        return build_mods(self)
 
     def _save_tile_splitter_sizes(self) -> None:
         if not hasattr(self, "tile_splitter"):
             return
         sizes = self.tile_splitter.sizes()
-        if len(sizes) >= 2 and sizes[0] > 0 and sizes[1] > 0:
+        if self.detail_scroll.isVisibleTo(self.tile_splitter) and len(sizes) >= 2 and sizes[0] > 0 and sizes[1] > 0:
             self.cfg["_tile_list_width"] = int(sizes[0])
             self.cfg["_tile_detail_width"] = int(sizes[1])
 
@@ -723,46 +540,31 @@ class ModManagerGui(QtWidgets.QMainWindow):
         detail_w = int(self.cfg.get("_tile_detail_width") or 0)
         if list_w > 0 and detail_w > 0:
             self.tile_splitter.setSizes([list_w, detail_w])
+        else:
+            self.tile_splitter.setSizes([self.width(), tokens.DETAIL_PANEL_MIN_WIDTH])
 
-    def _build_presets(self) -> None:
-        self.presets_dialog = self._dialog("Presets")
-        layout = QtWidgets.QVBoxLayout(self.presets_dialog)
-        self.presets_model = PresetTableModel(self.theme.palette, self)
-        self.presets_table = QtWidgets.QTableView()
-        self.presets_table.setModel(self.presets_model)
-        self.presets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.presets_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        configure_header(self.presets_table, PresetTableModel.COLUMNS)
-        self.presets_table.doubleClicked.connect(self._toggle_preset_at_index)
-        layout.addWidget(self.presets_table)
+    def _toggle_details(self) -> None:
+        visible = self.details_button.isChecked()
+        if not visible:
+            self._save_tile_splitter_sizes()
+        self.cfg["mod_details_visible"] = visible
+        self.setting_widgets["mod_details_visible"].setChecked(visible)
+        self._apply_details_visibility()
+        save_config(self.cfg)
 
-        self.presets_toolbar = IconToolbar(self.presets_dialog)
-        self.presets_toolbar.build(PRESETS_TOOLBAR_SECTIONS)
-        page_section = self.presets_toolbar.sections["page"]
-        page_section.add_action("prev_page", "back", "Previous presets page", lambda: self._change_preset_page(-1))
-        self.preset_page_control = page_section.add_widget(PageControl())
-        self.preset_page_control.pageRequested.connect(self._set_preset_page)
-        self.preset_page_label = self.preset_page_control
-        page_section.add_action("next_page", "forward", "Next presets page", lambda: self._change_preset_page(1))
+    def _apply_details_visibility(self) -> None:
+        visible = bool(self.cfg.get("mod_details_visible", True))
+        self.details_button.setChecked(visible)
+        self.detail_scroll.setVisible(visible)
+        if visible:
+            self._restore_tile_splitter_sizes()
 
-        self.preset_name = QtWidgets.QLineEdit()
-        self.preset_name.setPlaceholderText("Preset name")
-        preset_section = self.presets_toolbar.sections["preset"]
-        preset_section._actions_layout.insertWidget(0, self.preset_name)
-        self.preset_name.setParent(preset_section)
-
-        self.presets_toolbar.connect({
-            "save": self._save_preset,
-            "toggle": self._toggle_selected_presets,
-            "delete": self._delete_selected_presets,
-        })
-        self.registry.extend(ACTIONS, self.presets_toolbar.buttons.values())
-        self.presets_toolbar.add_stretch()
-        layout.addWidget(self.presets_toolbar)
+    def _build_presets(self):
+        return build_presets(self)
 
     def _build_settings(self) -> None:
         self.settings = SettingsController(self)
-        self.settings_dialog = self.settings.dialog
+        self.settings_page = self.settings.page
         self.settings_form = self.settings.form
         self._settings_form = self.settings.form
         self.setting_widgets = self.settings.fields
@@ -771,26 +573,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.accent_preview_button = self.settings.accent_button
         self.text_preview_badge = self.settings.text_badge
 
-    def _build_broken(self) -> None:
-        self.broken_dialog = self._dialog("Broken links")
-        layout = QtWidgets.QVBoxLayout(self.broken_dialog)
-        self.broken_model = BrokenTableModel(self)
-        self.broken_table = QtWidgets.QTableView()
-        self.broken_table.setModel(self.broken_model)
-        self.broken_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.broken_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        configure_header(self.broken_table, BrokenTableModel.COLUMNS)
-        self.broken_table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.broken_table)
-        self.broken_toolbar = IconToolbar(self.broken_dialog)
-        self.broken_toolbar.build(BROKEN_TOOLBAR_SECTIONS)
-        self.broken_toolbar.connect({
-            "remove_selected": self._remove_selected_broken,
-            "remove_all": self._remove_all_broken,
-        })
-        self.registry.extend(ACTIONS, self.broken_toolbar.buttons.values())
-        self.broken_toolbar.add_stretch()
-        layout.addWidget(self.broken_toolbar)
+    def _build_broken(self):
+        return build_broken(self)
 
     @property
     def busy(self) -> bool:
@@ -809,6 +593,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _on_busy_changed(self, busy: bool) -> None:
         self.registry.set_enabled(ACTIONS, not busy)
+        self._sync_workspace()
+        self.workspace.stack.setEnabled(not busy)
         self._update_mod_selection_actions()
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
@@ -860,10 +646,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _show_mod_view(self) -> None:
         is_tiles = self._is_tile_view()
-        self.mods_stack.setCurrentWidget(self.tile_splitter if is_tiles else self.mods_table)
+        self.mods_stack.setCurrentWidget((self.tiles_view if is_tiles else self.mods_table) if self.current_mods_shown else self.library_empty)
         self.view_list_button.setChecked(not is_tiles)
         self.view_tiles_button.setChecked(is_tiles)
         self._refresh_selected_detail()
+        self._apply_details_visibility()
 
     def _sort_mods(self, key: str) -> None:
         key = self._normalize_mod_sort_key(key)
@@ -911,6 +698,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         button.setToolTip("Sort descending" if self.mod_sort_reverse else "Sort ascending")
 
     def _zoom_tiles(self, direction: int):
+        if not self._is_mods_tab_active() or self._editing_text():
+            return
         if not self._is_tile_view():
             return None
         current = tokens.clamp_tile_size(self.cfg.get("tile_size"))
@@ -944,6 +733,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _on_mod_selection_changed(self) -> None:
         self._update_mod_selection_actions()
+        self.selection_status.setText(f"{len(self._selected_rows(self._current_mod_view()))} selected")
         self._refresh_selected_detail()
 
     def _select_mod_names(self, selected_names: list[str] | None = None) -> None:
@@ -1006,12 +796,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         clear_layout(layout)
 
     def _detail_row(self, label: str, value: str) -> None:
-        row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)
-        value_label = QtWidgets.QLabel(value)
-        value_label.setWordWrap(True)
-        row.addWidget(detail_name_label(label))
-        row.addWidget(value_label, 1)
-        self.detail_layout.addLayout(row)
+        self.detail_scroll.add_text_row(label, value)
 
     def _format_mod_created_date(self, mod: ModItem) -> str:
         record = self.current_mod_records.get(mod.name, {})
@@ -1025,20 +810,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return "-"
 
     def _dates_fit_on_one_row(self, last_managed: str, created: str, available_width: int | None = None) -> bool:
-        if available_width is None:
-            margins = self.detail_layout.contentsMargins()
-            viewport_width = self.detail_scroll.viewport().width()
-            if viewport_width <= 1:
-                viewport_width = self.detail_scroll.width()
-            available_width = max(1, viewport_width - margins.left() - margins.right())
-        metrics = self.detail_frame.fontMetrics()
-        needed = (
-            tokens.DETAIL_LABEL_MIN_WIDTH * 2
-            + metrics.horizontalAdvance(last_managed)
-            + metrics.horizontalAdvance(created)
-            + tokens.DETAIL_DATES_SPACING
-        )
-        return available_width >= needed
+        return self.detail_scroll.dates_fit_on_one_row(last_managed, created, available_width)
 
     def _detail_dates_row(self, mod: ModItem) -> None:
         last_managed = self.current_mod_records.get(mod.name, {}).get("last_managed") or "-"
@@ -1058,17 +830,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.detail_layout.addLayout(row)
 
     def _detail_path_row(self, label: str, path: Path) -> None:
-        row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)
-        row.addWidget(detail_name_label(label))
-        row.addWidget(path_button(path, lambda target: select_in_explorer(target)), 1)
-        self.detail_layout.addLayout(row)
+        self.detail_scroll.add_row(detail_name_label(label), path_button(path, lambda target: select_in_explorer(target)), stretch_last=True)
 
     def _detail_row_with_button(self, label: str, button: QtWidgets.QPushButton) -> None:
-        row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)
-        row.addWidget(QtWidgets.QLabel(label))
-        row.addWidget(button)
-        row.addStretch(1)
-        self.detail_layout.addLayout(row)
+        self.detail_scroll.add_row(detail_name_label(label), button, trailing_stretch=True)
 
     def _detail_label_row(self, value: str) -> None:
         button = text_button(
@@ -1084,11 +849,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
         favorite = mod.name in self.current_mod_favorites
         text = "Remove from favorites" if favorite else "Add to favorites"
         button = text_button(
-            text,
+            "Favorite",
             text,
             lambda name=mod.name: self._toggle_favorite_name(name),
             icon_name="favorite_filled" if favorite else "favorite",
+            accessible_name=text,
         )
+        button.setCheckable(True)
+        button.setChecked(favorite)
         self._detail_row_with_button("Favorite", button)
 
     def _detail_state_action_row(self, mod: ModItem) -> None:
@@ -1152,14 +920,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._clear_detail()
         installed = sum(1 for mod in mods if mod.installed)
         not_installed = len(mods) - installed
-        title = QtWidgets.QLabel(f"{len(mods)} mods selected")
-        title_font = title.font()
-        title_font.setBold(True)
-        title.setFont(title_font)
-        self.detail_layout.addWidget(title)
+        self.detail_scroll.add_heading(f"{len(mods)} mods selected", self.details_button.click)
         self._detail_row("Installed", str(installed))
         self._detail_row("Not installed", str(not_installed))
-        actions = QtWidgets.QHBoxLayout()
         install_button = QtWidgets.QPushButton(f"Install {not_installed}")
         install_button.setIcon(self._icon("install"))
         install_button.setToolTip("Install selected mods that are not installed")
@@ -1177,11 +940,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         toggle_button.setToolTip("Toggle all selected mods")
         toggle_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         toggle_button.clicked.connect(self._toggle_selected_mods)
-        actions.addWidget(install_button)
-        actions.addWidget(uninstall_button)
-        actions.addWidget(toggle_button)
-        actions.addStretch(1)
-        self.detail_layout.addLayout(actions)
+        self.detail_scroll.add_actions([install_button, uninstall_button, toggle_button])
 
     def _detail_image(self, mod_name: str) -> None:
         img_path = mod_image_path(self.cfg, mod_name)
@@ -1191,37 +950,25 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if pixmap.isNull():
             return
         image = DetailImageLabel(pixmap)
-        image.update_scaled_pixmap(self._detail_image_target_size())
         self.detail_layout.addWidget(image)
-        QtCore.QTimer.singleShot(0, self._update_detail_image_size)
+        self.detail_scroll.rescale_images()
 
     def _detail_image_target_size(self, image: DetailImageLabel | None = None) -> QtCore.QSize:
-        if not hasattr(self, "detail_frame"):
-            return QtCore.QSize(1, 1)
-        margins = self.detail_layout.contentsMargins()
-        viewport_width = self.detail_scroll.viewport().width()
-        if viewport_width <= 1:
-            viewport_width = self.detail_scroll.width()
-        viewport_height = self.detail_scroll.viewport().height()
-        if viewport_height <= 1:
-            viewport_height = self.detail_scroll.height()
-        max_width = max(1, viewport_width - margins.left() - margins.right() - 2)
-        image_top = image.y() if image is not None and image.y() > 0 else margins.top()
-        max_height = max(1, viewport_height - image_top - margins.bottom() - 2)
-        return QtCore.QSize(max_width, max_height)
+        return self.detail_scroll.image_target_size(image)
 
     def _update_detail_image_size(self) -> None:
         if not hasattr(self, "detail_frame"):
             return
-        for image in self.detail_frame.findChildren(DetailImageLabel):
-            image.update_scaled_pixmap(self._detail_image_target_size(image))
+        self.detail_scroll.rescale_images()
 
     def _refresh_mod_detail(self, mod: ModItem | None) -> None:
         self._clear_detail()
         if mod is None:
-            self.detail_layout.addWidget(QtWidgets.QLabel("No mod selected"))
+            self.detail_scroll.add_heading("No mod selected", self.details_button.click)
+            self.detail_scroll.add_text_row("Details", "Select a mod to see its information and available actions.")
             return
-        self._detail_row("Name", mod.name)
+        self.detail_scroll.add_heading(mod.name, self.details_button.click)
+        self._detail_row("Status", "Installed" if mod.installed else "Not installed")
         self._detail_label_row(self.current_mod_labels.get(mod.name, "-"))
         self._detail_favorite_row(mod)
         self._detail_state_action_row(mod)
@@ -1261,7 +1008,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.current_mod_favorites = load_favorites(self.cfg)
         self.mod_page.set(page)
         list_blocker = QtCore.QSignalBlocker(self.mods_table.selectionModel())
-        tile_blocker = QtCore.QSignalBlocker(self.tiles_view.selectionModel())
         try:
             self.mods_model.set_data(shown, labels, self.current_mod_records, self.current_mod_favorites)
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
@@ -1278,9 +1024,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.favorite_filter_button.setChecked(favorite_only)
             self._select_mod_names(selected_names)
         finally:
-            del tile_blocker
             del list_blocker
-        self._refresh_selected_detail()
+        self._show_mod_view()
+        self._sync_workspace()
+        self.selection_status.setText(f"{len(self._selected_rows(self._current_mod_view()))} selected")
 
     def refresh_presets(self) -> None:
         selected_names = [
@@ -1309,10 +1056,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.presets_table.setUpdatesEnabled(True)
             if blocker is not None:
                 del blocker
+        self.presets_stack.setCurrentWidget(self.presets_table if page_keys else self.presets_empty)
 
     def refresh_broken(self) -> None:
         self.current_broken = list_broken_links(self.cfg)
         self.broken_model.set_data(self.current_broken)
+        self.broken_stack.setCurrentWidget(self.broken_table if self.current_broken else self.broken_empty)
 
     def _mods_search(self) -> None:
         self.search_var.set(self.search_box.currentText().strip())
@@ -1460,7 +1209,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._set_status(message)
             self.refresh_mods()
             self.refresh_presets()
-            self._close_dialog(self.presets_dialog)
 
         self.errors.run(
             "Toggling presets...",
@@ -1520,7 +1268,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._refresh_theme()
         self._set_status(SETTINGS_SAVED)
         self.refresh_all()
-        self._close_dialog(self.settings_dialog)
+        self.settings.reset()
 
     def _remove_selected_broken(self) -> None:
         rows = self._selected_rows(self.broken_table)
@@ -1536,7 +1284,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
             count = sum(item.success for item in result.items)
             self._set_status(f"Removed broken links: {count}. Errors: {result.errors}.")
             self.refresh_broken()
-            self._close_dialog(self.broken_dialog)
 
         self.errors.run(
             "Removing broken links...",
@@ -1545,7 +1292,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+        if self._is_mods_tab_active() and event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1556,13 +1303,22 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._handle_mods_drop(paths)
 
     def _handle_mods_drop(self, paths, x: int = 0, y: int = 0, target_mod_name: str = "") -> None:
+        if not self._is_mods_tab_active():
+            release = getattr(paths, "close", None)
+            if release:
+                release()
+            return
         if getattr(paths, "temporary_root", None) is None:
             paths = [Path(path) for path in paths]
         self._import_paths(paths, image_target_name=target_mod_name)
 
     def _handle_paste(self, event=None) -> None:
-        if self.archive_import.dialog is not None:
+        if self.busy:
+            return
+        if self.archive_import.dialog is not None and self.archive_import.dialog.isVisible():
             self.archive_import.paste()
+            return
+        if not self._is_mods_tab_active():
             return
         paths = read_clipboard_paths()
         if paths:

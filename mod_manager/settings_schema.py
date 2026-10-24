@@ -136,6 +136,12 @@ LIST_FIELDS = (
 
 APPEARANCE_FIELDS = (
     FieldSpec(
+        key="mod_details_visible",
+        label="Details",
+        tooltip="Show the selected mod details beside the library in list and tile views. The panel visibility is remembered between launches.",
+        kind=FLAG,
+    ),
+    FieldSpec(
         key="gui_theme",
         label="Theme",
         tooltip="Follow the operating system appearance, or always use the light or the dark colour scheme.",

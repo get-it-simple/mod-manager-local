@@ -5,6 +5,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ...imports import PreparedArchive
 from ...settings_schema import label_for, spec_for
 from ..models.archive_model import ArchiveModModel
+from ..models.columns import configure_header
 from ..theme import tokens
 from .archive_selector import ArchiveSelector
 from .style_utils import apply_margins
@@ -34,6 +35,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
         self.model = ArchiveModModel(self)
         self.table = QtWidgets.QTableView(self)
         self.table.setModel(self.model)
+        configure_header(self.table, self.model.COLUMNS)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)

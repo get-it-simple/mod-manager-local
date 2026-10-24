@@ -6,7 +6,7 @@ A symlink-based mod manager for Unreal Engine games and most other engines, supp
 
 ---
 
-![Mod Manager demo](assets/2026-07-31_084946.jpg)
+![Mod Manager interface](assets/interface.png)
 
 ---
 
@@ -96,6 +96,9 @@ python build-gui-exe.py --pyz
 - Pagination, search, and ordering
 - Broken link detection and cleanup
 - GUI (PySide6/Qt) and CLI interfaces
+- The GUI sidebar opens Library, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
+- The **Details** button shows or hides the selected mod's information beside both list and tile views. Visibility and panel width are remembered between launches.
+- Settings keep unsaved edits while you move between pages. **Save** applies them; **Reset changes** restores the saved values. Closing the application discards unsaved edits.
 - The GUI status bar shows a clickable error count for mod operations. Open it to review failed files, full source/destination paths, and error descriptions from the current session, including batch and preset actions. History remains available across game profile changes and resets when the application closes.
 - Source and destination paths in the mod details show the two nearest directories and the file or folder name, up to 100 characters. Longer text is shortened in the middle to fit; hover to see the full path or click to locate it in Explorer.
 - Drag, drop, paste, or pick mod files/folders in the GUI
@@ -121,6 +124,7 @@ Choose **Use image** to apply it, **Choose file...** to select another image, or
 If no single usable image is available, the file chooser opens directly.
 Applying to multiple mods always requires confirmation; accepting the clipboard offer also confirms that batch.
 Preview files are stored locally in the source folder's `images` directory. Original image files are preserved.
+In the details panel, previews automatically fit the space below the mod information, including enlarging small images, while preserving their proportions and showing the whole image.
 
 </details>
 

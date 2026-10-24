@@ -7,10 +7,10 @@ from ...settings_schema import INT, SETTINGS_SECTIONS
 from ...workers import _run_save_settings
 from .. import icons
 from ..dialogs import prompts
-from ..dialogs.base import themed_dialog
-from ..pages.toolbar_specs import SETTINGS_TOOLBAR_SECTIONS
 from ..theme import colors, tokens
-from ..widgets import FormBuilder, IconToolbar, apply_margins
+from ..widgets import FormBuilder, IconToolbar, apply_margins, write_field
+from ..widgets.workspace import WorkspacePage
+from ..widgets.style_utils import set_variant
 from .widget_registry import ACTIONS
 
 TITLE = "Settings"
@@ -42,7 +42,7 @@ class SettingsController(QtCore.QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.dialog = themed_dialog(window, TITLE, tokens.LARGE_DIALOG_SIZE)
+        self.page = WorkspacePage(TITLE, "Changes apply only when you save. Drafts remain here while you navigate.")
         self._build()
 
     @property
@@ -98,16 +98,18 @@ class SettingsController(QtCore.QObject):
         self.fields["gui_font_size"].textChanged.connect(self.update_font_preview)
         self.update_font_preview()
 
-        self.toolbar = IconToolbar(self.dialog)
-        self.toolbar.build(SETTINGS_TOOLBAR_SECTIONS)
-        self.toolbar.connect({"save_settings": self.save})
+        self.toolbar = IconToolbar(self.page)
+        section = self.toolbar.add_section("settings", "Settings")
+        button = section.add_text_action("save_settings", "Save", "save", "Save settings", self.save)
+        set_variant(button, "primary")
+        section.add_text_action("reset_settings", "Reset changes", "reset", "Restore the last saved settings", self.reset)
         self.window.registry.extend(ACTIONS, self.toolbar.buttons.values())
         self.toolbar.add_stretch()
 
         wrapper_layout.addWidget(host)
         wrapper_layout.addStretch(1)
         scroll.setWidget(wrapper)
-        layout = QtWidgets.QVBoxLayout(self.dialog)
+        layout = self.page.body
         layout.addWidget(scroll)
         layout.addWidget(self.toolbar)
 
@@ -168,7 +170,7 @@ class SettingsController(QtCore.QObject):
         current = QtGui.QColor(self.fields[key].text())
         if not current.isValid():
             current = self.fallback_color(key)
-        chosen = prompts.choose_color(self.dialog, current, f"Choose {settings_schema.label_for(key).lower()}")
+        chosen = prompts.choose_color(self.window, current, f"Choose {settings_schema.label_for(key).lower()}")
         if chosen.isValid():
             self.fields[key].setText(chosen.name())
             self.update_preview()
@@ -211,10 +213,17 @@ class SettingsController(QtCore.QObject):
         try:
             settings_schema.coerce_settings(values)
         except ValueError as error:
-            prompts.show_error(self.dialog, TITLE, str(error))
+            prompts.show_error(self.window, TITLE, str(error))
             return
 
         def done(new_cfg):
             self.window.apply_saved_settings(new_cfg, old_theme != self.theme_settings(new_cfg))
 
         self.window._run_action("Saving settings...", lambda: _run_save_settings(self.cfg, values), done)
+
+    def reset(self) -> None:
+        for key, value in settings_schema.read_settings(self.cfg).items():
+            write_field(self.fields[key], value)
+        self.update_color_rows()
+        self.update_preview()
+        self.update_font_preview()

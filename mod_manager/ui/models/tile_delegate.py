@@ -56,7 +56,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         label = index.model().labels.get(mod.name, EMPTY_LABEL)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
         rect = self._content_rect(option)
-        self._draw_acrylic_card(painter, rect, selected)
+        self._draw_card(painter, rect, selected)
 
         image_rect = self._image_rect(rect)
         pixmap = self._pixmap_for(mod, image_rect.size())
@@ -95,8 +95,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             painter.drawText(badge.adjusted(inset, 0, -inset, 0), QtCore.Qt.AlignCenter, label_badge_text)
 
         name_badge = self._name_badge_rect(rect, image_rect)
-        self._draw_badge(painter, name_badge, accent)
-        painter.setPen(foreground)
+        painter.setPen(qcolor(self.palette_colors.fg))
         inset = tokens.TILE_NAME_TEXT_INSET
         painter.drawText(
             name_badge.adjusted(inset, 0, -inset, 0),
@@ -107,9 +106,10 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
         if favorite or hovered:
             favorite_rect = self._favorite_rect(image_rect)
+            self._draw_badge(painter, favorite_rect, qcolor(self.palette_colors.panel))
             icon = icons.glyph_icon(
                 "favorite_filled" if favorite else "favorite",
-                foreground,
+                qcolor(self.palette_colors.control_fg),
             )
             icon.paint(painter, favorite_rect, QtCore.Qt.AlignCenter)
         painter.restore()
@@ -135,31 +135,13 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         QtWidgets.QToolTip.hideText()
         return super().helpEvent(event, view, option, index)
 
-    def _draw_acrylic_card(self, painter, rect: QtCore.QRect, selected: bool) -> None:
+    def _draw_card(self, painter, rect: QtCore.QRect, selected: bool) -> None:
         theme = self.palette_colors
         base = qcolor(theme.tile_base_selected if selected else theme.tile_base)
-        border = qcolor(theme.tile_border_selected if selected else theme.tile_border)
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(qcolor(theme.tile_shadow))
-        painter.drawRoundedRect(
-            rect.adjusted(0, tokens.TILE_SHADOW_OFFSET, 0, tokens.TILE_SHADOW_OFFSET),
-            tokens.TILE_CARD_RADIUS,
-            tokens.TILE_CARD_RADIUS,
-        )
-        gradient = QtGui.QLinearGradient(rect.topLeft(), rect.bottomRight())
-        gradient.setColorAt(0, qcolor(theme.tile_shine))
-        gradient.setColorAt(tokens.TILE_GRADIENT_MID, base)
-        gradient.setColorAt(1, qcolor(theme.tile_end))
-        painter.setBrush(gradient)
+        border = self.accent_color if selected else qcolor(theme.tile_border)
+        painter.setBrush(base)
         painter.setPen(QtGui.QPen(border))
         painter.drawRoundedRect(rect, tokens.TILE_CARD_RADIUS, tokens.TILE_CARD_RADIUS)
-        painter.setPen(QtGui.QPen(qcolor(theme.tile_inner)))
-        painter.setBrush(QtCore.Qt.NoBrush)
-        painter.drawRoundedRect(
-            rect.adjusted(tokens.BORDER_WIDTH, tokens.BORDER_WIDTH, -tokens.BORDER_WIDTH, -tokens.BORDER_WIDTH),
-            tokens.TILE_CARD_INNER_RADIUS,
-            tokens.TILE_CARD_INNER_RADIUS,
-        )
 
     def _draw_badge(self, painter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
         painter.setBrush(color)

@@ -12,33 +12,25 @@ if qt_available():
     from mod_manager.ui.widgets.style_utils import TOOLBAR_SECTION, VARIANT_PROPERTY
 
 EXPECTED_TOOLBAR = (
-    ("game", "Game", ("manage game profiles",)),
     ("filter", "Search", (
-        "Apply search, label and favorite filters",
-        "Clear search, label and favorite filters",
-        "Show favorite mods only",
+        "Apply search, label and favorite filters", "Clear search, label and favorite filters", "Show favorite mods only",
     )),
     ("order", "Order", ("Sort ascending",)),
     ("view", "View", ("Show mods as a list", "Show mods as tiles")),
-    ("manage", "Manage", ("Open presets", "Open settings", "Open broken links cleanup")),
+    ("import", "Import", ("Import mod files", "Import a mod folder")),
 )
 
 EXPECTED_ACTIONS = (
-    ("page", "Page", ("Previous mods page", "Next mods page")),
     ("state", "Install", (
-        "Install all mods on the current page",
-        "Uninstall all mods on the current page",
-        "Toggle selected mods",
+        "Install all mods on the current page", "Uninstall all mods on the current page", "Toggle selected mods",
     )),
     ("label", "Label", (
-        "Add label to selected mods",
-        "Remove label from selected mods",
-        "Add or remove selected mods from favorites",
+        "Add label to selected mods", "Remove label from selected mods", "Add or remove selected mods from favorites",
     )),
-    ("import", "Import", (
-        "Import mod files", "Import a mod folder",
+    ("preview", "Preview", (
         "Set preview image for selected mods from the clipboard or a file; confirm when applying to multiple mods",
     )),
+    ("page", "Page", ("Previous mods page", "Next mods page")),
 )
 
 
@@ -146,11 +138,11 @@ class ModsToolbarSectionTest(WindowTestCase):
     def test_every_declared_button_key_is_registered(self):
         self.assertEqual(
             set(self.window.mods_toolbar.buttons),
-            set(toolbar_specs.button_keys(toolbar_specs.MODS_TOOLBAR_SECTIONS)) | {"games", "order_direction"},
+            set(toolbar_specs.button_keys(toolbar_specs.MODS_TOOLBAR_SECTIONS)) | {"import_files", "import_folder", "order_direction"},
         )
         self.assertEqual(
             set(self.window.mods_actions.buttons),
-            set(toolbar_specs.button_keys(toolbar_specs.MODS_ACTION_SECTIONS)) | {"prev_page", "next_page"},
+            set(toolbar_specs.button_keys(toolbar_specs.MODS_ACTION_SECTIONS)) | {"prev_page", "next_page", "toggle_selected"},
         )
 
     def test_busy_state_disables_every_action_button(self):
@@ -164,11 +156,11 @@ class ModsToolbarSectionTest(WindowTestCase):
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
-class DialogToolbarSectionTest(WindowTestCase):
+class PageToolbarSectionTest(WindowTestCase):
     def test_presets_dialog_groups_paging_and_preset_actions(self):
         toolbar = self.window.presets_toolbar
-        self.assertEqual(toolbar.section_order(), ["page", "preset"])
-        self.assertEqual([section.title for section in toolbar.sections.values()], ["Page", "Presets"])
+        self.assertEqual(toolbar.section_order(), ["preset", "page"])
+        self.assertEqual([section.title for section in toolbar.sections.values()], ["Presets", "Page"])
         self.assertIn(self.window.preset_name, toolbar.sections["preset"].widgets())
         self.assertIn(self.window.preset_page_label, toolbar.sections["page"].widgets())
         self.assertEqual(set(toolbar.buttons), {"prev_page", "next_page", "save", "toggle", "delete"})
@@ -182,10 +174,10 @@ class DialogToolbarSectionTest(WindowTestCase):
     def test_settings_dialog_groups_its_save_action(self):
         toolbar = self.window.settings_toolbar
         self.assertEqual(toolbar.sections["settings"].title, "Settings")
-        self.assertEqual(set(toolbar.buttons), {"save_settings"})
+        self.assertEqual(set(toolbar.buttons), {"save_settings", "reset_settings"})
 
-    def test_games_page_and_dialog_share_the_same_sections(self):
-        for toolbar in (self.window.games_page_toolbar, self.window.games_dialog_toolbar):
+    def test_games_page_groups_profile_actions(self):
+        for toolbar in (self.window.games_page_toolbar,):
             self.assertEqual(toolbar.section_order(), ["choose", "profiles"])
             self.assertEqual([section.title for section in toolbar.sections.values()], ["Game", "Profiles"])
             self.assertEqual(set(toolbar.buttons), {"select", "add", "edit", "delete"})
@@ -196,7 +188,6 @@ class DialogToolbarSectionTest(WindowTestCase):
             self.window.broken_toolbar,
             self.window.settings_toolbar,
             self.window.games_page_toolbar,
-            self.window.games_dialog_toolbar,
         )
         for toolbar in toolbars:
             for key, button in toolbar.buttons.items():

@@ -5,131 +5,45 @@ import unittest
 from mod_manager.ui.theme import colors, tokens
 from mod_manager.ui.theme.stylesheet import build_stylesheet
 
-LEGACY_DARK = {
-    "bg": "#202124",
-    "fg": "#f8fafc",
-    "control_fg": "#f2f2f5",
-    "panel": "#111827",
-    "alt_panel": "#1f2937",
-    "button": "#2b2f36",
-    "tooltip_bg": "#111827",
-    "tooltip_fg": "#f8fafc",
-    "field": "#2d2d30",
-    "field_border": "#3f3f42",
-    "field_focus": "#6b6a7c",
-    "field_fg": "#f2f2f5",
-    "combo": "#626071",
-    "combo_hover": "#716f82",
-    "combo_focus": "#78758a",
-    "combo_list": "#2d2d30",
-    "combo_list_border": "#56565c",
-    "menu": "#2d2d30",
-    "menu_border": "#3f3f42",
-    "menu_selected": "#626071",
-}
-
-LEGACY_LIGHT = {
-    "bg": "#f8fafc",
-    "fg": "#111827",
-    "control_fg": "#111827",
-    "panel": "#ffffff",
-    "alt_panel": "#eef2f7",
-    "button": "#f1f5f9",
-    "tooltip_bg": "#ffffff",
-    "tooltip_fg": "#111827",
-    "field": "#f4f4f5",
-    "field_border": "#d4d4d8",
-    "field_focus": "#9291a5",
-    "field_fg": "#111827",
-    "combo": "#e4e4e7",
-    "combo_hover": "#d4d4d8",
-    "combo_focus": "#c4c4ca",
-    "combo_list": "#ffffff",
-    "combo_list_border": "#d4d4d8",
-    "menu": "#ffffff",
-    "menu_border": "#d4d4d8",
-    "menu_selected": "#e4e4e7",
-}
-
-LEGACY_BUTTON_OVERLAYS = {
-    "dark": {
-        "button_normal": "rgba(255, 255, 255, 22)",
-        "button_hover": "rgba(255, 255, 255, 38)",
-        "button_pressed": "rgba(255, 255, 255, 55)",
-        "button_disabled": "rgba(255, 255, 255, 10)",
-    },
-    "light": {
-        "button_normal": "rgba(0, 0, 0, 35)",
-        "button_hover": "rgba(0, 0, 0, 55)",
-        "button_pressed": "rgba(0, 0, 0, 75)",
-        "button_disabled": "rgba(0, 0, 0, 15)",
-    },
-}
-
-LEGACY_TILE_DARK = {
-    "tile_base": (30, 41, 59, 188),
-    "tile_base_selected": (30, 64, 175, 170),
-    "tile_border": (148, 163, 184, 112),
-    "tile_border_selected": (96, 165, 250, 205),
-    "tile_shine": (255, 255, 255, 42),
-    "tile_end": (15, 23, 42, 148),
-    "tile_shadow": (0, 0, 0, 72),
-    "tile_inner": (255, 255, 255, 68),
-    "placeholder_bg": (30, 41, 59, 155),
-}
-
-LEGACY_TILE_LIGHT = {
-    "tile_base": (255, 255, 255, 172),
-    "tile_base_selected": (219, 234, 254, 188),
-    "tile_border": (148, 163, 184, 150),
-    "tile_border_selected": (59, 130, 246, 210),
-    "tile_shine": (255, 255, 255, 214),
-    "tile_end": (226, 232, 240, 132),
-    "tile_shadow": (15, 23, 42, 24),
-    "tile_inner": (255, 255, 255, 165),
-    "placeholder_bg": (226, 232, 240, 150),
-}
+def contrast(first: str, second: str) -> float:
+    def relative(value):
+        channels = [part / 255 for part in colors.hex_to_rgb(value)]
+        linear = [part / 12.92 if part <= 0.04045 else ((part + 0.055) / 1.055) ** 2.4 for part in channels]
+        return sum(channel * weight for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+    one, two = sorted((relative(first), relative(second)))
+    return (two + 0.05) / (one + 0.05)
 
 
-class PaletteParityTest(unittest.TestCase):
-    def test_dark_surface_colors_match_the_previous_theme(self):
-        palette = colors.build_palette("dark", colors.FALLBACK_ACCENT)
-        for name, expected in LEGACY_DARK.items():
-            self.assertEqual(getattr(palette, name), expected, name)
+class PaletteDesignTest(unittest.TestCase):
+    def test_default_text_and_metadata_are_readable_on_each_surface(self):
+        for mode in ("light", "dark"):
+            palette = colors.build_palette(mode)
+            for surface in (palette.bg, palette.panel, palette.alt_panel):
+                with self.subTest(mode=mode, surface=surface):
+                    self.assertGreaterEqual(contrast(palette.fg, surface), 7)
+                    self.assertGreaterEqual(contrast(palette.muted, surface), 4.5)
 
-    def test_light_surface_colors_match_the_previous_theme(self):
-        palette = colors.build_palette("light", colors.FALLBACK_ACCENT)
-        for name, expected in LEGACY_LIGHT.items():
-            self.assertEqual(getattr(palette, name), expected, name)
+    def test_light_and_dark_have_distinct_surfaces(self):
+        light, dark = (colors.build_palette(mode) for mode in ("light", "dark"))
+        self.assertFalse(colors.is_dark_color(light.bg))
+        self.assertTrue(colors.is_dark_color(dark.bg))
+        for palette in (light, dark):
+            self.assertNotEqual(palette.bg, palette.panel)
+            self.assertNotEqual(palette.border, palette.panel)
 
-    def test_button_overlays_match_the_previous_theme(self):
-        for mode, expected in LEGACY_BUTTON_OVERLAYS.items():
-            palette = colors.build_palette(mode, colors.FALLBACK_ACCENT)
-            for name, value in expected.items():
-                self.assertEqual(getattr(palette, name), value, f"{mode}.{name}")
-
-    def test_tile_colors_match_the_previous_theme(self):
-        for mode, expected in (("dark", LEGACY_TILE_DARK), ("light", LEGACY_TILE_LIGHT)):
-            palette = colors.build_palette(mode, colors.FALLBACK_ACCENT)
-            for name, (red, green, blue, alpha) in expected.items():
-                value = getattr(palette, name)
-                self.assertEqual(colors.hex_to_rgb(value.color), (red, green, blue), f"{mode}.{name}")
-                self.assertEqual(value.alpha, alpha, f"{mode}.{name}")
-
-    def test_placeholder_text_and_state_colors_match_the_previous_theme(self):
-        dark = colors.build_palette("dark")
-        light = colors.build_palette("light")
-        self.assertEqual(dark.placeholder_fg, "#cbd5e1")
-        self.assertEqual(light.placeholder_fg, "#64748b")
-        self.assertEqual(dark.state_ok, "#16a34a")
-        self.assertEqual(dark.state_bad, "#dc2626")
+    def test_cards_and_placeholders_are_opaque_matte_surfaces(self):
+        for mode in ("light", "dark"):
+            palette = colors.build_palette(mode)
+            self.assertEqual(palette.tile_base.alpha, 255)
+            self.assertEqual(palette.tile_base_selected.alpha, 255)
+            self.assertEqual(palette.placeholder_bg.alpha, 255)
 
     def test_accent_colors_are_derived_from_the_accent(self):
         palette = colors.build_palette("dark", "#2563eb")
         self.assertEqual(palette.accent, "#2563eb")
         self.assertEqual(palette.accent_text, "#ffffff")
-        self.assertEqual(palette.accent_fill, "rgba(37, 99, 235, 84)")
-        self.assertEqual(palette.accent_border, "rgba(37, 99, 235, 150)")
+        self.assertEqual(palette.accent_fill, "rgba(37, 99, 235, 30)")
+        self.assertEqual(palette.accent_border, "rgba(37, 99, 235, 170)")
 
     def test_a_bright_accent_gets_dark_readable_text(self):
         palette = colors.build_palette("light", "#fefefe")
@@ -148,14 +62,12 @@ class PaletteParityTest(unittest.TestCase):
         self.assertFalse(colors.build_palette("system").is_dark)
         self.assertTrue(colors.build_palette("dark").is_dark)
 
-    def test_table_selection_uses_accent_background_without_a_border(self):
+    def test_table_selection_uses_a_soft_accent_and_retains_readable_text(self):
         palette = colors.build_palette("dark", "#2563eb")
         stylesheet = build_stylesheet(palette)
-        selection_rule = stylesheet.split("QTableView::item:selected {", 1)[1].split("}", 1)[0]
-        self.assertIn(f"background-color: {palette.accent};", selection_rule)
-        self.assertIn(f"color: {palette.accent_text};", selection_rule)
-        self.assertIn("border: none;", selection_rule)
-        self.assertIn("outline: none;", selection_rule)
+        self.assertIn(f"background-color: {palette.accent_fill}; color: {palette.fg};", stylesheet)
+        self.assertIn("QTableView::item:focus", stylesheet)
+        self.assertIn(f"border-color: {palette.accent}", stylesheet)
 
 
 class TextOverrideTest(unittest.TestCase):
@@ -166,12 +78,12 @@ class TextOverrideTest(unittest.TestCase):
 
     def test_custom_text_color_leaves_surfaces_untouched(self):
         palette = colors.build_palette("dark", colors.FALLBACK_ACCENT, "#ff0000")
-        self.assertEqual(palette.bg, LEGACY_DARK["bg"])
-        self.assertEqual(palette.panel, LEGACY_DARK["panel"])
+        self.assertEqual(palette.bg, colors.build_palette("dark").bg)
+        self.assertEqual(palette.panel, colors.build_palette("dark").panel)
 
     def test_invalid_text_override_is_ignored(self):
         palette = colors.build_palette("dark", colors.FALLBACK_ACCENT, "nonsense")
-        self.assertEqual(palette.fg, LEGACY_DARK["fg"])
+        self.assertEqual(palette.fg, colors.build_palette("dark").fg)
 
 
 class ColorMathTest(unittest.TestCase):

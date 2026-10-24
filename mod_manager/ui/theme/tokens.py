@@ -8,7 +8,7 @@ SPACE_XL = 10
 SPACE_2XL = 12
 SPACE_3XL = 18
 
-PAGE_MARGIN = 28
+PAGE_MARGIN = 16
 DETAIL_MARGIN = 12
 TOOLBAR_SECTION_MARGIN = 6
 FORM_LABEL_MIN_WIDTH = 170
@@ -18,8 +18,8 @@ FORM_PAIR_SPACING = 24
 PAGE_INPUT_WIDTH = 44
 
 RADIUS_SM = 4
-RADIUS_MD = 7
-RADIUS_LG = 8
+RADIUS_MD = 6
+RADIUS_LG = 6
 RADIUS_IMAGE = 5
 
 BORDER_WIDTH = 1
@@ -32,7 +32,7 @@ TEXT_BUTTON_MIN_WIDTH = 96
 LABEL_EDIT_MAX_WIDTH = 160
 PROFILE_FIELD_MIN_WIDTH = 420
 DETAIL_LABEL_MIN_WIDTH = 110
-DETAIL_PANEL_MIN_WIDTH = 320
+DETAIL_PANEL_MIN_WIDTH = 280
 DETAIL_DATES_SPACING = 28
 DETAIL_IMAGE_INSET = 2
 PATH_MAX_CHARS = 100
@@ -59,6 +59,20 @@ TILE_DETAIL_STRETCH = 2
 
 TITLE_FONT_STEP = 6
 TITLE_FONT_MIN = 16
+
+SIDEBAR_WIDTH = 176
+SIDEBAR_COMPACT_WIDTH = 56
+SIDEBAR_BREAKPOINT = 1100
+NAVIGATION_HEIGHT = 36
+TABLE_ROW_HEIGHT = 34
+TABLE_HEADER_HEIGHT = 32
+SCROLLBAR_WIDTH = 10
+SPLITTER_WIDTH = 4
+SEARCH_MIN_WIDTH = 130
+LABEL_FILTER_MIN_WIDTH = 92
+ORDER_MIN_WIDTH = 115
+DETAIL_TITLE_FONT_STEP = 2
+EMPTY_STATE_MIN_HEIGHT = 100
 
 CHECK_PEN_MIN = 2.0
 CHECK_PEN_RATIO = 0.14
@@ -111,6 +125,31 @@ COMBO_CHEVRON_HALF_HEIGHT = 2
 COMBO_CHEVRON_RIGHT_INSET = 9
 
 GLYPH_PEN = 1.8
+ICON_SCALE_FACTORS = (1, 2, 3)
+GLYPH_PATHS = {
+    "add": (((4, 9), (14, 9)), ((9, 4), (9, 14))),
+    "remove": (((4, 4), (14, 14)), ((14, 4), (4, 14))),
+    "clear": (((4, 4), (14, 14)), ((14, 4), (4, 14))),
+    "back": (((11, 4), (6, 9), (11, 14)),),
+    "forward": (((7, 4), (12, 9), (7, 14)),),
+    "folder": (((2, 14), (2, 4), (7, 4), (9, 6), (16, 6), (16, 14), (2, 14)),),
+    "open": (((2, 14), (2, 4), (7, 4), (9, 6), (16, 6), (16, 14), (2, 14)),),
+    "image": (((2, 2), (16, 2), (16, 16), (2, 16), (2, 2)), ((3, 13), (7, 8), (10, 11), (13, 7), (16, 11))),
+    "tiles": (((2, 2), (7, 2), (7, 7), (2, 7), (2, 2)), ((11, 2), (16, 2), (16, 7), (11, 7), (11, 2)), ((2, 11), (7, 11), (7, 16), (2, 16), (2, 11)), ((11, 11), (16, 11), (16, 16), (11, 16), (11, 11))),
+    "list": (((3, 4), (4, 4)), ((7, 4), (15, 4)), ((3, 9), (4, 9)), ((7, 9), (15, 9)), ((3, 14), (4, 14)), ((7, 14), (15, 14))),
+    "import": (((9, 2), (9, 11)), ((5, 7), (9, 11), (13, 7)), ((3, 11), (3, 16), (15, 16), (15, 11))),
+    "install": (((9, 2), (9, 11)), ((5, 7), (9, 11), (13, 7)), ((3, 13), (3, 16), (15, 16), (15, 13))),
+    "uninstall": (((4, 9), (14, 9)),),
+    "toggle": (((3, 6), (14, 6), (11, 3)), ((15, 12), (4, 12), (7, 15))),
+    "save": (((3, 2), (13, 2), (16, 5), (16, 16), (2, 16), (2, 2), (3, 2)), ((5, 2), (5, 7), (12, 7), (12, 2)), ((5, 16), (5, 11), (13, 11), (13, 16))),
+    "presets": (((2, 6), (9, 2), (16, 6), (9, 10), (2, 6)), ((2, 10), (9, 14), (16, 10)), ((2, 14), (9, 18), (16, 14))),
+    "game": (((3, 5), (15, 5), (17, 14), (13, 14), (11, 11), (7, 11), (5, 14), (1, 14), (3, 5)), ((4, 8), (8, 8)), ((6, 6), (6, 10)), ((12, 8), (13, 8)), ((14, 10), (15, 10))),
+    "menu": (((3, 4), (15, 4)), ((3, 9), (15, 9)), ((3, 14), (15, 14))),
+    "details": (((2, 2), (16, 2), (16, 16), (2, 16), (2, 2)), ((11, 2), (11, 16))),
+    "search": (((11, 11), (16, 16)),),
+    "reset": (((3, 7), (5, 4), (10, 3), (14, 6), (15, 10), (12, 14), (7, 15), (4, 12)), ((3, 2), (3, 7), (8, 7))),
+}
+GLYPH_CIRCLES = {"search": (3, 3, 10, 10)}
 GLYPH_MARGIN = 3
 GLYPH_INNER_MARGIN = 6
 GLYPH_CENTER = 9
@@ -158,6 +197,12 @@ ERROR_COLUMNS = (
     ("action", "Action", RESIZE_CONTENTS, ALIGN_LEFT),
     ("mod", "Mod", RESIZE_STRETCH, ALIGN_LEFT),
     ("file", "File", RESIZE_STRETCH, ALIGN_LEFT),
+)
+
+ARCHIVE_COLUMNS = (
+    ("selected", "Add", RESIZE_FIXED, ALIGN_CENTER),
+    ("name", "Mod", RESIZE_FIXED, ALIGN_LEFT),
+    ("files", "Files in archive", RESIZE_STRETCH, ALIGN_LEFT),
 )
 
 MOD_COLUMNS = (

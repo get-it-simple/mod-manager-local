@@ -9,7 +9,7 @@ from ..theme import tokens
 from .buttons import icon_button
 from .section import section_title_label
 from .select import select_box
-from .style_utils import TOOLBAR_SECTION, apply_margins, expanding_size_policy, fixed_size_policy, set_variant
+from .style_utils import apply_margins, expanding_size_policy, fixed_size_policy, set_variant
 
 
 _font_families: list[str] | None = None
@@ -75,7 +75,7 @@ def build_field(spec: FieldSpec, value, parent=None) -> QtWidgets.QWidget:
 class FormSection(QtWidgets.QFrame):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
-        set_variant(self, TOOLBAR_SECTION)
+        set_variant(self, "formSection")
         outer = apply_margins(
             QtWidgets.QVBoxLayout(self),
             margins=tokens.TOOLBAR_SECTION_MARGIN,

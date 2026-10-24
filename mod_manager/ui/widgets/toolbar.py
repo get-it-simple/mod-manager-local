@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from ..theme import tokens
 from .buttons import icon_button, text_button
 from .section import section_title_label
 from .style_utils import TOOLBAR_SECTION, apply_margins, set_variant
+from .flow_layout import FlowLayout
 
 
 class ToolbarSection(QtWidgets.QFrame):
@@ -79,14 +80,34 @@ class ToolbarSection(QtWidgets.QFrame):
 class IconToolbar(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._layout = apply_margins(QtWidgets.QHBoxLayout(self), margins=None, spacing=tokens.SPACE_MD)
+        self._layout = FlowLayout(self)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         self.buttons: dict[str, QtWidgets.QAbstractButton] = {}
         self.sections: dict[str, ToolbarSection] = {}
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_height()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_height()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (QtCore.QEvent.FontChange, QtCore.QEvent.StyleChange) and hasattr(self, "_layout"):
+            self._layout.invalidate()
+            self._update_height()
+
+    def _update_height(self) -> None:
+        self.setMinimumHeight(self._layout.heightForWidth(self.width()))
+
     def add_section(self, key: str, title: str, stretch: int = 0) -> ToolbarSection:
         section = ToolbarSection(key, title, self)
+        section.setProperty("toolbarStretch", stretch)
+        section.setProperty("alignTrailing", key == "page")
         self.sections[key] = section
-        self._layout.addWidget(section, stretch)
+        self._layout.addWidget(section)
         return section
 
     def build(self, specs) -> None:
@@ -94,7 +115,7 @@ class IconToolbar(QtWidgets.QWidget):
             self.add_section(key, title).add_actions(actions)
 
     def add_stretch(self, stretch: int = 1) -> None:
-        self._layout.addStretch(stretch)
+        self._layout.invalidate()
 
     def register(self, key: str, button: QtWidgets.QAbstractButton) -> None:
         self.buttons[key] = button

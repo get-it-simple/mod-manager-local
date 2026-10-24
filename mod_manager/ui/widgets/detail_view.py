@@ -7,13 +7,14 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..theme import tokens
 from .style_utils import LINK, apply_margins, clear_layout, fixed_size_policy, set_variant
+from .buttons import icon_button
 
 
 class DetailImageLabel(QtWidgets.QLabel):
     def __init__(self, pixmap: QtGui.QPixmap, parent=None):
         super().__init__(parent)
         self._source_pixmap = pixmap
-        self._target_size = QtCore.QSize(1, 1)
+        self._target_size: QtCore.QSize | None = None
         self.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
         self.setMinimumWidth(0)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
@@ -25,24 +26,26 @@ class DetailImageLabel(QtWidgets.QLabel):
     def update_scaled_pixmap(self, size: QtCore.QSize | None = None) -> None:
         if self._source_pixmap.isNull():
             return
-        if size is not None:
-            self._target_size = size
-        target_width = self._target_size.width() if self._target_size.width() > 1 else self.width()
-        if target_width <= 1 and self.parentWidget():
-            target_width = self.parentWidget().width()
-        target_height = self._target_size.height() if self._target_size.height() > 1 else self._source_pixmap.height()
+        target = size or self._target_size or QtCore.QSize(self.width(), self._source_pixmap.height())
+        target = QtCore.QSize(max(1, target.width()), max(1, target.height()))
+        if target == self._target_size:
+            return
+        self._target_size = target
+        ratio = self._source_pixmap.devicePixelRatio()
+        pixel_size = self._source_pixmap.size().scaled(target * ratio, QtCore.Qt.KeepAspectRatio)
+        pixel_size = QtCore.QSize(max(1, pixel_size.width()), max(1, pixel_size.height()))
         scaled = self._source_pixmap.scaled(
-            max(1, target_width),
-            max(1, target_height),
-            QtCore.Qt.KeepAspectRatio,
+            pixel_size,
+            QtCore.Qt.IgnoreAspectRatio,
             QtCore.Qt.SmoothTransformation,
         )
         self.setPixmap(scaled)
-        self.setFixedHeight(scaled.height())
+        self.setFixedHeight(max(1, round(scaled.deviceIndependentSize().height())))
 
 
 def detail_name_label(text: str, parent=None) -> QtWidgets.QLabel:
     label = QtWidgets.QLabel(text, parent)
+    set_variant(label, "muted")
     label.setMinimumWidth(tokens.DETAIL_LABEL_MIN_WIDTH)
     label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
     return label
@@ -117,9 +120,34 @@ class DetailPanel(QtWidgets.QScrollArea):
             spacing=tokens.SPACE_LG,
         )
         self.layout.setAlignment(QtCore.Qt.AlignTop)
+        self.layout.setSizeConstraint(QtWidgets.QLayout.SetMinimumSize)
         self.setWidgetResizable(True)
         self.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.setWidget(self.frame)
+        self._rescale_timer = QtCore.QTimer(self)
+        self._rescale_timer.setSingleShot(True)
+        self._rescale_timer.timeout.connect(self.rescale_images)
+        self.frame.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj is self.frame and event.type() in (
+            QtCore.QEvent.LayoutRequest,
+            QtCore.QEvent.FontChange,
+            QtCore.QEvent.StyleChange,
+            QtCore.QEvent.Show,
+        ):
+            self._schedule_rescale()
+        return super().eventFilter(obj, event)
+
+    def viewportEvent(self, event):
+        result = super().viewportEvent(event)
+        if event.type() == QtCore.QEvent.Resize and hasattr(self, "_rescale_timer"):
+            self._schedule_rescale()
+        return result
+
+    def _schedule_rescale(self) -> None:
+        if not self._rescale_timer.isActive():
+            self._rescale_timer.start(tokens.IMMEDIATE_MS)
 
     def clear(self) -> None:
         clear_layout(self.layout)
@@ -127,6 +155,22 @@ class DetailPanel(QtWidgets.QScrollArea):
     def add_widget(self, widget: QtWidgets.QWidget) -> QtWidgets.QWidget:
         self.layout.addWidget(widget)
         return widget
+
+    def add_heading(self, title: str, on_close: Callable) -> None:
+        label = QtWidgets.QLabel(title)
+        label.setWordWrap(True)
+        label.setMinimumWidth(0)
+        label.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        set_variant(label, "heading")
+        font = label.font()
+        font.setPointSize(font.pointSize() + tokens.DETAIL_TITLE_FONT_STEP)
+        font.setBold(True)
+        label.setFont(font)
+        self.add_row(label, icon_button("remove", "Hide details", on_close))
+
+    def add_actions(self, buttons: list[QtWidgets.QPushButton]) -> None:
+        for button in buttons:
+            self.layout.addWidget(button, 0, QtCore.Qt.AlignLeft)
 
     def add_row(self, *widgets, stretch_last: bool = False, trailing_stretch: bool = False):
         row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)
@@ -152,12 +196,25 @@ class DetailPanel(QtWidgets.QScrollArea):
         return max(1, width - margins.left() - margins.right())
 
     def image_target_size(self, image: DetailImageLabel | None = None) -> QtCore.QSize:
+        width = self.available_width()
         margins = self.layout.contentsMargins()
-        viewport_height = self.viewport().height() or self.height()
-        top = image.y() if image is not None and image.y() > 0 else margins.top()
+        occupied_height = margins.top() + margins.bottom()
+        content_count = 0
+        for index in range(self.layout.count()):
+            item = self.layout.itemAt(index)
+            if item.spacerItem() is not None or item.isEmpty():
+                continue
+            content_count += 1
+            if isinstance(item.widget(), DetailImageLabel):
+                continue
+            height = item.heightForWidth(width) if item.hasHeightForWidth() else item.sizeHint().height()
+            occupied_height += max(item.minimumSize().height(), height)
+        if image is None or self.layout.indexOf(image) < 0:
+            content_count += 1
+        occupied_height += max(0, content_count - 1) * self.layout.spacing()
         return QtCore.QSize(
-            max(1, self.available_width() - tokens.DETAIL_IMAGE_INSET),
-            max(1, viewport_height - top - margins.bottom() - tokens.DETAIL_IMAGE_INSET),
+            max(1, width - tokens.DETAIL_IMAGE_INSET),
+            max(1, self.viewport().height() - occupied_height),
         )
 
     def rescale_images(self) -> None:

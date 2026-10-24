@@ -190,7 +190,7 @@ class ErrorHistoryGuiTests(WindowTestCase):
         buttons = [button for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)
                    if button.toolTip() in (str(self.mod.src), str(self.mod.dest))]
         self.assertEqual(len(buttons), 2)
-        self.assertGreaterEqual(self.window.detail_scroll.width(), 320)
+        self.assertGreaterEqual(self.window.detail_scroll.width(), 280)
         for button in buttons:
             self.assertLessEqual(len(button.text()), 100)
             self.assertIn("…", button.text())

@@ -19,6 +19,8 @@ def _base_button(text: str, tooltip: str, accessible_name: str, parent=None) -> 
     set_variant(button, ACRYLIC)
     button.setAccessibleName(accessible_name)
     button.setToolTip(tooltip or accessible_name)
+    button.setCursor(QtCore.Qt.PointingHandCursor)
+    button.setMinimumHeight(tokens.ICON_BUTTON_SIZE)
     return fixed_size_policy(button)
 
 
