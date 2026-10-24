@@ -30,6 +30,7 @@ class OperationFailure:
     src: Path
     dest: Path
     message: str
+    code: str = ""
 
 
 @dataclass(frozen=True)

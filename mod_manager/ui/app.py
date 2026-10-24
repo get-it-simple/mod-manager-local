@@ -12,6 +12,7 @@ from ..folder_actions import ensure_paths, open_folder, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
+from ..link_recovery import preset_install_names
 from ..mods import (
     add_favorites_to_mods,
     add_label_to_mods,
@@ -1465,6 +1466,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             "Toggling presets...",
             lambda: toggle_presets_result(self.cfg, names, installed, True),
             done,
+            preset_names=preset_install_names(names, installed),
         )
 
     def _toggle_preset_at_index(self, index) -> None:

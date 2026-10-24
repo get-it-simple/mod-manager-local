@@ -15,12 +15,13 @@ def show_info(parent, title: str, message: str) -> None:
     QtWidgets.QMessageBox.information(parent, title, message)
 
 
-def ask_yes_no(parent, title: str, message: str) -> bool:
+def ask_yes_no(parent, title: str, message: str, *, default_no: bool = False) -> bool:
     answer = QtWidgets.QMessageBox.question(
         parent,
         title,
         message,
         QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No if default_no else QtWidgets.QMessageBox.NoButton,
     )
     return answer == QtWidgets.QMessageBox.Yes
 

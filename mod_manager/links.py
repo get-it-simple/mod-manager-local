@@ -7,10 +7,15 @@ from pathlib import Path
 import tempfile
 from typing import List, Tuple
 
-from .platform_utils import is_junction, is_windows
+from .platform_utils import is_junction, is_windows, supports_links
 
 TARGET_EXISTS = "Target already exists: {}"
 SOURCE_MISSING = "Source not found: {}"
+UNSUPPORTED_LINKS = "unsupported_links"
+UNSUPPORTED_LINK_MESSAGE = (
+    "The destination file system does not support links. "
+    "Select Copy as the game's Install method, or use a destination that supports links, such as NTFS."
+)
 
 def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
     try:
@@ -18,6 +23,8 @@ def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
             return False, TARGET_EXISTS.format(dest)
         if not src.exists():
             return False, SOURCE_MISSING.format(src)
+        if supports_links(dest.parent) is False:
+            return False, UNSUPPORTED_LINK_MESSAGE
 
         if is_windows():
             if src.is_dir():
@@ -48,14 +55,21 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
         return results
 
     work_idxs: List[int] = []
+    support: dict[Path, bool | None] = {}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".bat", delete=False) as f:
         bat_path = f.name
+        f.write("@echo off\n")
         for i, (src, dest, is_dir) in enumerate(items):
             if dest.exists() or dest.is_symlink():
                 results[i] = (False, TARGET_EXISTS.format(dest))
                 continue
             if not src.exists():
                 results[i] = (False, SOURCE_MISSING.format(src))
+                continue
+            if dest.parent not in support:
+                support[dest.parent] = supports_links(dest.parent)
+            if support[dest.parent] is False:
+                results[i] = (False, UNSUPPORTED_LINK_MESSAGE)
                 continue
 
             work_idxs.append(i)
@@ -68,7 +82,9 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
             f.write(f"echo __END__{i}__\n")
 
     try:
-        res = subprocess.run(["cmd", "/c", bat_path], capture_output=True, text=True, creationflags=0x08000000)
+        if not work_idxs:
+            return results
+        res = subprocess.run(["cmd", "/d", "/q", "/c", bat_path], capture_output=True, text=True, creationflags=0x08000000)
         out = (res.stdout or "").splitlines()
 
         state: dict[int, dict] = {}
@@ -124,7 +140,7 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
         for i in work_idxs:
             st = state.get(i)
             if not st:
-                results[i] = (False, "mklink error")
+                results[i] = (False, (res.stderr or "").strip() or "mklink error")
                 continue
             rc = st.get("rc")
             msg = "\n".join((st.get("lines") or [])).strip()
@@ -135,7 +151,9 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
 
         return results
     except Exception as e:
-        return [(False, str(e)) for _ in items]
+        for i in work_idxs:
+            results[i] = (False, str(e))
+        return results
     finally:
         try:
             os.remove(bat_path)

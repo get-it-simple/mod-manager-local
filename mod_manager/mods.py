@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .models import ModFile, ModItem, OperationFailure, OperationItem, OperationResult
-from .links import copy_batch, mklink, mklink_batch, remove_path, unlink_path
+from .links import (
+    UNSUPPORTED_LINK_MESSAGE, UNSUPPORTED_LINKS,
+    copy_batch, mklink, mklink_batch, remove_path, unlink_path,
+)
 from .platform_utils import is_junction, is_windows
 from .storage import (
     ensure_mod_records,
@@ -272,10 +275,13 @@ def apply_mods_batch(mods: List[ModItem], overwrite: bool = False) -> List[Tuple
     return [(item.success, item.message) for item in apply_mods_batch_result(mods, overwrite).items]
 
 
-def apply_mods_batch_result(mods: List[ModItem], overwrite: bool = False) -> OperationResult:
+def apply_mods_batch_result(
+    mods: List[ModItem], overwrite: bool = False, *, pending_only: bool = True,
+) -> OperationResult:
     if not mods:
         return OperationResult()
-    work = [(index, f) for index, m in enumerate(mods) for f in _pending_files(m, overwrite)]
+    work = [(index, f) for index, m in enumerate(mods)
+            for f in (_pending_files(m, overwrite) if pending_only else m.install_files)]
     linked = [(index, f) for index, f in work if not mods[index].copy_install]
     copied = [(index, f) for index, f in work if mods[index].copy_install]
 
@@ -288,7 +294,8 @@ def apply_mods_batch_result(mods: List[ModItem], overwrite: bool = False) -> Ope
         for (index, member), result in zip(items, results):
             per_mod[index].append(result)
             if not result[0]:
-                failures[index].append(OperationFailure(member.src, member.dest, result[1]))
+                code = UNSUPPORTED_LINKS if result[1] == UNSUPPORTED_LINK_MESSAGE else ""
+                failures[index].append(OperationFailure(member.src, member.dest, result[1], code))
     return OperationResult(tuple(
         OperationItem(mod.name, "installed", *_fold_results(results), tuple(errors))
         for mod, results, errors in zip(mods, per_mod, failures)
@@ -403,7 +410,9 @@ def remove_favorites_from_mods(cfg: Dict, targets: List[str]) -> str:
     update_favorites(cfg, targets, False)
     return f"Favorites removed: {', '.join(targets)}"
 
-def change_mods(mods: List[ModItem], action: str = "toggle", overwrite: bool = False) -> OperationResult:
+def change_mods(
+    mods: List[ModItem], action: str = "toggle", overwrite: bool = False, *, pending_only: bool = True,
+) -> OperationResult:
     pending = []
     results = []
     for mod in mods:
@@ -411,7 +420,10 @@ def change_mods(mods: List[ModItem], action: str = "toggle", overwrite: bool = F
             results.append(deactivate_mod_result(mod))
         elif not mod.installed and action != "uninstall":
             pending.append(mod)
-    results.extend(apply_mods_batch_result(pending, overwrite).items)
+    if pending_only:
+        results.extend(apply_mods_batch_result(pending, overwrite).items)
+    else:
+        results.extend(apply_mods_batch_result(pending, overwrite, pending_only=False).items)
     for state in ("installed", "uninstalled"):
         names = [item.name for item in results if item.action == state and item.success]
         if names:

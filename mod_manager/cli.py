@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from . import settings_schema
 from .cli_environment import configured_path, diagnose, prepare_paths, require_paths
@@ -14,13 +14,16 @@ from .mods import (
     remove_label_from_mods,
 )
 from .links import unlink_broken_link
+from .link_recovery import needs_copy_recovery, preset_install_names
+from .models import OperationResult
 from .presets import (
     delete_presets_by_indexes, preset_mods_to_install, presets_view,
-    save_preset_from_installed, toggle_presets_by_indexes,
+    save_preset_from_installed,
+    _toggle_presets_result, _preset_messages,
 )
 from .storage import (
     GAME_PROFILE_KEYS, create_game_profile, delete_game_profile, game_abbreviation,
-    load_config, save_config, set_active_game_profile, update_game_profile,
+    active_game_profile, load_config, save_config, set_active_game_profile, update_game_profile,
 )
 from .storage_policy import storage_policy
 
@@ -93,6 +96,19 @@ def _mods_selection(args, cfg):
     return mods_view(cfg, args.page, label, args.search, args.order, args.favorite)
 
 
+def _recover_links(
+    args: argparse.Namespace, cfg: dict, result: OperationResult, preset_names: tuple[str, ...] = (),
+) -> OperationResult:
+    if not needs_copy_recovery(result):
+        return result
+    if args.recover_links is not None:
+        return args.recover_links(cfg, result, preset_names)
+    profile = active_game_profile(cfg)
+    if profile:
+        print(f"Use games edit {profile['id']} --install-mode copy, then retry the failed installations.", file=sys.stderr)
+    return result
+
+
 def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
     require_paths(cfg, game=args.mods_cmd in {"install", "uninstall", "toggle"})
     if args.mods_cmd in {"list", "search", "label", "page", "order"}:
@@ -113,6 +129,7 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
         if args.mods_cmd != "uninstall" and not _allow_overwrite(pending, args.overwrite):
             return 1
         result = change_mods(targets, args.mods_cmd, getattr(args, "overwrite", False))
+        result = _recover_links(args, cfg, result)
         print(f"Page {page}. {result.summary()}")
         for item in result.items:
             print(f"{item.name}: {'OK' if item.success else 'ERR'} — {item.message}", file=sys.stdout if item.success else sys.stderr)
@@ -156,7 +173,13 @@ def _run_presets(args: argparse.Namespace, cfg: Dict) -> int:
     work, _missing = preset_mods_to_install(cfg, names)
     if not _allow_overwrite(work, args.overwrite):
         return 1
-    message, messages, errors = toggle_presets_by_indexes(cfg, args.page, args.indexes, installed, args.overwrite)
+    installing = preset_install_names(names, installed)
+    message, result, messages = _toggle_presets_result(cfg, names, installed, args.overwrite)
+    recovered = _recover_links(args, cfg, result, installing)
+    if recovered is not result:
+        message = recovered.summary()
+        messages = _preset_messages(recovered)
+    errors = bool(recovered.errors)
     print(message or "No presets toggled.")
     for detail in messages:
         print(detail, file=sys.stderr if errors else sys.stdout)
@@ -276,9 +299,13 @@ def _run_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return 0
 
 
-def run_cli(argv: List[str] | None = None) -> int:
+def run_cli(
+    argv: List[str] | None = None, *,
+    recover_links: Callable[[dict, OperationResult, tuple[str, ...]], OperationResult] | None = None,
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.recover_links = recover_links
     if args.cmd == "help":
         return _run_help(args, parser)
     if args.cmd is None or any(getattr(args, key, False) is None for key in ("mods_cmd", "presets_cmd", "games_cmd", "settings_cmd", "broken_cmd")):

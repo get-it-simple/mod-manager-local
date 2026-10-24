@@ -93,7 +93,7 @@ MODS_FIELDS = (
     FieldSpec(
         key="install_mode",
         label="Install method",
-        tooltip="Link creates a symlink or junction in the game mods folder. Copy physically copies the mod files there for games that cannot load linked files.",
+        tooltip="Link creates a symlink or junction in the game mods folder. Copy physically copies the mod files there when the game or destination file system cannot use links.",
         kind=CHOICE,
         choices=("link", "copy"),
     ),

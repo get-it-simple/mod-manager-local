@@ -32,6 +32,8 @@ python mod-manager.py gui
 
 > **Windows note:** Directory junctions do not require elevation. For file symlinks, Administrator rights may be needed if the account lacks the *Create symbolic links* privilege — this can be avoided by enabling [Developer Mode](https://learn.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development).
 
+> **File system support:** exFAT and FAT32 destinations cannot store symbolic links or junctions. Use **Games → Edit → Install method → copy**, or a destination with link support such as NTFS. Administrator rights and Developer Mode do not add link support to exFAT or FAT32.
+
 ---
 
 ## Build GUI Executable
@@ -325,6 +327,8 @@ operate on the entire selected page; `toggle` acts only on the given indexes.
 `--mod-group-extensions` joins several file types into a single mod. With `.pak,.utoc,.ucas`, the files `Weapon.pak`, `Weapon.utoc` and `Weapon.ucas` become one mod listed as `Weapon.pak` — named after the first extension in the list that is actually present — and installing, uninstalling, or applying a preset covers every member at once. A grouped mod counts as installed only when all of its files are in the game folder; a half-installed group completes on the next install. Grouped extensions are always treated as mod files even when `--mod-extensions` does not list them, and files are only grouped with siblings in the same folder, so a recursive scan never merges two same-named mods from different subfolders.
 
 `--install-mode` selects how mods reach the game folder. `link` (the default) creates symlinks and junctions as before. `copy` physically copies the mod files, for games that refuse to load linked content; uninstalling then deletes those copies from the game folder and never touches your source mods. In copy mode an install that would replace an existing file asks for confirmation first — the GUI shows a dialog listing the affected files, and the CLI prints them and stops unless `--overwrite` is given.
+
+When the destination file system reports no link support, the GUI and interactive text menus offer to save `copy` in the current game profile and retry only the failed installations. Declining keeps the profile unchanged. Existing successful links and installations stay in place; replacing a conflicting file requires separate confirmation. Failed attempts remain in the GUI session error history. One-shot CLI commands never prompt or change the install method automatically: use `games edit <profile-id> --install-mode copy`, then retry the failed installations.
 
 **Examples:**
 
