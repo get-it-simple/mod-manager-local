@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 from typing import List, Tuple
 
-from .platform_utils import is_windows
+from .platform_utils import is_junction, is_windows
 
 TARGET_EXISTS = "Target already exists: {}"
 SOURCE_MISSING = "Source not found: {}"
@@ -144,9 +144,12 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
 
 def unlink_path(path: Path) -> Tuple[bool, str]:
     try:
-        if not path.exists() and not path.is_symlink():
+        junction = is_junction(path)
+        if not path.exists() and not path.is_symlink() and not junction:
             return False, "Already removed"
-        if path.is_dir() and not path.is_symlink():
+        if junction:
+            os.rmdir(path)
+        elif path.is_dir() and not path.is_symlink():
             try:
                 os.rmdir(path)
             except OSError:
@@ -156,6 +159,15 @@ def unlink_path(path: Path) -> Tuple[bool, str]:
         return True, "OK"
     except Exception as e:
         return False, str(e)
+
+def unlink_broken_link(path: Path) -> Tuple[bool, str]:
+    try:
+        if not (path.is_symlink() or is_junction(path)) or path.exists():
+            return False, "Not a broken link; left unchanged"
+        return unlink_path(path)
+    except OSError as error:
+        return False, str(error)
+
 
 def copy_path(src: Path, dest: Path, overwrite: bool = False) -> Tuple[bool, str]:
     try:
@@ -182,7 +194,9 @@ def copy_batch(items: List[Tuple[Path, Path, bool]], overwrite: bool = False) ->
 def remove_path(path: Path) -> Tuple[bool, str]:
     """Remove a link or a copy installed in the game mods folder."""
     try:
-        if not path.exists() and not path.is_symlink():
+        if path.is_symlink() or is_junction(path):
+            return unlink_path(path)
+        if not path.exists():
             return False, "Already removed"
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)

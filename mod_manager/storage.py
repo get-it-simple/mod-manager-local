@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import tempfile
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -9,29 +12,74 @@ from typing import Dict, List
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
 from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
+from .storage_policy import StorageError, current_policy
 
 FAVORITES_KEY = "__favorites__"
 DEFAULT_FAVORITE_SCOPE = "__default__"
 
 def load_json(path: Path, default):
-    if not path.exists():
-        return default
     try:
         with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            value = json.load(f)
+        if current_policy().strict and not isinstance(value, type(default)):
+            raise StorageError(f"Invalid data in {path}: expected {type(default).__name__}. Repair the file before continuing.")
+        return value
+    except FileNotFoundError:
+        return deepcopy(default)
+    except (OSError, ValueError, UnicodeError) as error:
+        if current_policy().strict:
+            raise StorageError(f"Cannot read {path}: {error}. Repair the file or its permissions before continuing.") from error
         return default
 
 def save_json(path: Path, data) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 def load_config() -> Dict:
-    cfg = load_json(CONFIG_PATH, DEFAULT_CONFIG.copy())
+    cfg = load_json(CONFIG_PATH, deepcopy(DEFAULT_CONFIG))
+    if current_policy().strict:
+        _validate_config(cfg)
     for key, val in DEFAULT_CONFIG.items():
         cfg.setdefault(key, val)
     cfg = normalize_game_profiles(cfg)
     return cfg
+
+
+def _validate_config(cfg: Dict) -> None:
+    from . import settings_schema
+
+    profiles = cfg.get("game_profiles", [])
+    if not isinstance(profiles, list) or any(not isinstance(profile, dict) for profile in profiles):
+        raise StorageError("game_profiles must be a list of game profile objects. Repair config.json.")
+    for profile in profiles:
+        identifier = profile.get("id", "")
+        if not isinstance(identifier, str) or any(character in identifier for character in "/\\:\0") or identifier in {".", ".."}:
+            raise StorageError("Invalid game profile ID in config.json; IDs must be plain file name components.")
+    for values in (cfg, *profiles):
+        for spec in (*settings_schema.all_specs(), *settings_schema.GAME_PROFILE_FIELDS):
+            if spec.key not in values:
+                continue
+            value = values[spec.key]
+            if spec.kind == settings_schema.INT:
+                if isinstance(value, bool):
+                    raise StorageError(f"{spec.label} must be a whole number. Repair config.json.")
+                settings_schema.parse_int(spec, value)
+            elif spec.kind == settings_schema.FLAG:
+                if not isinstance(value, bool) and not (spec.key in GAME_PROFILE_KEYS and value == ""):
+                    raise StorageError(f"{spec.label} must be true or false. Repair config.json.")
+            elif not isinstance(value, str):
+                raise StorageError(f"{spec.label} must be text. Repair config.json.")
+            elif spec.kind == settings_schema.CHOICE and value and value not in spec.choices:
+                raise StorageError(f"{spec.label} must be one of: {', '.join(spec.choices)}. Repair config.json.")
 
 def save_config(cfg: Dict) -> None:
     save_json(CONFIG_PATH, normalize_game_profiles(dict(cfg)))
@@ -43,6 +91,15 @@ def profile_id_for(name: str, created_at: str) -> str:
     raw = f"{name.strip()}|{created_at.strip()}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
+
+def _unique_profile_id(name: str, created_at: str, used: set[str]) -> str:
+    identifier = profile_id_for(name, created_at)
+    sequence = 0
+    while identifier in used:
+        sequence += 1
+        identifier = profile_id_for(name, f"{created_at}|{sequence}")
+    return identifier
+
 def game_abbreviation(name: str) -> str:
     words = [part for part in "".join(ch if ch.isalnum() else " " for ch in name).split() if part]
     if len(words) >= 2:
@@ -52,7 +109,7 @@ def game_abbreviation(name: str) -> str:
     return "??"
 
 def _profile_from_legacy(cfg: Dict) -> Dict | None:
-    if not any(str(cfg.get(key) or "").strip() for key in GAME_PROFILE_KEYS):
+    if not any(cfg.get(key) not in (None, "", False, DEFAULT_CONFIG.get(key)) for key in GAME_PROFILE_KEYS):
         return None
     name = str(cfg.get("game_name") or "Default game").strip() or "Default game"
     created_at = str(cfg.get("game_profile_created_at") or _now_iso())
@@ -74,12 +131,12 @@ def normalize_game_profiles(cfg: Dict) -> Dict:
         created_at = str(profile.get("created_at") or _now_iso())
         profile_id = str(profile.get("id") or profile_id_for(name, created_at))
         if profile_id in seen:
-            created_at = _now_iso()
-            profile_id = profile_id_for(name, created_at)
+            profile_id = _unique_profile_id(name, created_at, seen)
         seen.add(profile_id)
         item = {"id": profile_id, "name": name, "created_at": created_at}
         for key in GAME_PROFILE_KEYS:
-            item[key] = profile.get(key, "")
+            value = profile.get(key, DEFAULT_CONFIG.get(key, ""))
+            item[key] = DEFAULT_CONFIG[key] if value == "" and isinstance(DEFAULT_CONFIG[key], bool) else value
         normalized.append(item)
 
     if not normalized:
@@ -114,13 +171,14 @@ def active_game_profile(cfg: Dict | None = None) -> Dict | None:
 def create_game_profile(name: str, values: Dict | None = None, cfg: Dict | None = None) -> Dict:
     values = values or {}
     created_at = str(values.get("created_at") or _now_iso())
+    used = {profile["id"] for profile in (cfg or {}).get("game_profiles", [])}
     profile = {
-        "id": profile_id_for(name, created_at),
+        "id": _unique_profile_id(name, created_at, used),
         "name": str(name or "Game").strip() or "Game",
         "created_at": created_at,
     }
     for key in GAME_PROFILE_KEYS:
-        profile[key] = values.get(key, "")
+        profile[key] = values.get(key, DEFAULT_CONFIG.get(key, ""))
     if cfg is not None:
         cfg.setdefault("game_profiles", []).append(profile)
         cfg["active_game_profile_id"] = profile["id"]
@@ -152,22 +210,26 @@ def delete_game_profile(cfg: Dict, profile_id: str) -> bool:
     if len(kept) == len(profiles):
         return False
     cfg["game_profiles"] = kept
+    if not kept:
+        for key in GAME_PROFILE_KEYS:
+            cfg[key] = DEFAULT_CONFIG[key]
     if cfg.get("active_game_profile_id") == profile_id:
         cfg["active_game_profile_id"] = kept[0]["id"] if kept else ""
     normalize_game_profiles(cfg)
     return True
 
 def _active_profile_context(base_path: Path) -> tuple[Path, Dict | None, Dict]:
-    raw = load_json(CONFIG_PATH, DEFAULT_CONFIG.copy())
-    raw = normalize_game_profiles(raw)
+    raw = load_config()
     profile = active_game_profile(raw)
     if not profile:
         return base_path, None, raw
-    PROFILE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if current_policy().migrate:
+        PROFILE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     return PROFILE_DATA_DIR / f"{profile['id']}-{base_path.name}", profile, raw
 
 def _active_profile_data_path(base_path: Path) -> Path:
     path, _profile, _cfg = _active_profile_context(base_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 def _is_first_profile(profile: Dict | None, cfg: Dict) -> bool:
@@ -215,14 +277,16 @@ def _load_profile_json(base_path: Path, default):
     if not path.exists():
         if is_legacy_profile:
             data = _mod_record_data(base_path, load_json(base_path, default))
-            save_json(path, data)
+            if current_policy().migrate:
+                save_json(path, data)
             return data
         return load_json(path, default)
     data = load_json(path, default)
     if is_legacy_profile:
         merged = _merge_legacy_records(data, _mod_record_data(base_path, load_json(base_path, default)))
         if merged is not data:
-            save_json(path, merged)
+            if current_policy().migrate:
+                save_json(path, merged)
             return merged
     return data
 
@@ -241,6 +305,24 @@ def save_presets(presets: Dict[str, List[str]]) -> None:
             "state": rec.get("state", "undefined"),
         }
     save_json(_active_profile_data_path(PRESETS_PATH), data)
+    _sync_legacy_records(PRESETS_PATH, data)
+
+
+def _sync_legacy_records(base_path: Path, records: Dict) -> None:
+    path, profile, cfg = _active_profile_context(base_path)
+    if path == base_path or not _is_first_profile(profile, cfg) or not base_path.exists():
+        return
+    legacy = load_json(base_path, {})
+    updated = dict(legacy)
+    for name in legacy:
+        if base_path == LABELS_PATH and name == FAVORITES_KEY:
+            continue
+        if name not in records:
+            updated.pop(name)
+        else:
+            updated[name] = records[name]
+    if updated != legacy:
+        save_json(base_path, updated)
 
 def load_labels() -> Dict[str, str]:
     records = load_mod_records()
@@ -273,6 +355,10 @@ def load_mod_records() -> Dict[str, Dict]:
     data = {}
     changed = False
     for name, value in raw.items():
+        if current_policy().strict:
+            label = value.get("label", "") if isinstance(value, dict) else value
+            if not isinstance(label, str):
+                raise StorageError("Invalid mod label metadata: labels must be text.")
         if isinstance(value, dict):
             data[name] = {
                 "label": value.get("label", ""),
@@ -286,7 +372,7 @@ def load_mod_records() -> Dict[str, Dict]:
                 "state": "undefined",
             }
             changed = True
-    if changed:
+    if changed and current_policy().migrate:
         save_json(_active_profile_data_path(LABELS_PATH), data)
     return data
 
@@ -302,6 +388,7 @@ def _save_mod_record_data(records: Dict[str, Dict]) -> None:
         if isinstance(favorites, dict) and favorites:
             data[FAVORITES_KEY] = favorites
     save_json(path, data)
+    _sync_legacy_records(LABELS_PATH, data)
 
 def _favorite_scope(cfg: Dict) -> str:
     return str(cfg.get("active_game_profile_id") or DEFAULT_FAVORITE_SCOPE)
@@ -346,6 +433,8 @@ def mark_mods_managed(names: List[str], state: str) -> None:
     save_mod_records(records)
 
 def ensure_mod_records(names: List[str]) -> None:
+    if not current_policy().migrate:
+        return
     records = load_mod_records()
     changed = False
     for name in names:
@@ -360,6 +449,10 @@ def load_preset_records() -> Dict[str, Dict]:
     data = {}
     changed = False
     for name, value in raw.items():
+        if current_policy().strict:
+            members = value.get("mods", []) if isinstance(value, dict) else value
+            if not isinstance(members, list) or any(not isinstance(member, str) for member in members):
+                raise StorageError("Invalid preset metadata: mods must be a list of names.")
         if isinstance(value, dict):
             data[name] = {
                 "mods": value.get("mods", []),
@@ -373,7 +466,7 @@ def load_preset_records() -> Dict[str, Dict]:
                 "state": "undefined",
             }
             changed = True
-    if changed:
+    if changed and current_policy().migrate:
         save_json(_active_profile_data_path(PRESETS_PATH), data)
     return data
 

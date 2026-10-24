@@ -15,8 +15,8 @@ class CliUtilsTests(unittest.TestCase):
         path = base / "mm select target.pak"
         path.write_text("x", encoding="utf-8")
         try:
-            with patch("mod_manager.cli_utils.is_windows", return_value=True), patch(
-                "mod_manager.cli_utils._windows_shell_select_path",
+            with patch("mod_manager.folder_actions.is_windows", return_value=True), patch(
+                "mod_manager.folder_actions._windows_shell_select_path",
                 return_value=False,
             ), patch("subprocess.Popen") as popen:
                 select_in_explorer(path)
@@ -40,8 +40,8 @@ class CliUtilsTests(unittest.TestCase):
         except (OSError, NotImplementedError):
             self.skipTest("symlinks are not available")
         try:
-            with patch("mod_manager.cli_utils.is_windows", return_value=True), patch(
-                "mod_manager.cli_utils._windows_shell_select_path",
+            with patch("mod_manager.folder_actions.is_windows", return_value=True), patch(
+                "mod_manager.folder_actions._windows_shell_select_path",
                 return_value=False,
             ), patch("subprocess.Popen") as popen:
                 select_in_explorer(link)
@@ -57,8 +57,8 @@ class CliUtilsTests(unittest.TestCase):
         path = Path(tempfile.gettempdir()) / "mm shell select target.pak"
         path.write_text("x", encoding="utf-8")
         try:
-            with patch("mod_manager.cli_utils.is_windows", return_value=True), patch(
-                "mod_manager.cli_utils._windows_shell_select_path",
+            with patch("mod_manager.folder_actions.is_windows", return_value=True), patch(
+                "mod_manager.folder_actions._windows_shell_select_path",
                 return_value=True,
             ) as shell_select, patch("subprocess.Popen") as popen:
                 select_in_explorer(path)

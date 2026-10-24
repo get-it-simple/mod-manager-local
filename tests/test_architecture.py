@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import re
 import unittest
+import subprocess
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -45,6 +47,26 @@ def imported_modules(path: Path) -> set[str]:
 
 
 class LayeringTest(unittest.TestCase):
+    def test_gui_and_domain_do_not_import_cli_modules(self):
+        offenders = []
+        cli_modules = {path.stem for path in package_files() if path.stem.startswith("cli") or path.stem == "menus"}
+        for path in package_files():
+            if path.stem in cli_modules:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[-1] in cli_modules:
+                    offenders.append(str(path.relative_to(PROJECT_ROOT)))
+        self.assertEqual(offenders, [])
+
+    def test_interfaces_import_independently_in_fresh_processes(self):
+        probe = PROJECT_ROOT / "tests" / "fixtures" / "import_probe.py"
+        for mode in ("gui", "cli"):
+            with self.subTest(mode=mode):
+                result = subprocess.run([sys.executable, str(probe), mode], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("GUI imports without CLI" if mode == "gui" else "mods toggle", result.stdout)
+
     def test_only_ui_modules_import_qt(self):
         offenders = {
             path.relative_to(PROJECT_ROOT).as_posix()

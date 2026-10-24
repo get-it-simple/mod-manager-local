@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from tests.qt_support import dispose, qt_app
 
-from mod_manager.models import ModItem
+from mod_manager.models import ModItem, OperationItem, OperationResult
 from tests.window_fixture import FAKE_DEST as _FAKE_DEST
 from tests.window_fixture import FAKE_SRC as _FAKE_SRC
 from tests.window_fixture import base_config
@@ -548,7 +548,12 @@ class GuiTests(unittest.TestCase):
         self.window.search_var.set("pak")
         self.window.label_filter_var.set("combat")
 
-        with patch("mod_manager.ui.app.apply_mods_page", return_value=(2, 3, 1)) as apply_mods, patch.object(
+        operation = OperationResult((
+            OperationItem("a.pak", "installed", True, "OK"),
+            OperationItem("b.pak", "installed", True, "OK"),
+            OperationItem("c.pak", "installed", False, "Access denied"),
+        ))
+        with patch("mod_manager.ui.app.change_mods_page", return_value=(2, operation)) as apply_mods, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
@@ -559,14 +564,14 @@ class GuiTests(unittest.TestCase):
         refresh_presets.assert_called_once_with()
 
         self.select_mod_rows(0, 1)
-        with patch("mod_manager.ui.app.toggle_mods_by_indexes", return_value="Toggled") as toggle_mods, patch.object(
+        with patch("mod_manager.ui.app.change_mods", return_value=OperationResult()) as toggle_mods, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods, patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_mods()
 
-        toggle_mods.assert_called_once_with(self.mods, [1, 2], True)
+        toggle_mods.assert_called_once_with(self.mods, overwrite=True)
         refresh_mods.assert_called_once_with(["combat.pak", "ui.pak"])
-        self.assertEqual(self.window.context.status_text, "Toggled")
+        self.assertEqual(self.window.context.status_text, "Nothing to change.")
 
     def test_mod_selection_buttons_are_enabled_only_with_selection(self):
         self.window.mods_table.selectionModel().clearSelection()
@@ -579,7 +584,7 @@ class GuiTests(unittest.TestCase):
 
     def test_source_and_destination_rows_select_paths_in_explorer(self):
         self.window._refresh_mod_detail(self.mods[0])
-        buttons = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.text() in {str(self.mods[0].src), str(self.mods[0].dest)}]
+        buttons = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.toolTip() in {str(self.mods[0].src), str(self.mods[0].dest)}]
         self.assertEqual(len(buttons), 2)
 
         with patch("mod_manager.ui.app.select_in_explorer") as select_in_explorer:
@@ -901,7 +906,7 @@ class GuiTests(unittest.TestCase):
         preset_selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         preset_selection.select(self.window.presets_model.index(1, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
 
-        with patch("mod_manager.ui.app.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
+        with patch("mod_manager.ui.app.toggle_presets_result", return_value=("Preset toggled", OperationResult())) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_presets()
@@ -913,17 +918,18 @@ class GuiTests(unittest.TestCase):
         self.window._open_broken_dialog()
         broken_selection = self.window.broken_table.selectionModel()
         broken_selection.select(self.window.broken_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
-        with patch("mod_manager.ui.app.deactivate_mod", return_value=(True, "OK")) as deactivate, patch.object(self.window, "refresh_broken"):
+        outcome = OperationItem(self.broken[0].name, "uninstalled", True, "OK")
+        with patch("mod_manager.ui.app.deactivate_mod_result", return_value=outcome) as deactivate, patch.object(self.window, "refresh_broken"):
             self.window._remove_selected_broken()
 
         deactivate.assert_called_once_with(self.broken[0])
-        self.assertEqual(self.window.context.status_text, "Removed broken links: 1")
+        self.assertEqual(self.window.context.status_text, "Removed broken links: 1. Errors: 0.")
         self.assertFalse(self.window.broken_dialog.isVisible())
 
     def test_preset_double_click_toggles_clicked_preset(self):
         self.window._run_action = self.run_action_inline
         self.window._open_presets_dialog()
-        with patch("mod_manager.ui.app.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
+        with patch("mod_manager.ui.app.toggle_presets_result", return_value=("Preset toggled", OperationResult())) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window.presets_table.doubleClicked.emit(self.window.presets_model.index(1, 0))

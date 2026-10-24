@@ -8,7 +8,7 @@ from threading import Event
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...archive_backend import ARCHIVE_EXTENSIONS
-from ...cli_utils import ensure_paths
+from ...folder_actions import ensure_paths
 from ...dragdrop import read_clipboard_image, read_clipboard_paths
 from ...imports import create_plans, execute_plans, ignored_file, prepare_archive, resolve_plans
 from ...mods import is_image_file

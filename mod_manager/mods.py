@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import shutil
+import os
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .models import ModFile, ModItem
+from .models import ModFile, ModItem, OperationFailure, OperationItem, OperationResult
 from .links import copy_batch, mklink, mklink_batch, remove_path, unlink_path
-from .platform_utils import is_windows
+from .platform_utils import is_junction, is_windows
 from .storage import (
     ensure_mod_records,
     load_favorites,
@@ -17,7 +18,7 @@ from .storage import (
     save_labels,
     update_favorites,
 )
-from .cli_utils import filter_items_by_query, page_slice, paginate, sort_items
+from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
 
 IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
@@ -157,8 +158,17 @@ def list_installed_mods(cfg: Dict) -> List[ModItem]:
     return [m for m in items if m.installed]
 
 def list_broken_links(cfg: Dict) -> List[ModItem]:
-    items = discover_mods(cfg)
-    return [m for m in items if m.installed and not m.src.exists()]
+    directory = Path(cfg.get("game_mods_dir") or "").expanduser()
+    if not cfg.get("game_mods_dir") or not directory.is_dir():
+        return []
+    broken = []
+    for destination in sorted(directory.iterdir(), key=lambda path: path.name.lower()):
+        if (destination.is_symlink() or is_junction(destination)) and not destination.exists():
+            target = Path(os.readlink(destination))
+            if not target.is_absolute():
+                target = destination.parent / target
+            broken.append(ModItem(destination.name, target, destination, is_junction(destination), True))
+    return broken
 
 def is_copy_install(cfg: Dict) -> bool:
     return str(cfg.get("install_mode") or "").strip().lower() == "copy"
@@ -259,20 +269,30 @@ def _link_files(files: List[ModFile]) -> List[Tuple[bool, str]]:
     return mklink_batch(items)
 
 def apply_mods_batch(mods: List[ModItem], overwrite: bool = False) -> List[Tuple[bool, str]]:
+    return [(item.success, item.message) for item in apply_mods_batch_result(mods, overwrite).items]
+
+
+def apply_mods_batch_result(mods: List[ModItem], overwrite: bool = False) -> OperationResult:
     if not mods:
-        return []
+        return OperationResult()
     work = [(index, f) for index, m in enumerate(mods) for f in _pending_files(m, overwrite)]
     linked = [(index, f) for index, f in work if not mods[index].copy_install]
     copied = [(index, f) for index, f in work if mods[index].copy_install]
 
     per_mod: List[List[Tuple[bool, str]]] = [[] for _ in mods]
+    failures: list[list[OperationFailure]] = [[] for _ in mods]
     for items, results in (
         (linked, _link_files([f for _index, f in linked])),
         (copied, copy_batch([(f.src, f.dest, f.is_dir) for _index, f in copied], overwrite)),
     ):
-        for (index, _f), result in zip(items, results):
+        for (index, member), result in zip(items, results):
             per_mod[index].append(result)
-    return [_fold_results(results) for results in per_mod]
+            if not result[0]:
+                failures[index].append(OperationFailure(member.src, member.dest, result[1]))
+    return OperationResult(tuple(
+        OperationItem(mod.name, "installed", *_fold_results(results), tuple(errors))
+        for mod, results, errors in zip(mods, per_mod, failures)
+    ))
 
 OVERWRITE_PREVIEW_COUNT = 10
 OVERWRITE_MESSAGE = "{count} file(s) already exist in the game mods folder:\n\n{names}"
@@ -295,11 +315,23 @@ def overwrite_message(names: List[str]) -> str:
     return OVERWRITE_MESSAGE.format(count=len(names), names=listed)
 
 def deactivate_mod(mod: ModItem) -> Tuple[bool, str]:
+    result = deactivate_mod_result(mod)
+    return result.success, result.message
+
+
+def deactivate_mod_result(mod: ModItem) -> OperationItem:
     remove = remove_path if mod.copy_install else unlink_path
-    results = [remove(f.dest) for f in mod.install_files if _is_installed(f.dest)]
+    results = []
+    failures = []
+    for member in mod.install_files:
+        if _is_installed(member.dest) or is_junction(member.dest):
+            ok, message = remove(member.dest)
+            results.append((ok, message))
+            if not ok:
+                failures.append(OperationFailure(member.src, member.dest, message))
     if not results:
-        return False, "Already removed"
-    return _fold_results(results)
+        return OperationItem(mod.name, "uninstalled", False, "Already removed")
+    return OperationItem(mod.name, "uninstalled", *_fold_results(results), tuple(failures))
 
 def mods_view(
     cfg: Dict,
@@ -371,90 +403,55 @@ def remove_favorites_from_mods(cfg: Dict, targets: List[str]) -> str:
     update_favorites(cfg, targets, False)
     return f"Favorites removed: {', '.join(targets)}"
 
+def change_mods(mods: List[ModItem], action: str = "toggle", overwrite: bool = False) -> OperationResult:
+    pending = []
+    results = []
+    for mod in mods:
+        if mod.installed and action != "install":
+            results.append(deactivate_mod_result(mod))
+        elif not mod.installed and action != "uninstall":
+            pending.append(mod)
+    results.extend(apply_mods_batch_result(pending, overwrite).items)
+    for state in ("installed", "uninstalled"):
+        names = [item.name for item in results if item.action == state and item.success]
+        if names:
+            mark_mods_managed(names, state)
+    return OperationResult(tuple(results))
+
+
+def change_mods_page(
+    cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
+    favorite_only: bool = False, overwrite: bool = False, *, action: str = "install",
+) -> Tuple[int, OperationResult]:
+    _items, shown, target_page, _pages, _labels = mods_view(
+        cfg, page, label_filter, search_query, order_mode, favorite_only
+    )
+    return target_page, change_mods(shown, action, overwrite)
+
+
 def deactivate_mods_page(
-    cfg: Dict,
-    page: int,
-    label_filter: str,
-    search_query: str,
-    order_mode: str,
+    cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
     favorite_only: bool = False,
 ) -> Tuple[int, int]:
-    _items, shown, target_page, _pages, _labels = mods_view(
-        cfg, page, label_filter, search_query, order_mode, favorite_only
-    )
-    count = 0
-    removed_names = []
-    for m in shown:
-        if m.installed:
-            ok, _msg = deactivate_mod(m)
-            if ok:
-                count += 1
-                removed_names.append(m.name)
-    if count:
-        mark_mods_managed(removed_names, "uninstalled")
-    return target_page, count
+    page, result = change_mods_page(cfg, page, label_filter, search_query, order_mode, favorite_only, action="uninstall")
+    return page, sum(item.success for item in result.items)
+
 
 def apply_mods_page(
-    cfg: Dict,
-    page: int,
-    label_filter: str,
-    search_query: str,
-    order_mode: str,
-    favorite_only: bool = False,
-    overwrite: bool = False,
+    cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
+    favorite_only: bool = False, overwrite: bool = False,
 ) -> Tuple[int, int, int]:
-    _items, shown, target_page, _pages, _labels = mods_view(
-        cfg, page, label_filter, search_query, order_mode, favorite_only
-    )
-    to_install = [m for m in shown if not m.installed]
-    total = len(to_install)
-    err = 0
-    for idx, m in enumerate(to_install, start=1):
-        print(f"[{idx}/{total}] Installing {m.name} ...")
-    results = apply_mods_batch(to_install, overwrite)
-    installed_names = []
-    for _m, (ok, msg) in zip(to_install, results):
-        if not ok:
-            err += 1
-            print(f"  ERR — {msg}")
-        else:
-            installed_names.append(_m.name)
-    if installed_names:
-        mark_mods_managed(installed_names, "installed")
-    return target_page, total, err
+    page, result = change_mods_page(cfg, page, label_filter, search_query, order_mode, favorite_only, overwrite)
+    return page, len(result.items), result.errors
+
 
 def mods_by_indexes(shown: List[ModItem], indexes: List[int]) -> List[ModItem]:
     return [shown[num - 1] for num in indexes if 1 <= num <= len(shown)]
 
+
 def toggle_mods_by_indexes(shown: List[ModItem], indexes: List[int], overwrite: bool = False) -> str:
-    to_install: List[ModItem] = []
-    uninstalled_names = []
-    uninstalled = 0
-    uninstall_errors = 0
-    for m in mods_by_indexes(shown, indexes):
-        if m.installed:
-            ok, msg = deactivate_mod(m)
-            if ok:
-                uninstalled += 1
-                uninstalled_names.append(m.name)
-            else:
-                uninstall_errors += 1
-        else:
-            to_install.append(m)
-    install_errors = 0
-    if to_install:
-        results = apply_mods_batch(to_install, overwrite)
-        install_errors = sum(1 for ok, _msg in results if not ok)
-        mark_mods_managed([m.name for m, (ok, _msg) in zip(to_install, results) if ok], "installed")
-    if uninstalled_names:
-        mark_mods_managed(uninstalled_names, "uninstalled")
-    installed = len(to_install) - install_errors
-    parts = []
-    if to_install:
-        parts.append(f"Installed {installed}/{len(to_install)}. Errors: {install_errors}.")
-    if uninstalled or uninstall_errors:
-        parts.append(f"Uninstalled {uninstalled}. Errors: {uninstall_errors}.")
-    return " ".join(parts)
+    result = change_mods(mods_by_indexes(shown, indexes), overwrite=overwrite)
+    return result.summary() if result.items else ""
 
 def mods_records() -> Dict[str, Dict]:
     return load_mod_records()

@@ -36,7 +36,7 @@ class GameProfilePromptTests(unittest.TestCase):
                     return value
             return ""
 
-        with patch("mod_manager.menus.prompt", side_effect=fake_prompt):
+        with patch("mod_manager.cli_menu_io.prompt", side_effect=fake_prompt):
             values = menus._prompt_game_profile(existing)
         self.asked = asked
         return values
@@ -59,10 +59,9 @@ class GameProfilePromptTests(unittest.TestCase):
         self.assertEqual(values["install_mode"], "copy")
         self.assertEqual(values["mod_group_extensions"], ".pak,.utoc,.ucas")
 
-    def test_an_unknown_install_method_falls_back_to_linking(self):
-        values = self._run({"Game name": "Stalker Two", "Install method": "teleport"})
-
-        self.assertEqual(values["install_mode"], "link")
+    def test_an_unknown_install_method_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Install method"):
+            self._run({"Game name": "Stalker Two", "Install method": "teleport"})
 
     def test_empty_answers_keep_the_existing_profile_values(self):
         existing = {"name": "Old", "install_mode": "copy", "mod_group_extensions": ".pak"}
@@ -88,7 +87,7 @@ class ConfirmOverwriteTests(unittest.TestCase):
 
     def _confirm(self, mods, answer: str):
         out = io.StringIO()
-        with patch("mod_manager.menus.prompt", return_value=answer), patch("sys.stdout", out):
+        with patch("mod_manager.cli_menu_io.prompt", return_value=answer), patch("sys.stdout", out):
             return menus._confirm_overwrite(mods), out.getvalue()
 
     def test_nothing_to_replace_needs_no_question(self):

@@ -8,16 +8,16 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from app_paths import APP_NAME, APP_VERSION
 
-from ..cli_utils import ensure_paths, open_folder, select_in_explorer
+from ..folder_actions import ensure_paths, open_folder, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
-from ..models import ModItem
+from ..models import ModItem, OperationResult
 from ..mods import (
     add_favorites_to_mods,
     add_label_to_mods,
-    apply_mods_page,
-    deactivate_mod,
-    deactivate_mods_page,
+    change_mods,
+    change_mods_page,
+    deactivate_mod_result,
     existing_targets,
     import_mod_file,
     is_copy_install,
@@ -32,7 +32,6 @@ from ..mods import (
     mods_view,
     remove_label_from_mods,
     remove_favorites_from_mods,
-    toggle_mods_by_indexes,
 )
 from ..presets import (
     delete_presets_by_names,
@@ -40,7 +39,7 @@ from ..presets import (
     presets_records,
     presets_view,
     save_preset_from_installed,
-    toggle_presets_by_names,
+    toggle_presets_result,
 )
 from ..storage import (
     active_game_profile,
@@ -58,6 +57,7 @@ from .controllers.games_controller import GamesController
 from .controllers.settings_controller import SettingsController
 from .controllers.archive_import_controller import ArchiveImportController
 from .controllers.preview_controller import PreviewController
+from .controllers.error_history_controller import ErrorHistoryController
 from .dialogs import prompts
 from .dialogs.base import close_dialog, show_dialog, themed_dialog
 from .dialogs.game_profile import GameProfileDialog
@@ -164,6 +164,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.previews = PreviewController(self)
         self._init_theme()
         self.context = AppContext(self.cfg, self.theme, self.runner)
+        self.errors = ErrorHistoryController(self)
         self.registry = WidgetRegistry()
         self.resize(
             max(tokens.MIN_WIDTH, tokens.to_int(self.cfg.get("window_width"), tokens.DEFAULT_WIDTH)),
@@ -222,6 +223,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._save_tile_splitter_sizes()
         save_config(self.cfg)
         self.archive_import.shutdown()
+        if self.errors.dialog is not None:
+            self.errors.dialog.close()
         self.runner.shutdown()
         for attr in ("_table_drop_target", "_tiles_drop_target"):
             target = getattr(self, attr, None)
@@ -301,7 +304,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _dialogs(self) -> list[QtWidgets.QDialog]:
         names = ("games_dialog", "presets_dialog", "settings_dialog", "broken_dialog")
-        return [dialog for dialog in (getattr(self, name, None) for name in names) if dialog is not None]
+        dialogs = [dialog for dialog in (getattr(self, name, None) for name in names) if dialog is not None]
+        if hasattr(self, "errors") and self.errors.dialog is not None:
+            dialogs.append(self.errors.dialog)
+        return dialogs
 
     def _on_system_appearance_changed(self, *_args) -> None:
         if self._applying_theme or self.theme.is_applying:
@@ -680,6 +686,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.detail_layout.setSpacing(8)
         self.detail_layout.setAlignment(QtCore.Qt.AlignTop)
         self.detail_scroll = QtWidgets.QScrollArea()
+        self.detail_scroll.setMinimumWidth(tokens.DETAIL_PANEL_MIN_WIDTH)
         self.detail_scroll.setWidgetResizable(True)
         self.detail_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.detail_scroll.setWidget(self.detail_frame)
@@ -1123,14 +1130,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         names = [m.name for m in selected]
 
-        def done(message):
-            self._set_status(message)
+        def done(result):
+            self._set_status(result.summary())
             self.refresh_mods(names)
             self.refresh_presets()
 
-        self._run_action(
+        self.errors.run(
             "Updating selected mods...",
-            lambda: toggle_mods_by_indexes(self.current_mods_shown, indexes, True),
+            lambda: change_mods(selected, overwrite=True),
             done,
         )
 
@@ -1368,30 +1375,31 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
 
         def done(result):
-            target_page, total, errors = result
-            self._set_status(f"Installed {total - errors}/{total} on page {target_page}. Errors: {errors}.")
+            target_page, operation = result
+            total = len(operation.items)
+            self._set_status(f"Installed {total - operation.errors}/{total} on page {target_page}. Errors: {operation.errors}.")
             self.refresh_mods()
             self.refresh_presets()
 
         favorite_only = bool(self.favorite_filter_var.get())
         view_args = (self.cfg, page, label_filter, search, order, favorite_only, True)
-        self._run_action("Installing mods...", lambda: apply_mods_page(*view_args), done)
+        self.errors.run("Installing mods...", lambda: change_mods_page(*view_args), done)
 
     def _uninstall_page(self) -> None:
         page, label_filter, search, order = self._view_args()
 
         def done(result):
-            target_page, count = result
-            self._set_status(f"Uninstalled {count} on page {target_page}.")
+            target_page, operation = result
+            count = sum(item.success for item in operation.items)
+            self._set_status(f"Uninstalled {count} on page {target_page}. Errors: {operation.errors}.")
             self.refresh_mods()
             self.refresh_presets()
 
         view_args = (self.cfg, page, label_filter, search, order)
-        self._run_action(
+        favorite_only = bool(self.favorite_filter_var.get())
+        self.errors.run(
             "Uninstalling mods...",
-            lambda: deactivate_mods_page(*view_args, True)
-            if self.favorite_filter_var.get()
-            else deactivate_mods_page(*view_args),
+            lambda: change_mods_page(*view_args, favorite_only, action="uninstall"),
             done,
         )
 
@@ -1447,15 +1455,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
 
         def done(result):
-            message, _messages, _has_errors = result
+            message, _operation = result
             self._set_status(message)
             self.refresh_mods()
             self.refresh_presets()
             self._close_dialog(self.presets_dialog)
 
-        self._run_action(
+        self.errors.run(
             "Toggling presets...",
-            lambda: toggle_presets_by_names(self.cfg, names, installed, True),
+            lambda: toggle_presets_result(self.cfg, names, installed, True),
             done,
         )
 
@@ -1516,22 +1524,23 @@ class ModManagerGui(QtWidgets.QMainWindow):
         rows = self._selected_rows(self.broken_table)
         selected = [self.current_broken[i] for i in rows if i < len(self.current_broken)]
 
-        def done(count):
-            self._set_status(f"Removed broken links: {count}")
-            self.refresh_broken()
-            self._close_dialog(self.broken_dialog)
-
-        self._run_action("Removing broken links...", lambda: sum(1 for mod in selected if deactivate_mod(mod)[0]), done)
+        self._remove_broken(selected)
 
     def _remove_all_broken(self) -> None:
-        mods = list(self.current_broken)
+        self._remove_broken(list(self.current_broken))
 
-        def done(count):
-            self._set_status(f"Removed broken links: {count}")
+    def _remove_broken(self, mods: list[ModItem]) -> None:
+        def done(result):
+            count = sum(item.success for item in result.items)
+            self._set_status(f"Removed broken links: {count}. Errors: {result.errors}.")
             self.refresh_broken()
             self._close_dialog(self.broken_dialog)
 
-        self._run_action("Removing broken links...", lambda: sum(1 for mod in mods if deactivate_mod(mod)[0]), done)
+        self.errors.run(
+            "Removing broken links...",
+            lambda: OperationResult(tuple(deactivate_mod_result(mod) for mod in mods)),
+            done,
+        )
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():

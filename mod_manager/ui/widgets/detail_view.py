@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -48,14 +48,53 @@ def detail_name_label(text: str, parent=None) -> QtWidgets.QLabel:
     return label
 
 
+def display_path(path: Path | str) -> str:
+    full = str(path)
+    windows = "\\" in full or (len(full) > 1 and full[1] == ":")
+    parsed = PureWindowsPath(full) if windows else PurePosixPath(full)
+    parts = parsed.parts[1:] if parsed.anchor else parsed.parts
+    visible_parts = tokens.PATH_VISIBLE_DIRECTORIES + 1
+    if len(parts) > visible_parts:
+        separator = "\\" if windows else "/"
+        full = "…" + separator + separator.join(parts[-visible_parts:])
+    if len(full) > tokens.PATH_MAX_CHARS:
+        first = tokens.PATH_MAX_CHARS // 2
+        last = tokens.PATH_MAX_CHARS - first - 1
+        full = full[:first] + "…" + full[-last:]
+    return full
+
+
+class PathButton(QtWidgets.QPushButton):
+    def __init__(self, path: Path, on_click: Callable, parent=None):
+        self._display_path = display_path(path)
+        super().__init__(self._display_path, parent)
+        set_variant(self, LINK)
+        self.setFlat(True)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+        self.setToolTip(str(path))
+        self.setAccessibleName(str(path))
+        self.clicked.connect(lambda _checked=False, target=Path(path): on_click(target))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_text()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (QtCore.QEvent.FontChange, QtCore.QEvent.StyleChange):
+            self._update_text()
+
+    def _update_text(self) -> None:
+        option = QtWidgets.QStyleOptionButton()
+        self.initStyleOption(option)
+        content = self.style().subElementRect(QtWidgets.QStyle.SE_PushButtonContents, option, self)
+        self.setText(self.fontMetrics().elidedText(self._display_path, QtCore.Qt.ElideMiddle, max(0, content.width())))
+
+
 def path_button(path: Path, on_click: Callable, parent=None) -> QtWidgets.QPushButton:
-    button = QtWidgets.QPushButton(str(path), parent)
-    set_variant(button, LINK)
-    button.setFlat(True)
-    button.setCursor(QtCore.Qt.PointingHandCursor)
-    button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-    button.clicked.connect(lambda _checked=False, target=Path(path): on_click(target))
-    return button
+    return PathButton(path, on_click, parent)
 
 
 def action_button(text: str, icon: QtGui.QIcon, tooltip: str, on_click: Callable, parent=None) -> QtWidgets.QPushButton:
