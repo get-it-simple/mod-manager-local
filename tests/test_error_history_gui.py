@@ -187,6 +187,7 @@ class ErrorHistoryGuiTests(WindowTestCase):
         self.window.show()
         self.window._refresh_mod_detail(self.mod)
         self.qt_app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         buttons = [button for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)
                    if button.toolTip() in (str(self.mod.src), str(self.mod.dest))]
         self.assertEqual(len(buttons), 2)

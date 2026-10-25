@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from tests.qt_support import qt_app, qt_available
+from tests.qt_support import dispose, qt_app, qt_available
 
 if qt_available():
-    from PySide6 import QtWidgets
+    from PySide6 import QtCore, QtWidgets
 
     from mod_manager.ui import icons
     from mod_manager.ui.theme import colors, tokens
@@ -144,13 +144,26 @@ class LayoutHelperTest(unittest.TestCase):
 
     def test_clear_layout_removes_nested_widgets(self):
         host = QtWidgets.QWidget()
+        self.addCleanup(dispose, host)
         layout = QtWidgets.QVBoxLayout(host)
         inner = QtWidgets.QHBoxLayout()
-        inner.addWidget(QtWidgets.QLabel("inner"))
+        widgets = [QtWidgets.QLabel("inner"), QtWidgets.QLabel("outer")]
+        inner.addWidget(widgets[0])
         layout.addLayout(inner)
-        layout.addWidget(QtWidgets.QLabel("outer"))
+        layout.addWidget(widgets[1])
+        host.show()
+        self.app.processEvents()
+        destroyed = []
+        for widget in widgets:
+            self.assertTrue(widget.isVisible())
+            widget.destroyed.connect(lambda: destroyed.append(True))
         clear_layout(layout)
         self.assertEqual(layout.count(), 0)
+        for widget in widgets:
+            self.assertFalse(widget.isVisible())
+            self.assertNotIn(widget, self.app.topLevelWidgets())
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        self.assertEqual(len(destroyed), len(widgets))
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")

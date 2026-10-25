@@ -158,6 +158,7 @@ class WorkspaceGuiTests(WindowTestCase):
         self.window.show()
         self.select_mod_rows(0)
         self.qt_app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         buttons = self.window.detail_frame.findChildren(QtWidgets.QPushButton)
         previous_bottom = -1
         for button in sorted(buttons, key=lambda child: child.y()):

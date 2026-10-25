@@ -59,6 +59,10 @@ def choose_item(parent, title: str, label: str, items: list[str], current: int =
     return QtWidgets.QInputDialog.getItem(parent, title, label, items, current, False)
 
 
+def choose_text(parent, title: str, label: str, text: str = "") -> tuple[str, bool]:
+    return QtWidgets.QInputDialog.getText(parent, title, label, text=text)
+
+
 def choose_import_conflict(parent, name: str) -> str:
     dialog = QtWidgets.QMessageBox(parent)
     dialog.setWindowTitle("Import name conflict")

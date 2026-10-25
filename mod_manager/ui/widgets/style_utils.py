@@ -53,7 +53,7 @@ def clear_layout(layout) -> None:
         item = layout.takeAt(0)
         widget = item.widget()
         if widget:
-            widget.setParent(None)
+            widget.hide()
             widget.deleteLater()
         child = item.layout()
         if child:

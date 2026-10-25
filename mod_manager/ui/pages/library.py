@@ -4,6 +4,7 @@ from PySide6 import QtCore, QtWidgets
 from ... import settings_schema
 
 from ..controllers import ACTIONS, SELECTION
+from ..controllers.mod_context_menu import ModContextMenu
 from ..models import (
     FavoriteDelegate,
     ModListView,
@@ -192,5 +193,6 @@ def build_mods(window) -> None:
 
     window.mods_actions = window._build_mods_actions()
     layout.addWidget(window.mods_actions)
+    window.mod_menu = ModContextMenu(window)
     window._show_mod_view()
 

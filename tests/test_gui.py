@@ -462,6 +462,7 @@ class GuiTests(unittest.TestCase):
         self.window._set_view_mode("tiles")
         self.window._refresh_mod_detail(self.mods[0])
         self.window._refresh_mod_detail(self.mods[1])
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
 
         texts = self.widget_texts(self.window.detail_frame)
         self.assertEqual(texts.count("ui.pak"), 1)
@@ -471,6 +472,7 @@ class GuiTests(unittest.TestCase):
 
     def test_single_mod_detail_shows_state_action_button(self):
         self.window._refresh_mod_detail(self.mods[0])
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         texts = self.widget_texts(self.window.detail_frame)
         self.assertIn("Action", texts)
         self.assertIn("Uninstall", texts)
@@ -572,6 +574,7 @@ class GuiTests(unittest.TestCase):
 
     def test_source_and_destination_rows_select_paths_in_explorer(self):
         self.window._refresh_mod_detail(self.mods[0])
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         buttons = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.toolTip() in {str(self.mods[0].src), str(self.mods[0].dest)}]
         self.assertEqual(len(buttons), 2)
 

@@ -185,6 +185,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
         self.cfg["window_height"] = self.height()
         self._save_tile_splitter_sizes()
@@ -425,6 +426,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _navigate(self, key: str) -> None:
         if self.busy or (key in PROFILE_PAGES and not active_game_profile(self.cfg)):
             return
+        self.mod_menu.close()
         if key == "presets":
             self.refresh_presets()
         elif key == "cleanup":
@@ -544,7 +546,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.tile_splitter.setSizes([self.width(), tokens.DETAIL_PANEL_MIN_WIDTH])
 
     def _toggle_details(self) -> None:
-        visible = self.details_button.isChecked()
+        self._set_details_visible(self.details_button.isChecked())
+
+    def _set_details_visible(self, visible: bool) -> None:
         if not visible:
             self._save_tile_splitter_sizes()
         self.cfg["mod_details_visible"] = visible
@@ -617,6 +621,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return f"-{key}" if self.preset_sort_reverse else key
 
     def _set_view_mode(self, mode: str) -> None:
+        self.mod_menu.close()
         mode = normalize_view_mode(mode)
         self.mod_view_mode.set(mode)
         self.cfg["mod_view_mode"] = mode
@@ -1165,24 +1170,22 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not label:
             prompts.show_error(self, "Label", "Enter label.")
             return
-        targets = self._selected_mod_names()
-
-        def done(message):
-            self._set_status(message)
-            self.refresh_mods(targets)
-
-        self._run_action("Adding label...", lambda: add_label_to_mods(label, targets), done)
+        self._change_label_selected(label)
 
     def _remove_label_selected(self) -> None:
         label = self.label_edit.text().strip()
         self.label_edit_var.set(label)
+        self._change_label_selected(label, remove=True)
+
+    def _change_label_selected(self, label: str, *, remove: bool = False) -> None:
         targets = self._selected_mod_names()
 
         def done(message):
             self._set_status(message)
             self.refresh_mods(targets)
 
-        self._run_action("Removing label...", lambda: remove_label_from_mods(label, targets), done)
+        action = remove_label_from_mods if remove else add_label_to_mods
+        self._run_action("Removing label..." if remove else "Adding label...", lambda: action(label, targets), done)
 
     def _save_preset(self) -> None:
         name = self.preset_name.text().strip()
