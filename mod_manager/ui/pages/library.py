@@ -16,6 +16,7 @@ from ..theme import tokens
 from ..widgets import IconToolbar, PageControl, attach_completer, fixed_size_policy, select_box
 from ..widgets.workspace import EmptyState
 from ..widgets.detail_view import DetailPanel
+from ..widgets.filter_expansion import FilterExpansion
 from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
 from ..view_modes import MOD_ORDER_OPTIONS, order_label_for_key
@@ -42,6 +43,7 @@ def build_mods_toolbar(window) -> IconToolbar:
     filter_section = toolbar.sections["filter"]
     filter_section.add_widget(window.search_box, 2)
     filter_section.add_widget(window.label_filter_box, 1)
+    window.filter_expansion = FilterExpansion(toolbar, filter_section, window.filter_boxes)
     window.favorite_filter_button = toolbar.button("favorite_filter")
     window.favorite_filter_button.setCheckable(True)
 
@@ -170,6 +172,7 @@ def build_mods(window) -> None:
     window.tiles_view.zoomRequested.connect(window._zoom_tiles)
     window.tiles_view.doubleClicked.connect(lambda _idx: window._toggle_selected_mods())
     window.tile_delegate.favoriteToggled.connect(window._toggle_favorite_name)
+    window.tile_delegate.labelsRequested.connect(window._show_label_choices)
 
     window.detail_scroll = DetailPanel()
     window.detail_frame = window.detail_scroll.frame

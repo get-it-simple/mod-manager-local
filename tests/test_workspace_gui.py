@@ -160,11 +160,15 @@ class WorkspaceGuiTests(WindowTestCase):
         self.qt_app.processEvents()
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         buttons = self.window.detail_frame.findChildren(QtWidgets.QPushButton)
-        previous_bottom = -1
-        for button in sorted(buttons, key=lambda child: child.y()):
+        rectangles = []
+        for button in buttons:
             self.assertGreaterEqual(button.height(), button.minimumSizeHint().height())
-            self.assertGreater(button.y(), previous_bottom)
-            previous_bottom = button.geometry().bottom()
+            origin = button.mapTo(self.window.detail_frame, QtCore.QPoint())
+            rectangle = QtCore.QRect(origin, button.size())
+            self.assertTrue(self.window.detail_frame.rect().contains(rectangle))
+            for previous in rectangles:
+                self.assertFalse(rectangle.intersects(previous))
+            rectangles.append(rectangle)
         self.assertGreaterEqual(self.window.detail_frame.height(), self.window.detail_layout.minimumSize().height())
 
     def test_library_file_paste_keeps_working_with_search_focused(self):

@@ -12,6 +12,7 @@ from ..folder_actions import ensure_paths, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
+from ..labels import AUTOMATIC, ResolvedLabels, label_names
 from ..link_recovery import preset_install_names
 from ..mods import (
     add_favorites_to_mods,
@@ -56,6 +57,7 @@ from .context import AppContext
 from .controllers import ACTIONS, SELECTION, WidgetRegistry
 from .controllers.settings_controller import SAVED_MESSAGE as SETTINGS_SAVED
 from .controllers.games_controller import GamesController
+from .controllers.labels_controller import LabelsController
 from .controllers.settings_controller import SettingsController
 from .controllers.archive_import_controller import ArchiveImportController
 from .controllers.preview_controller import PreviewController
@@ -150,6 +152,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_view_mode = _Var(normalize_view_mode(self.cfg.get("mod_view_mode")))
 
         self.current_mod_items: list[ModItem] = []
+        self.current_mod_names: list[str] = []
         self.current_mods_shown: list[ModItem] = []
         self.current_mod_labels: dict[str, str] = {}
         self.current_mod_records: dict[str, dict] = {}
@@ -185,6 +188,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self.filter_expansion.shutdown()
+        self._close_label_choices()
         self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
         self.cfg["window_height"] = self.height()
@@ -396,7 +401,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._build_presets()
         self._build_settings()
         self._build_broken()
-        for key, page in (("library", self.mods_tab), ("games", self.games_page), ("presets", self.presets_page), ("settings", self.settings.page), ("cleanup", self.broken_page)):
+        self.labels_controller = LabelsController(self)
+        for key, page in (("library", self.mods_tab), ("labels", self.labels_controller.page), ("games", self.games_page), ("presets", self.presets_page), ("settings", self.settings.page), ("cleanup", self.broken_page)):
             self.workspace.add_page(key, page)
         self.registry.extend(ACTIONS, self.workspace.navigation.values())
         self.registry.extend(ACTIONS, (self.workspace.profile_box, self.game_button))
@@ -427,8 +433,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if self.busy or (key in PROFILE_PAGES and not active_game_profile(self.cfg)):
             return
         self.mod_menu.close()
+        self._close_label_choices()
         if key == "presets":
             self.refresh_presets()
+        elif key == "labels":
+            if not self.labels_controller.activate():
+                return
         elif key == "cleanup":
             self.refresh_broken()
         elif key == "games":
@@ -596,6 +606,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.runner.set_status(text)
 
     def _on_busy_changed(self, busy: bool) -> None:
+        self._close_label_choices()
         self.registry.set_enabled(ACTIONS, not busy)
         self._sync_workspace()
         self.workspace.stack.setEnabled(not busy)
@@ -785,6 +796,32 @@ class ModManagerGui(QtWidgets.QMainWindow):
         option.rect = self.tiles_view.visualRect(index)
         return self.tile_delegate._label_for_pos(option, index, pos)
 
+    def _show_label_choices(self, names: tuple[str, ...], position: QtCore.QPoint) -> None:
+        self._close_label_choices()
+        menu = QtWidgets.QMenu(self)
+        menu.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        for name in names:
+            action = menu.addAction(self._icon("label_add"), name)
+            action.setIconVisibleInMenu(True)
+            action.triggered.connect(lambda _checked=False, label=name: self._apply_label_choice(menu, label))
+        self._label_choices_menu = menu
+        menu.destroyed.connect(lambda: self._forget_label_choices(menu))
+        menu.popup(position)
+
+    def _forget_label_choices(self, menu: QtWidgets.QMenu) -> None:
+        if getattr(self, "_label_choices_menu", None) is menu:
+            self._label_choices_menu = None
+
+    def _apply_label_choice(self, menu: QtWidgets.QMenu, name: str) -> None:
+        if getattr(self, "_label_choices_menu", None) is menu and not self.busy and self._is_mods_tab_active():
+            self._toggle_label_filter(name)
+
+    def _close_label_choices(self) -> None:
+        menu = getattr(self, "_label_choices_menu", None)
+        self._label_choices_menu = None
+        if menu is not None:
+            menu.close()
+
     def _refresh_selected_detail(self) -> None:
         rows = self._selected_rows(self._current_mod_view())
         if len(rows) == 1 and rows[0] < len(self.current_mods_shown):
@@ -820,37 +857,18 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _detail_dates_row(self, mod: ModItem) -> None:
         last_managed = self.current_mod_records.get(mod.name, {}).get("last_managed") or "-"
         created = self._format_mod_created_date(mod)
-        if not self._dates_fit_on_one_row(last_managed, created):
-            self._detail_row("Last managed", last_managed)
-            self._detail_row("Created", created)
-            return
-
-        row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)
-        for label, value in (("Last managed", last_managed), ("Created", created)):
-            value_label = QtWidgets.QLabel(value)
-            fixed_size_policy(value_label)
-            row.addWidget(detail_name_label(label))
-            row.addWidget(value_label)
-        row.addStretch(1)
-        self.detail_layout.addLayout(row)
+        self.detail_scroll.add_fields([("Last managed", last_managed), ("Created", created)])
 
     def _detail_path_row(self, label: str, path: Path) -> None:
         self.detail_scroll.add_row(detail_name_label(label), path_button(path, lambda target: select_in_explorer(target)), stretch_last=True)
 
-    def _detail_row_with_button(self, label: str, button: QtWidgets.QPushButton) -> None:
-        self.detail_scroll.add_row(detail_name_label(label), button, trailing_stretch=True)
+    def _detail_label_row(self, values: tuple[str, ...]) -> None:
+        buttons = []
+        for value in values:
+            buttons.append(text_button(value, f"Filter mods by {value}", lambda name=value: self._toggle_label_filter(name), icon_name="toggle"))
+        self.detail_scroll.add_label_buttons(buttons)
 
-    def _detail_label_row(self, value: str) -> None:
-        button = text_button(
-            value or "-",
-            "Filter mods by this label",
-            lambda: self._toggle_label_filter(value),
-            icon_name="toggle",
-        )
-        button.setEnabled(bool(value and value != "-"))
-        self._detail_row_with_button("Label", button)
-
-    def _detail_favorite_row(self, mod: ModItem) -> None:
+    def _detail_favorite_button(self, mod: ModItem) -> QtWidgets.QPushButton:
         favorite = mod.name in self.current_mod_favorites
         text = "Remove from favorites" if favorite else "Add to favorites"
         button = text_button(
@@ -862,9 +880,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
         button.setCheckable(True)
         button.setChecked(favorite)
-        self._detail_row_with_button("Favorite", button)
+        return button
 
-    def _detail_state_action_row(self, mod: ModItem) -> None:
+    def _detail_state_button(self, mod: ModItem) -> QtWidgets.QPushButton:
         action = "uninstall" if mod.installed else "install"
         index = self.current_mods_shown.index(mod) + 1 if mod in self.current_mods_shown else 1
         button = text_button(
@@ -873,7 +891,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             lambda i=index: self._toggle_selected_indexes([i]),
             icon_name=action,
         )
-        self._detail_row_with_button("Action", button)
+        return button
 
     def _toggle_label_filter(self, label: str) -> None:
         if not label or label == "-":
@@ -973,10 +991,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.detail_scroll.add_text_row("Details", "Select a mod to see its information and available actions.")
             return
         self.detail_scroll.add_heading(mod.name, self.details_button.click)
-        self._detail_row("Status", "Installed" if mod.installed else "Not installed")
-        self._detail_label_row(self.current_mod_labels.get(mod.name, "-"))
-        self._detail_favorite_row(mod)
-        self._detail_state_action_row(mod)
+        self.detail_scroll.add_flow_row([
+            QtWidgets.QLabel("Installed" if mod.installed else "Not installed"),
+            self._detail_favorite_button(mod), self._detail_state_button(mod),
+        ])
+        self._detail_label_row(label_names(self.current_mod_labels, mod.name))
         self._detail_dates_row(mod)
         if mod.files:
             self._detail_row("Grouped files", ", ".join(f.src.name for f in mod.files))
@@ -1000,6 +1019,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.refresh_broken()
 
     def refresh_mods(self, selected_names: List[str] | None = None) -> None:
+        self._close_label_choices()
         page, label_filter, search, order = self._view_args()
         favorite_only = bool(self.favorite_filter_var.get())
         view_args = (self.cfg, page, label_filter, search, order)
@@ -1007,6 +1027,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             mods_view(*view_args, True) if favorite_only else mods_view(*view_args)
         )
         self.current_mod_items = items
+        self.current_mod_names = sorted(labels.memberships if isinstance(labels, ResolvedLabels) else [mod.name for mod in items], key=str.casefold)
         self.current_mods_shown = shown
         self.current_mod_labels = labels
         self.current_mod_records = mods_records()
@@ -1018,14 +1039,16 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tile_delegate.set_favorites(self.current_mod_favorites)
             self.page_control.set_page(page, pages)
-            self.search_box.clear()
-            self.search_box.addItems([m.name for m in items])
-            self.search_box.setCurrentText(search)
-            label_values = sorted({v for v in labels.values() if v})
-            self.label_filter_box.clear()
-            self.label_filter_box.addItems(label_values)
-            self.label_filter_box.setCurrentText(label_filter)
-            self.label_edit_model.setStringList(label_values)
+            label_values = sorted(labels.state.definitions if isinstance(labels, ResolvedLabels) else {v for v in labels.values() if v}, key=str.casefold)
+            for box, values, text in ((self.search_box, self.current_mod_names, search), (self.label_filter_box, label_values, label_filter)):
+                with QtCore.QSignalBlocker(box), QtCore.QSignalBlocker(box.lineEdit()):
+                    box.clear()
+                    box.addItems(values)
+                    for index, value in enumerate(values):
+                        box.setItemData(index, value, QtCore.Qt.ToolTipRole)
+                    box.setCurrentText(text)
+            manual_values = [name for name in label_values if not isinstance(labels, ResolvedLabels) or labels.state.definitions[name].mode != AUTOMATIC]
+            self.label_edit_model.setStringList(manual_values)
             self.favorite_filter_button.setChecked(favorite_only)
             self._select_mod_names(selected_names)
         finally:
@@ -1178,6 +1201,13 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._change_label_selected(label, remove=True)
 
     def _change_label_selected(self, label: str, *, remove: bool = False) -> None:
+        if isinstance(self.current_mod_labels, ResolvedLabels):
+            state = self.current_mod_labels.state
+            canonical = state.canonical_name(label)
+            if canonical in state.definitions and state.definitions[canonical].mode == AUTOMATIC:
+                self._navigate("labels")
+                self.labels_controller._rebuild(canonical)
+                return
         targets = self._selected_mod_names()
 
         def done(message):

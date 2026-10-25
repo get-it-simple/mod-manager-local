@@ -474,7 +474,7 @@ class GuiTests(unittest.TestCase):
         self.window._refresh_mod_detail(self.mods[0])
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         texts = self.widget_texts(self.window.detail_frame)
-        self.assertIn("Action", texts)
+        self.assertIn("Installed", texts)
         self.assertIn("Uninstall", texts)
         self.assertNotIn("State", texts)
 

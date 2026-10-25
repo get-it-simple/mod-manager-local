@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from PySide6 import QtCore, QtGui, QtWidgets
+
+from ...settings_schema import LABEL_NAME_FIELD, LABEL_MODE_FIELD, LABEL_TERMS_FIELD, LABEL_MEMBERS_FIELD
+from ..theme import tokens
+from .detail_view import DetailPanel
+from .select import select_box
+from .style_utils import apply_margins
+from .toolbar import IconToolbar
+from .completer import FullTextDelegate
+
+
+class ModChoicesModel(QtCore.QAbstractListModel):
+    checkedChanged = QtCore.Signal(str, bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.names: list[str] = []
+        self.checked: set[str] = set()
+
+    def set_choices(self, names: list[str], checked: set[str]) -> None:
+        self.beginResetModel()
+        self.names = list(names)
+        self.checked = set(checked)
+        self.endResetModel()
+
+    def rowCount(self, parent=QtCore.QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self.names)
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        name = self.names[index.row()]
+        if role in (QtCore.Qt.DisplayRole, QtCore.Qt.ToolTipRole):
+            return name
+        if role == QtCore.Qt.CheckStateRole:
+            return QtCore.Qt.Checked if name in self.checked else QtCore.Qt.Unchecked
+        return None
+
+    def flags(self, index):
+        return super().flags(index) | QtCore.Qt.ItemIsUserCheckable
+
+    def setData(self, index, value, role=QtCore.Qt.EditRole) -> bool:
+        if not index.isValid() or role != QtCore.Qt.CheckStateRole:
+            return False
+        checked = value == QtCore.Qt.Checked or value == QtCore.Qt.Checked.value
+        name = self.names[index.row()]
+        if checked:
+            self.checked.add(name)
+        else:
+            self.checked.discard(name)
+        self.dataChanged.emit(index, index, [role])
+        self.checkedChanged.emit(name, checked)
+        return True
+
+
+class LabelEditor(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.list_view = QtWidgets.QListView()
+        self.list_view.setMinimumWidth(tokens.LABEL_LIST_MIN_WIDTH)
+        self.list_model = QtGui.QStandardItemModel(self)
+        self.list_view.setModel(self.list_model)
+        self.details = DetailPanel()
+        self.name_edit = QtWidgets.QLineEdit()
+        self.mode_box = select_box()
+        self.mode_box.addItems(LABEL_MODE_FIELD.choices)
+        self.terms_edit = QtWidgets.QPlainTextEdit()
+        self.terms_edit.setPlaceholderText("One name fragment per line")
+        self.terms_edit.setFixedHeight(tokens.LABEL_TERMS_HEIGHT)
+        self.details.add_heading("Label settings")
+        form_host = QtWidgets.QWidget()
+        form = QtWidgets.QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(tokens.SPACE_LG)
+        form.setVerticalSpacing(tokens.SPACE_SM)
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+        for spec, widget in ((LABEL_NAME_FIELD, self.name_edit), (LABEL_MODE_FIELD, self.mode_box), (LABEL_TERMS_FIELD, self.terms_edit)):
+            label = QtWidgets.QLabel(spec.label)
+            label.setToolTip(spec.tooltip)
+            widget.setToolTip(spec.tooltip)
+            widget.setAccessibleName(spec.label)
+            form.addRow(label, widget)
+        self.form = form
+        self.details.add_widget(form_host)
+        self.search_edit = QtWidgets.QLineEdit()
+        self.search_edit.setPlaceholderText("Find mods in the lists below")
+        self.search_edit.setToolTip("Search the complete mod catalog and matching mods by name")
+        self.details.add_widget(self.search_edit)
+        self.manual_heading = QtWidgets.QLabel(LABEL_MEMBERS_FIELD.label)
+        self.manual_heading.setToolTip(LABEL_MEMBERS_FIELD.tooltip)
+        self.details.add_widget(self.manual_heading)
+        self.manual_model = ModChoicesModel(self)
+        self.manual_proxy = self._proxy(self.manual_model)
+        self.manual_view = self._list(self.manual_proxy)
+        self.manual_view.setToolTip(LABEL_MEMBERS_FIELD.tooltip)
+        self.details.add_widget(self.manual_view)
+        self.matches_heading = QtWidgets.QLabel()
+        self.details.add_widget(self.matches_heading)
+        self.matches_model = QtCore.QStringListModel(self)
+        self.matches_proxy = self._proxy(self.matches_model)
+        self.matches_view = self._list(self.matches_proxy)
+        self.details.add_widget(self.matches_view)
+        self.search_edit.textChanged.connect(self.manual_proxy.setFilterFixedString)
+        self.search_edit.textChanged.connect(self.matches_proxy.setFilterFixedString)
+        self.toolbar = IconToolbar()
+        actions = self.toolbar.add_section("labels", "Labels")
+        actions.add_text_action("add", "New label", "add", "Create a label in this draft")
+        actions.add_action("delete", "delete", "Delete this label from the draft")
+        save = self.toolbar.add_section("save", "Changes")
+        save.add_text_action("save", "Save", "save", "Save all label changes for this game profile")
+        save.add_text_action("reset", "Reset changes", "reset", "Restore the saved labels for this game profile")
+        self.status = QtWidgets.QLabel()
+        self.status.setWordWrap(True)
+        self.splitter = QtWidgets.QSplitter()
+        self.splitter.addWidget(self.list_view)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 3)
+        layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_LG)
+        layout.addWidget(self.splitter, 1)
+        layout.addWidget(self.status)
+        layout.addWidget(self.toolbar)
+
+    def _proxy(self, model):
+        proxy = QtCore.QSortFilterProxyModel(self)
+        proxy.setSourceModel(model)
+        proxy.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        return proxy
+
+    def _list(self, model):
+        view = QtWidgets.QListView()
+        view.setModel(model)
+        view.setItemDelegate(FullTextDelegate(view))
+        view.setMinimumHeight(tokens.LABEL_EDITOR_LIST_HEIGHT)
+        view.setUniformItemSizes(True)
+        return view
+
+    def set_automatic(self, automatic: bool) -> None:
+        self.form.setRowVisible(self.terms_edit, automatic)
+        self.manual_heading.setVisible(not automatic)
+        self.manual_view.setVisible(not automatic)

@@ -286,9 +286,10 @@ class ModsViewFavoriteTests(unittest.TestCase):
         ), patch("mod_manager.mods.load_labels", return_value=labels), patch(
             "mod_manager.mods.load_mod_records", return_value={}
         ), patch("mod_manager.mods.load_favorites", return_value={"combat-favorite.pak", "ui-favorite.pak"}):
-            filtered, shown, page, pages, returned_labels = mods_view(
-                cfg, 1, "combat", "pak", "name", True
-            )
+            with patch("mod_manager.mods.load_label_definitions", return_value={}):
+                filtered, shown, page, pages, returned_labels = mods_view(
+                    cfg, 1, "combat", "pak", "name", True
+                )
 
         self.assertEqual([mod.name for mod in filtered], ["combat-favorite.pak"])
         self.assertEqual(shown, filtered)

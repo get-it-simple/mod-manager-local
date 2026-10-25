@@ -6,8 +6,9 @@ from ..theme import tokens
 
 
 class FlowLayout(QtWidgets.QLayout):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, constrain_items: bool = False):
         super().__init__(parent)
+        self.constrain_items = constrain_items
         self._items: list[QtWidgets.QLayoutItem] = []
         self.setContentsMargins(0, 0, 0, 0)
         self.setSpacing(tokens.SPACE_LG)
@@ -48,13 +49,13 @@ class FlowLayout(QtWidgets.QLayout):
         size = QtCore.QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
-        return size
+        return QtCore.QSize(0, size.height()) if self.constrain_items else size
 
     def _arrange(self, rect: QtCore.QRect, apply: bool) -> int:
         rows: list[list[QtWidgets.QLayoutItem]] = [[]]
         used = 0
         for item in self._items:
-            width = item.sizeHint().width()
+            width = min(item.sizeHint().width(), rect.width()) if self.constrain_items else item.sizeHint().width()
             spacing = self.spacing() if rows[-1] else 0
             if rows[-1] and used + spacing + width > rect.width():
                 rows.append([])
@@ -66,8 +67,12 @@ class FlowLayout(QtWidgets.QLayout):
         for row in rows:
             if not row:
                 continue
-            height = max(item.sizeHint().height() for item in row)
-            widths = [item.sizeHint().width() for item in row]
+            widths = [min(item.sizeHint().width(), rect.width()) if self.constrain_items else item.sizeHint().width() for item in row]
+            height = max(
+                max(item.minimumSize().height(), item.heightForWidth(width))
+                if self.constrain_items and item.hasHeightForWidth() else item.sizeHint().height()
+                for item, width in zip(row, widths)
+            )
             remaining = max(0, rect.width() - sum(widths) - self.spacing() * (len(row) - 1))
             expanding = [i for i, item in enumerate(row) if item.widget().property("toolbarStretch")]
             x = rect.x()

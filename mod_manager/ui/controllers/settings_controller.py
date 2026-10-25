@@ -10,6 +10,7 @@ from ..dialogs import prompts
 from ..theme import colors, tokens
 from ..widgets import FormBuilder, IconToolbar, apply_margins, write_field
 from ..widgets.workspace import WorkspacePage
+from ..widgets.font_preview import FontPreview
 from ..widgets.style_utils import set_variant
 from .widget_registry import ACTIONS
 
@@ -136,11 +137,21 @@ class SettingsController(QtCore.QObject):
         row.addStretch(1)
         return container
 
-    def _build_font_preview(self) -> QtWidgets.QLabel:
-        self.font_preview = QtWidgets.QLabel(FONT_PREVIEW_TEXT)
-        self.font_preview.setMinimumHeight(tokens.FONT_PREVIEW_MIN_HEIGHT)
-        self.font_preview.setAlignment(QtCore.Qt.AlignCenter)
-        return self.font_preview
+    def _build_font_preview(self) -> QtWidgets.QWidget:
+        self.font_preview = FontPreview(FONT_PREVIEW_TEXT)
+        container = QtWidgets.QWidget()
+        row = apply_margins(QtWidgets.QVBoxLayout(container), margins=None)
+        row.addWidget(self.font_preview)
+        self.font_preview.heightChanged.connect(container.setMinimumHeight)
+        self.font_preview.heightChanged.connect(self._refresh_font_layout)
+        container.setMinimumHeight(self.font_preview.minimumHeight())
+        return container
+
+    def _refresh_font_layout(self, _height: int) -> None:
+        section = self.form.sections["Appearance"]
+        section.form_layout.invalidate()
+        section.layout().invalidate()
+        section.updateGeometry()
 
     def update_font_preview(self, _value: str = "") -> None:
         font = self.window.theme.base_font

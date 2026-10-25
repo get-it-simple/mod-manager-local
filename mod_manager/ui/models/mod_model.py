@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui
 
 from ...models import ModItem
+from ...labels import label_names
 from .. import icons
 from ..theme import colors, tokens
 from . import columns
@@ -19,6 +20,7 @@ class ModTableModel(QtCore.QAbstractTableModel):
         super().__init__(parent)
         self.mods: list[ModItem] = []
         self.labels: dict[str, str] = {}
+        self.label_memberships: dict[str, tuple[str, ...]] = {}
         self.records: dict[str, dict] = {}
         self.favorites: set[str] = set()
         self.set_accent(accent_color or colors.FALLBACK_ACCENT)
@@ -35,6 +37,7 @@ class ModTableModel(QtCore.QAbstractTableModel):
         self.beginResetModel()
         self.mods = list(mods)
         self.labels = dict(labels or {})
+        self.label_memberships = {mod.name: label_names(labels or {}, mod.name) for mod in mods}
         self.records = dict(records or {})
         self.favorites = set(favorites or ())
         self.endResetModel()
@@ -55,6 +58,8 @@ class ModTableModel(QtCore.QAbstractTableModel):
             return None
         mod = self.mods[index.row()]
         column = index.column()
+        if role == QtCore.Qt.ToolTipRole and column in (1, 2):
+            return mod.name if column == 1 else self.labels.get(mod.name, "-")
         if role == QtCore.Qt.UserRole:
             return mod
         if role == QtCore.Qt.DecorationRole and column == 0:

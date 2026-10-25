@@ -8,6 +8,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..theme import tokens
 from .style_utils import LINK, apply_margins, clear_layout, fixed_size_policy, set_variant
 from .buttons import icon_button
+from .flow_layout import FlowLayout
 
 
 class DetailImageLabel(QtWidgets.QLabel):
@@ -117,7 +118,7 @@ class DetailPanel(QtWidgets.QScrollArea):
         self.layout = apply_margins(
             QtWidgets.QVBoxLayout(self.frame),
             margins=tokens.DETAIL_MARGIN,
-            spacing=tokens.SPACE_LG,
+            spacing=tokens.SPACE_SM,
         )
         self.layout.setAlignment(QtCore.Qt.AlignTop)
         self.layout.setSizeConstraint(QtWidgets.QLayout.SetMinimumSize)
@@ -156,21 +157,57 @@ class DetailPanel(QtWidgets.QScrollArea):
         self.layout.addWidget(widget)
         return widget
 
-    def add_heading(self, title: str, on_close: Callable) -> None:
+    def add_heading(self, title: str, on_close: Callable | None = None) -> None:
         label = QtWidgets.QLabel(title)
         label.setWordWrap(True)
         label.setMinimumWidth(0)
-        label.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        policy = label.sizePolicy()
+        policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Ignored)
+        label.setSizePolicy(policy)
         set_variant(label, "heading")
         font = label.font()
         font.setPointSize(font.pointSize() + tokens.DETAIL_TITLE_FONT_STEP)
         font.setBold(True)
         label.setFont(font)
-        self.add_row(label, icon_button("remove", "Hide details", on_close))
+        if on_close is None:
+            self.add_widget(label)
+        else:
+            self.add_row(label, icon_button("remove", "Hide details", on_close))
 
     def add_actions(self, buttons: list[QtWidgets.QPushButton]) -> None:
+        self.add_flow_row(buttons)
+
+    def add_flow_row(self, widgets: list[QtWidgets.QWidget]) -> QtWidgets.QWidget:
+        host = QtWidgets.QWidget()
+        layout = FlowLayout(host, constrain_items=True)
+        layout.setSpacing(tokens.SPACE_SM)
+        for widget in widgets:
+            widget.setMinimumWidth(0)
+            layout.addWidget(widget)
+        host.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        return self.add_widget(host)
+
+    def add_label_buttons(self, buttons: list[QtWidgets.QPushButton]) -> None:
+        if not buttons:
+            self.add_text_row("Labels", "-")
+            return
         for button in buttons:
-            self.layout.addWidget(button, 0, QtCore.Qt.AlignLeft)
+            button.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+        self.add_flow_row([detail_name_label("Labels"), *buttons])
+
+    def add_fields(self, fields: list[tuple[str, str]]) -> None:
+        widgets = []
+        for title, value in fields:
+            host = QtWidgets.QWidget()
+            row = apply_margins(QtWidgets.QHBoxLayout(host), margins=None, spacing=tokens.SPACE_SM)
+            label = detail_name_label(title)
+            label.setMinimumWidth(0)
+            text = QtWidgets.QLabel(value)
+            text.setWordWrap(True)
+            row.addWidget(label)
+            row.addWidget(text, 1)
+            widgets.append(host)
+        self.add_flow_row(widgets)
 
     def add_row(self, *widgets, stretch_last: bool = False, trailing_stretch: bool = False):
         row = apply_margins(QtWidgets.QHBoxLayout(), margins=None)

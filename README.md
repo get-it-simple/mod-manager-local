@@ -91,12 +91,14 @@ python build-gui-exe.py --pyz
 - Group several file types into one mod, for example `.pak` + `.utoc` + `.ucas` sharing a name; the detail panel lists every file of the group
 - Game profiles with separate game folders, source folders, presets, labels, and active default selection
 - Presets — save and restore named mod sets
-- Labels — tag and filter mods by category
+- Labels — assign several manual labels to a mod, or automatically match labels by name fragments
 - Profile-scoped favorites — star mods independently from labels and combine the favorite, label, and search filters
-- Pagination, search, and ordering
+- Pagination, search, and ordering; filter suggestions use the complete library and show full names on hover
 - Broken link detection and cleanup
 - GUI (PySide6/Qt) and CLI interfaces
-- The GUI sidebar opens Library, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
+- The GUI sidebar opens Library, Labels, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
+- **Labels** lists the active game's labels, their modes and matching mod counts. Select a label to rename it, choose **Manual** or **Automatic**, and inspect matching mods. Manual mode uses checked mods; Automatic mode matches any name fragment, ignoring letter case, with one fragment per line. Switching modes retains both sets of choices. New matching mods join automatically when the library refreshes.
+- **Save** applies all label edits for the active game; **Reset changes** reloads its saved labels. Drafts survive navigation and profile switching during the session; closing discards unfinished edits. Selecting a label filters the library; installation remains a separate action. Existing single-label data remains supported.
 - The **Details** button shows or hides the selected mod's information beside both list and tile views. Visibility and panel width are remembered between launches.
 - Right-click a mod in the list or tile view for an icon menu with install/uninstall, favorites, labels, preview image, Explorer locations, and details actions. Right-clicking a selected mod targets the whole selection; right-clicking another mod targets only that mod. Opening or dismissing the menu preserves selection. **Show details** is always available, including when the details panel is hidden. Close the panel with its close button or the **Details** header button.
 - Settings keep unsaved edits while you move between pages. **Save** applies them; **Reset changes** restores the saved values. Closing the application discards unsaved edits.

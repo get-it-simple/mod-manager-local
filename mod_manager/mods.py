@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .models import ModFile, ModItem, OperationFailure, OperationItem, OperationResult
+from .labels import ResolvedLabels, label_names, state_from_records
 from .links import (
     UNSUPPORTED_LINK_MESSAGE, UNSUPPORTED_LINKS,
     copy_batch, mklink, mklink_batch, remove_path, unlink_path,
@@ -16,9 +17,11 @@ from .storage import (
     ensure_mod_records,
     load_favorites,
     load_labels,
+    load_label_definitions,
+    load_label_state,
     load_mod_records,
     mark_mods_managed,
-    save_labels,
+    save_label_state,
     update_favorites,
 )
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
@@ -351,11 +354,13 @@ def mods_view(
     items_all = discover_mods(cfg)
     ensure_mod_records([m.name for m in items_all])
     items = filter_items_by_query(items_all, search_query)
-    labels = load_labels()
+    manual_labels = load_labels()
     records = load_mod_records()
+    state = state_from_records(records, load_label_definitions(), manual_labels)
+    labels = ResolvedLabels(state, [item.name for item in items_all])
     if label_filter:
-        lf = label_filter.lower()
-        items = [m for m in items if (labels.get(m.name) or "").lower() == lf]
+        lf = label_filter.casefold()
+        items = [m for m in items if any(name.casefold() == lf for name in label_names(labels, m.name))]
     if favorite_only:
         favorites = load_favorites(cfg)
         items = [m for m in items if m.name in favorites]
@@ -382,22 +387,19 @@ def mods_view(
     return items, shown, page, pages, labels
 
 def add_label_to_mods(label_name: str, targets: List[str]) -> str:
-    labels = load_labels()
-    for file_name in targets:
-        labels[file_name] = label_name
-    save_labels(labels)
+    state = load_label_state()
+    label_name = state.canonical_name(label_name)
+    state.assign(label_name, targets)
+    save_label_state(state)
     mark_mods_managed(targets, "label")
     return f"Label added: {label_name} -> {', '.join(targets)}"
 
 def remove_label_from_mods(label_name: str, targets: List[str]) -> str:
-    labels = load_labels()
-    removed = []
-    for file_name in targets:
-        if labels.get(file_name) == label_name:
-            labels.pop(file_name, None)
-            removed.append(file_name)
+    state = load_label_state()
+    label_name = state.canonical_name(label_name)
+    removed = state.assign(label_name, targets, assigned=False)
     if removed:
-        save_labels(labels)
+        save_label_state(state)
         mark_mods_managed(removed, "label")
         return f"Label removed: {label_name} -> {', '.join(removed)}"
     return "Label not found."

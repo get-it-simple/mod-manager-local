@@ -13,8 +13,10 @@ from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, 
 
 from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
 from .storage_policy import StorageError, current_policy
+from .labels import LabelDefinition, LabelState, state_from_records, unique_names
 
 FAVORITES_KEY = "__favorites__"
+LABEL_DEFINITIONS_KEY = "__label_definitions__"
 DEFAULT_FAVORITE_SCOPE = "__default__"
 
 def load_json(path: Path, default):
@@ -239,10 +241,12 @@ def _is_first_profile(profile: Dict | None, cfg: Dict) -> bool:
 def _merge_legacy_records(profile_data, legacy_data):
     if not isinstance(profile_data, dict) or not isinstance(legacy_data, dict):
         return profile_data
+    if LABEL_DEFINITIONS_KEY in profile_data:
+        return profile_data
     merged = dict(profile_data)
     changed = False
     for name, legacy_value in legacy_data.items():
-        if name == FAVORITES_KEY:
+        if name in (FAVORITES_KEY, LABEL_DEFINITIONS_KEY):
             continue
         current = merged.get(name)
         if current is None:
@@ -335,6 +339,7 @@ def save_labels(labels: Dict[str, str]) -> None:
         rec = current.get(name, {})
         data[name] = {
             "label": label,
+            "labels": [label] if label else [],
             "last_managed": rec.get("last_managed"),
             "state": rec.get("state", "undefined"),
         }
@@ -342,6 +347,7 @@ def save_labels(labels: Dict[str, str]) -> None:
         if name not in data and (rec.get("last_managed") or rec.get("state") != "undefined"):
             data[name] = {
                 "label": "",
+                "labels": [],
                 "last_managed": rec.get("last_managed"),
                 "state": rec.get("state", "undefined"),
             }
@@ -355,12 +361,19 @@ def load_mod_records() -> Dict[str, Dict]:
     data = {}
     changed = False
     for name, value in raw.items():
+        if name == LABEL_DEFINITIONS_KEY:
+            continue
         if current_policy().strict:
             label = value.get("label", "") if isinstance(value, dict) else value
             if not isinstance(label, str):
                 raise StorageError("Invalid mod label metadata: labels must be text.")
+            if isinstance(value, dict) and "labels" in value and (
+                not isinstance(value["labels"], list) or any(not isinstance(item, str) for item in value["labels"])
+            ):
+                raise StorageError("Invalid mod label metadata: labels must be a list of names.")
         if isinstance(value, dict):
             data[name] = {
+                **value,
                 "label": value.get("label", ""),
                 "last_managed": value.get("last_managed"),
                 "state": value.get("state", "undefined"),
@@ -373,7 +386,7 @@ def load_mod_records() -> Dict[str, Dict]:
             }
             changed = True
     if changed and current_policy().migrate:
-        save_json(_active_profile_data_path(LABELS_PATH), data)
+        _save_mod_record_data(data)
     return data
 
 def save_mod_records(records: Dict[str, Dict]) -> None:
@@ -382,6 +395,9 @@ def save_mod_records(records: Dict[str, Dict]) -> None:
 def _save_mod_record_data(records: Dict[str, Dict]) -> None:
     path = _active_profile_data_path(LABELS_PATH)
     data = dict(records)
+    current = load_json(path, {})
+    if LABEL_DEFINITIONS_KEY not in data and LABEL_DEFINITIONS_KEY in current:
+        data[LABEL_DEFINITIONS_KEY] = current[LABEL_DEFINITIONS_KEY]
     if path == LABELS_PATH:
         current = load_json(LABELS_PATH, {})
         favorites = current.get(FAVORITES_KEY) if isinstance(current, dict) else None
@@ -389,6 +405,40 @@ def _save_mod_record_data(records: Dict[str, Dict]) -> None:
             data[FAVORITES_KEY] = favorites
     save_json(path, data)
     _sync_legacy_records(LABELS_PATH, data)
+
+
+def load_label_definitions() -> dict[str, LabelDefinition]:
+    raw = _load_profile_json(LABELS_PATH, {}).get(LABEL_DEFINITIONS_KEY, {})
+    if not isinstance(raw, dict):
+        raise StorageError("Invalid label definitions: expected an object.")
+    result = {}
+    for name, value in raw.items():
+        if not isinstance(value, dict) or value.get("mode", "manual") not in ("manual", "automatic"):
+            raise StorageError(f"Invalid definition for label: {name}")
+        terms = value.get("terms", [])
+        if not isinstance(terms, list) or any(not isinstance(term, str) for term in terms):
+            raise StorageError(f"Invalid name fragments for label: {name}")
+        result[name] = LabelDefinition(value.get("mode", "manual"), unique_names(terms))
+    return result
+
+
+def load_label_state() -> LabelState:
+    return state_from_records(load_mod_records(), load_label_definitions())
+
+
+def save_label_state(state: LabelState) -> None:
+    state.validate()
+    records = load_mod_records()
+    for name in records.keys() | state.assignments.keys():
+        record = records.setdefault(name, {"last_managed": None, "state": "undefined"})
+        names = state.assignments.get(name, [])
+        record["labels"] = list(names)
+        record["label"] = names[0] if names else ""
+    records[LABEL_DEFINITIONS_KEY] = {
+        name: {"mode": definition.mode, "terms": list(definition.terms)}
+        for name, definition in state.definitions.items()
+    }
+    _save_mod_record_data(records)
 
 def _favorite_scope(cfg: Dict) -> str:
     return str(cfg.get("active_game_profile_id") or DEFAULT_FAVORITE_SCOPE)

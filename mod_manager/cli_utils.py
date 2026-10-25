@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
 from .folder_actions import ensure_paths, open_folder, select_in_explorer
-from .storage import load_labels
+from .storage import load_label_state
 from .cli_commands import command_description
 
 _PT_AVAILABLE = False
@@ -69,12 +69,12 @@ def _normalize_label(s: str) -> str:
 
 def _labels_for_completion() -> List[str]:
     try:
-        data = load_labels() or {}
+        values = list(load_label_state().definitions)
     except Exception:
-        data = {}
+        values = []
     seen = set()
     out: List[str] = []
-    for _k, v in data.items():
+    for v in values:
         if not v:
             continue
         disp = " ".join(str(v).replace("_", " ").split())

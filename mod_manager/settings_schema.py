@@ -51,6 +51,18 @@ GAME_NAME_FIELD = FieldSpec(
     kind=TEXT,
 )
 
+LABEL_NAME_FIELD = FieldSpec("label_name", "Label name", "Unique name shown in the library and label filters.", TEXT)
+LABEL_MODE_FIELD = FieldSpec(
+    "label_mode", "Mode", "Manual uses selected mods. Automatic matches any name fragment, ignoring letter case.",
+    CHOICE, choices=("Manual", "Automatic"),
+)
+LABEL_TERMS_FIELD = FieldSpec(
+    "label_terms", "Name fragments", "Enter one fragment per line. A mod matches when its name contains any fragment, ignoring letter case.", TEXT,
+)
+LABEL_MEMBERS_FIELD = FieldSpec(
+    "label_members", "Manual mods", "Check mods to assign this label manually. These choices are retained when switching to Automatic.", TEXT,
+)
+
 MODS_FIELDS = (
     FieldSpec(
         key="mods_source_dir",

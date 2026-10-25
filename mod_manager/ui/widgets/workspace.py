@@ -12,12 +12,13 @@ from .style_utils import apply_margins, set_variant, repolish
 
 NAVIGATION = (
     ("library", "Library", "list"),
+    ("labels", "Labels", "label_add"),
     ("presets", "Presets", "presets"),
     ("games", "Game profiles", "game"),
     ("cleanup", "Cleanup", "broken"),
     ("settings", "Settings", "settings"),
 )
-PROFILE_PAGES = ("library", "presets", "cleanup")
+PROFILE_PAGES = ("library", "labels", "presets", "cleanup")
 
 
 class WorkspacePage(QtWidgets.QWidget):

@@ -10,6 +10,7 @@ from tests.qt_support import dispose, qt_app, qt_available
 
 from app_paths import DEFAULT_CONFIG
 from mod_manager.models import ModItem
+from mod_manager.labels import LabelDefinition, LabelState
 
 if qt_available():
     from PySide6 import QtCore
@@ -58,6 +59,7 @@ class WindowTestCase(unittest.TestCase):
             patch("mod_manager.ui.app.mods_view", return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"})),
             patch("mod_manager.ui.app.mods_records", return_value={"combat.pak": {"last_managed": "2026-01-01 10:00:00"}}),
             patch("mod_manager.ui.app.load_favorites", return_value=set()),
+            patch("mod_manager.ui.controllers.labels_controller.load_label_state", side_effect=lambda: LabelState({"combat": LabelDefinition()}, {"combat.pak": ["combat"]})),
             patch("mod_manager.ui.app.presets_view", return_value=(self.presets, list(self.presets), ["core", "ui"], 1, 1)),
             patch("mod_manager.ui.app.presets_records", return_value={"core": {"last_managed": "2026-01-02 10:00:00"}}),
             patch("mod_manager.ui.app.list_installed_mods", return_value=[self.mods[0]]),
