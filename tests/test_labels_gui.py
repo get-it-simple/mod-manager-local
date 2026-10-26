@@ -77,11 +77,10 @@ class LabelsGuiTests(WindowTestCase):
         index = view.model().index(row, 1)
         view.scrollTo(index)
         self.qt_app.processEvents()
-        if column == 2 and fragments.draft.editing == row:
-            QtTest.QTest.keyClick(view.indexWidget(index), QtCore.Qt.Key_Return)
-            return
         rect = view.visualRect(index)
-        point = rect.center() if column == 2 else QtCore.QPoint(rect.right() - tokens.ICON_BUTTON_SIZE // 2, rect.center().y())
+        offset = 2 if column == 2 else 1
+        point = QtCore.QPoint(rect.right() - tokens.SPACE_XS - tokens.ICON_BUTTON_SIZE * offset + tokens.ICON_BUTTON_SIZE // 2,
+                             rect.center().y())
         QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=point)
 
     def test_fragment_enter_deduplication_and_save_include_unconfirmed_input(self):
@@ -114,6 +113,8 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(fragments.model.index(0, 2).data(), "Edit fragment")
         self.click_fragment_action(0, 2)
         self.assertTrue(fragments.new_edit.hasFocus())
+        self.assertIsNone(fragments.draft.editing)
+        self.assertIsNone(fragments.view.indexWidget(fragments.model.index(0, 1)))
         self.assertEqual(fragments.model.index(0, 1).data(), "combat")
         self.click_fragment_action(0, 2)
         field = fragments.view.indexWidget(fragments.model.index(0, 1))
@@ -153,10 +154,11 @@ class LabelsGuiTests(WindowTestCase):
     def test_switching_edited_rows_after_deduplication_keeps_the_clicked_fragment(self):
         self.open_label("Looks")
         self.set_fragments("ui", "pak", "combat")
+        self.show_editor()
         fragments = self.editor.terms_edit
-        fragments.start_edit(0)
+        self.click_fragment_action(0, 2)
         fragments.view.indexWidget(fragments.model.index(0, 1)).setText("pak")
-        fragments.start_edit(2)
+        self.click_fragment_action(2, 2)
         self.assertEqual(fragments.model.rowCount(), 2)
         self.assertEqual(fragments.draft.editing, 1)
         self.assertEqual(fragments.view.indexWidget(fragments.model.index(1, 1)).text(), "combat")
@@ -390,7 +392,7 @@ class LabelsGuiTests(WindowTestCase):
         self.controller.flush()
         self.assertNotIn("Looks", self.persisted.definitions)
 
-    def test_fragment_chips_wrap_and_all_remain_visible(self):
+    def test_fragment_chips_wrap_then_scroll_after_four_rows(self):
         self.open_label("Looks")
         self.set_fragments(*[f"fragment_{index}" for index in range(18)])
         self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
@@ -403,9 +405,125 @@ class LabelsGuiTests(WindowTestCase):
         self.window.resize(tokens.MIN_WIDTH, tokens.MIN_HEIGHT)
         self.qt_app.processEvents()
         self.assertGreater(view.height(), wide)
-        last = view.visualRect(view.model().index(17, 1))
-        self.assertTrue(view.viewport().rect().contains(last))
-        self.assertFalse(view.verticalScrollBar().isVisible())
+        self.assertTrue(view.verticalScrollBar().isVisible())
+        visible = [view.visualRect(view.model().index(row, 1)) for row in range(view.model().rowCount())]
+        visible = [rect for rect in visible if view.viewport().rect().intersects(rect)]
+        self.assertEqual(len({rect.top() for rect in visible}), 4)
+        for top in {rect.top() for rect in visible}:
+            self.assertEqual(min(rect.left() for rect in visible if rect.top() == top), view.spacing())
+        last_index = view.model().index(17, 1)
+        view.scrollTo(last_index)
+        self.qt_app.processEvents()
+        self.assertTrue(view.viewport().rect().contains(view.visualRect(last_index)))
+        self.click_fragment_action(17, 2)
+        self.assertTrue(view.viewport().rect().contains(view.indexWidget(last_index).geometry()))
+
+    def test_fragment_height_fits_zero_one_four_and_five_rows(self):
+        from mod_manager.ui.widgets.label_fragments import FragmentDraft, FragmentEditor
+        from tests.qt_support import dispose
+
+        editor = FragmentEditor()
+        editor.resize(tokens.FORM_MEDIUM_FIELD_WIDTH, tokens.DEFAULT_HEIGHT)
+        editor.show()
+        try:
+            heights = {}
+            for count in (0, 1, 4, 5):
+                with self.subTest(count=count):
+                    editor.bind(FragmentDraft([f"{number:02}" + "m" * 30 for number in range(count)]))
+                    self.qt_app.processEvents()
+                    view = editor.view
+                    heights[count] = view.height()
+                    self.assertEqual(view.isVisible(), bool(count))
+                    self.assertEqual(view.verticalScrollBar().isVisible(), count > 4)
+                    if count:
+                        rects = [view.visualRect(view.model().index(row, 1)) for row in range(min(count, 4))]
+                        self.assertTrue(all(view.viewport().rect().contains(rect) for rect in rects))
+                        self.assertEqual(len({rect.top() for rect in rects}), min(count, 4))
+                        self.assertTrue(all(rect.left() == view.spacing() for rect in rects))
+            self.assertGreater(heights[4], heights[1])
+            self.assertEqual(heights[4], heights[5])
+        finally:
+            dispose(editor)
+
+    def test_fragment_editor_grows_to_32_characters_without_losing_long_text(self):
+        self.open_label("Looks")
+        self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        self.click_fragment_action(0, 2)
+        index = fragments.model.index(0, 1)
+        field = fragments.view.indexWidget(index)
+        small_width = field.width()
+        long_text = "m" * 32
+        field.setText(long_text)
+        field.setCursorPosition(7)
+        QtTest.QTest.keyClicks(field, "x")
+        self.qt_app.processEvents()
+        self.assertEqual(field.cursorPosition(), 8)
+        self.assertGreater(field.width(), small_width)
+        field.setText(long_text)
+        self.qt_app.processEvents()
+        capped_width = field.width()
+        field.setText(long_text * 3)
+        self.qt_app.processEvents()
+        self.assertEqual(field.width(), capped_width)
+        self.assertEqual(index.data(QtCore.Qt.ToolTipRole), long_text * 3)
+        self.assertIs(fragments.view.indexWidget(index), field)
+        self.assertTrue(fragments.view.viewport().rect().contains(field.geometry()))
+        self.click_fragment_action(0, 2)
+        self.controller.flush()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, [long_text * 3])
+        fragments.new_edit.setText(long_text * 2)
+        QtTest.QTest.keyClick(fragments.new_edit, QtCore.Qt.Key_Return)
+        self.controller.flush()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, [long_text * 3, long_text * 2])
+
+    def test_label_fields_reflow_without_shrinking_inputs_below_twenty_characters(self):
+        self.open_label("Looks")
+        self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
+        self.show_editor()
+        fields = self.editor.fields
+        positions = [cell.mapTo(fields, QtCore.QPoint()) for cell in fields.cells]
+        self.assertEqual(positions[0].y(), positions[1].y())
+        self.window.resize(tokens.MIN_WIDTH, tokens.MIN_HEIGHT)
+        self.editor.splitter.setSizes([tokens.LABEL_LIST_DEFAULT_WIDTH, tokens.LABEL_LIST_DEFAULT_WIDTH])
+        self.qt_app.processEvents()
+        positions = [cell.mapTo(fields, QtCore.QPoint()) for cell in fields.cells]
+        self.assertGreater(positions[1].y(), positions[0].y())
+        for font_size in (10, 20):
+            with self.subTest(font_size=font_size):
+                font = fields.font()
+                font.setPointSize(font_size)
+                fields.setFont(font)
+                self.qt_app.processEvents()
+                for cell, (_spec, control) in zip(fields.cells, fields.fields):
+                    self.assertGreaterEqual(control.width(), control.minimumWidth())
+                    self.assertGreaterEqual(control.width(), control.fontMetrics().horizontalAdvance("0" * 20))
+                    label = cell.findChild(QtWidgets.QLabel)
+                    self.assertGreaterEqual(label.width(), label.fontMetrics().horizontalAdvance(label.text()))
+                    self.assertTrue(cell.rect().contains(control.geometry()))
+                    self.assertTrue(fields.rect().contains(cell.geometry()))
+
+    def test_fragment_header_is_compact_and_matches_fill_remaining_height(self):
+        self.open_label("Looks")
+        self.window.resize(tokens.DEFAULT_WIDTH, tokens.DEFAULT_HEIGHT)
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        heading = fragments.heading.mapTo(fragments, QtCore.QPoint())
+        field = fragments.new_edit.mapTo(fragments, QtCore.QPoint())
+        self.assertGreater(field.x(), heading.x() + fragments.heading.width())
+        self.assertEqual(field.y() + fragments.new_edit.height() // 2, heading.y() + fragments.heading.height() // 2)
+        self.assertLessEqual(fragments.view.y() - fragments.new_edit.geometry().bottom(), tokens.SPACE_SM + 1)
+        original_height = self.editor.matches_view.height()
+        self.set_fragments(*[f"fragment_{number}" for number in range(30)])
+        self.qt_app.processEvents()
+        self.assertLess(self.editor.matches_view.height(), original_height)
+        self.set_fragments("ui")
+        self.qt_app.processEvents()
+        self.assertEqual(self.editor.matches_view.height(), original_height)
+        frame = self.editor.details.frame
+        bottom = self.editor.matches_view.mapTo(frame, self.editor.matches_view.rect().bottomLeft()).y()
+        self.assertLessEqual(frame.height() - bottom, tokens.DETAIL_MARGIN + 1)
 
     def test_compact_label_list_shows_mode_icon_and_count_and_restores_names(self):
         self.open_label("Looks")

@@ -4,7 +4,7 @@ from ...i18n import t
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ...settings_schema import LABEL_NAME_FIELD, LABEL_MODE_FIELD, LABEL_TERMS_FIELD, LABEL_MEMBERS_FIELD
+from ...settings_schema import LABEL_MODE_FIELD, LABEL_MEMBERS_FIELD
 from ..theme import tokens
 from .detail_view import DetailPanel
 from .select import select_box
@@ -12,6 +12,7 @@ from .style_utils import apply_margins
 from .toolbar import IconToolbar
 from .completer import FullTextDelegate
 from .label_fragments import FragmentEditor
+from .label_fields import LabelFields
 from .label_lists import LabelListView, LabelMatchesModel, matching_mods_view
 from .buttons import icon_button
 
@@ -72,20 +73,10 @@ class LabelEditor(QtWidgets.QWidget):
         self.mode_box.addItems(LABEL_MODE_FIELD.choices)
         self.terms_edit = FragmentEditor()
         self.details.add_heading(t('label_settings'))
-        form_host = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(form_host)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(tokens.SPACE_LG)
-        form.setVerticalSpacing(tokens.SPACE_SM)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
-        for spec, widget in ((LABEL_NAME_FIELD, self.name_edit), (LABEL_MODE_FIELD, self.mode_box), (LABEL_TERMS_FIELD, self.terms_edit)):
-            label = QtWidgets.QLabel(spec.label)
-            label.setToolTip(spec.tooltip)
-            widget.setToolTip(spec.tooltip)
-            widget.setAccessibleName(spec.label)
-            form.addRow(label, widget)
-        self.form = form
-        self.details.add_widget(form_host)
+        self.fields = LabelFields(self.name_edit, self.mode_box)
+        self.details.add_widget(self.fields)
+        self.details.add_widget(self.terms_edit)
+        self.details.layout.setAlignment(QtCore.Qt.Alignment())
         self.search_edit = QtWidgets.QLineEdit()
         self.search_edit.setPlaceholderText(t('find_mods_in_the_lists_below'))
         self.search_edit.setToolTip(t('search_the_complete_mod_catalog_and_matching_mods_by_name'))
@@ -98,12 +89,14 @@ class LabelEditor(QtWidgets.QWidget):
         self.manual_view = self._list(self.manual_proxy)
         self.manual_view.setToolTip(LABEL_MEMBERS_FIELD.tooltip)
         self.details.add_widget(self.manual_view)
+        self.details.layout.setStretchFactor(self.manual_view, 1)
         self.matches_heading = QtWidgets.QLabel()
         self.details.add_widget(self.matches_heading)
         self.matches_model = LabelMatchesModel(self)
         self.matches_proxy = self._proxy(self.matches_model)
         self.matches_view = matching_mods_view(self.matches_proxy)
         self.details.add_widget(self.matches_view)
+        self.details.layout.setStretchFactor(self.matches_view, 1)
         self.search_edit.textChanged.connect(self.manual_proxy.setFilterFixedString)
         self.search_edit.textChanged.connect(self.matches_proxy.setFilterFixedString)
         self.toolbar = IconToolbar()
@@ -147,7 +140,7 @@ class LabelEditor(QtWidgets.QWidget):
         return view
 
     def set_automatic(self, automatic: bool) -> None:
-        self.form.setRowVisible(self.terms_edit, automatic or self.terms_edit.draft.editing is not None)
+        self.terms_edit.setVisible(automatic or self.terms_edit.draft.editing is not None)
         self.manual_heading.setVisible(not automatic)
         self.manual_view.setVisible(not automatic)
         self.matches_view.setColumnHidden(1, not automatic)
