@@ -3,9 +3,12 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui
 
 from ...imports import PreparedArchive
+from ..theme import tokens
 
 
 class ArchiveModModel(QtCore.QAbstractTableModel):
+    COLUMNS = tokens.ARCHIVE_COLUMNS
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.archive: PreparedArchive | None = None
@@ -23,7 +26,7 @@ class ArchiveModModel(QtCore.QAbstractTableModel):
 
     def headerData(self, section, orientation, role=QtCore.Qt.DisplayRole):
         if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
-            return ("Add", "Mod", "Files in archive")[section]
+            return self.COLUMNS[section][1]
         return None
 
     def data(self, index, role=QtCore.Qt.DisplayRole):

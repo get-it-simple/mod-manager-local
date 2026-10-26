@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 import atexit
 import functools
 import re
@@ -32,7 +34,7 @@ def safe_relative_path(name: str) -> Path:
         or INVALID_WINDOWS_NAME.search(part) or RESERVED_WINDOWS_NAME.match(part)
         for part in parts
     ):
-        raise ArchiveError(f"Unsafe archive path: {name!r}")
+        raise ArchiveError(t('unsafe_archive_path_value0', value0=f'{name!r}'))
     return Path(*PurePosixPath(normalized).parts)
 
 
@@ -57,7 +59,7 @@ def seven_zip_path() -> Path:
     found = shutil.which("7zz") or shutil.which("7z")
     if found:
         return Path(found)
-    raise ArchiveError("The bundled 7-Zip is missing. Restore assets/7zip or reinstall the application.")
+    raise ArchiveError(t('the_bundled_7_zip_is_missing_restore_assets_7zip_or_reinstall_the_applic'))
 
 
 def _run_seven_zip(arguments: list[str], cancelled: Event | None = None) -> str:
@@ -82,7 +84,7 @@ def _run_seven_zip(arguments: list[str], cancelled: Event | None = None) -> str:
             except subprocess.TimeoutExpired:
                 continue
         if process.returncode:
-            raise ArchiveError((error or output).strip() or "7-Zip could not read the archive.")
+            raise ArchiveError((error or output).strip() or t('7_zip_could_not_read_the_archive'))
         return output
 
 
@@ -92,13 +94,13 @@ def _validate_entries(entries: list[tuple[str, bool]]) -> None:
         relative = safe_relative_path(name)
         key = relative.as_posix().casefold()
         if key in seen:
-            raise ArchiveError(f"Duplicate archive path: {name}")
+            raise ArchiveError(t('duplicate_archive_path_value0', value0=f'{name}'))
         seen[key] = is_directory
     for name, _is_directory in entries:
         relative = safe_relative_path(name)
         for parent in relative.parents:
             if parent != Path(".") and seen.get(parent.as_posix().casefold()) is False:
-                raise ArchiveError(f"File and directory conflict: {name}")
+                raise ArchiveError(t('file_and_directory_conflict_value0', value0=f'{name}'))
 
 
 def _extract_zip(source: Path, destination: Path, cancelled: Event | None = None) -> None:
@@ -108,9 +110,9 @@ def _extract_zip(source: Path, destination: Path, cancelled: Event | None = None
         for entry in entries:
             mode = entry.external_attr >> 16
             if stat.S_ISLNK(mode) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)):
-                raise ArchiveError(f"Archive links and special files are unsupported: {entry.filename}")
+                raise ArchiveError(t('archive_links_and_special_files_are_unsupported_value0', value0=f'{entry.filename}'))
             if entry.flag_bits & 1:
-                raise ArchiveError("Password-protected archives are unsupported.")
+                raise ArchiveError(t('password_protected_archives_are_unsupported'))
         for entry in entries:
             check_cancelled(cancelled)
             target = destination / safe_relative_path(entry.filename)
@@ -127,21 +129,21 @@ def _extract_seven_zip(source: Path, destination: Path, cancelled: Event | None 
     records = []
     for block in re.split(r"\r?\n\s*\r?\n", listing.strip()):
         record = dict(line.split(" = ", 1) for line in block.splitlines() if " = " in line)
-        if "Path" in record:
+        if t('path') in record:
             records.append(record)
     if not records:
-        raise ArchiveError("The archive is empty or its file list could not be read.")
-    _validate_entries([(record["Path"], record.get("Folder") == "+" or "D" in record.get("Attributes", "")) for record in records])
+        raise ArchiveError(t('the_archive_is_empty_or_its_file_list_could_not_be_read'))
+    _validate_entries([(record[t('path')], record.get(t('folder')) == "+" or "D" in record.get(t('attributes'), "")) for record in records])
     for record in records:
-        attributes = record.get("Attributes", "")
-        if any(record.get(key) for key in ("Symbolic Link", "Hard Link", "Copy Link")) or record.get("Alternate Stream") == "+" or "L" in attributes:
-            raise ArchiveError(f"Archive links are unsupported: {record['Path']}")
-        if record.get("Encrypted") == "+":
-            raise ArchiveError("Password-protected archives are unsupported.")
+        attributes = record.get(t('attributes'), "")
+        if any(record.get(key) for key in (t('symbolic_link'), t('hard_link'), t('copy_link'))) or record.get(t('alternate_stream')) == "+" or "L" in attributes:
+            raise ArchiveError(t('archive_links_are_unsupported_value0', value0=f"{record['Path']}"))
+        if record.get(t('encrypted')) == "+":
+            raise ArchiveError(t('password_protected_archives_are_unsupported'))
     _run_seven_zip(["x", "-y", "-sccUTF-8", "-spd", f"-o{destination.resolve()}", "--", str(source.resolve())], cancelled)
     for path in destination.rglob("*"):
         if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
-            raise ArchiveError(f"Archive links are unsupported: {path.name}")
+            raise ArchiveError(t('archive_links_are_unsupported_value0', value0=f'{path.name}'))
 
 
 def extract_archive(source: Path, destination: Path, cancelled: Event | None = None) -> None:
@@ -151,4 +153,4 @@ def extract_archive(source: Path, destination: Path, cancelled: Event | None = N
         else:
             _extract_seven_zip(source, destination, cancelled)
     except (OSError, zipfile.BadZipFile, RuntimeError, subprocess.SubprocessError) as exc:
-        raise ArchiveError(f"Cannot extract {source.name}: {exc}") from exc
+        raise ArchiveError(t('cannot_extract_value0_value1', value0=f'{source.name}', value1=f'{exc}')) from exc

@@ -1,488 +1,430 @@
 from __future__ import annotations
 
-import io
-import tempfile
+import json
 import unittest
+from unittest.mock import patch
+
+from mod_manager import links, storage
+from mod_manager.collection_utils import paginate
+from mod_manager.platform_utils import is_junction
 from pathlib import Path
-from unittest.mock import Mock, patch
-
-from mod_manager.cli import run_cli
-from mod_manager.models import ModItem
-
-_FAKE_SRC = Path(tempfile.gettempdir()) / "mm_test_source"
-_FAKE_DEST = Path(tempfile.gettempdir()) / "mm_test_game"
+from mod_manager.storage_policy import storage_policy
 
 
-class CliRequestTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.cfg = {
-            "game_mods_dir": str(_FAKE_DEST),
-            "mods_source_dir": str(_FAKE_SRC),
-            "page_size": 10,
-            "gui_theme": "system",
-        }
+from tests.cli_support import CliEnvironment
 
-    def run_request(self, argv):
-        out = io.StringIO()
-        with patch("mod_manager.cli.load_config", return_value=self.cfg), patch("sys.stdout", out):
-            code = run_cli(argv)
-        return code, out.getvalue()
 
-    def mod_item(self, name: str, installed: bool = False) -> ModItem:
-        return ModItem(
-            name=name,
-            src=_FAKE_SRC / name,
-            dest=_FAKE_DEST / name,
-            is_dir=False,
-            installed=installed,
-        )
+class CliRequestTests(CliEnvironment, unittest.TestCase):
+    def test_help_and_version_never_load_configuration(self):
+        for argv in ([], ["help"], ["help", "mods", "toggle"], ["--help"], ["--version"], ["mods"], ["games"], ["presets"], ["settings"], ["broken"]):
+            with self.subTest(argv=argv), patch("mod_manager.cli.load_config", side_effect=AssertionError("loaded")):
+                code, output, errors = self.request(argv)
+                self.assertEqual(code, 0, errors)
+                self.assertTrue(output)
+        self.assertIn("Install inactive selections", self.request(["help", "mods", "toggle"])[1])
 
-    def test_help_request_prints_nested_command_help_without_loading_config(self):
-        out = io.StringIO()
-        with patch("mod_manager.cli.load_config") as load_config, patch("sys.stdout", out):
-            code = run_cli(["help", "mods", "toggle"])
+    def test_help_rejects_unknown_and_extra_topics(self):
+        for argv in (["help", "missing"], ["help", "mods", "missing"], ["help", "mods", "toggle", "extra"]):
+            self.assertEqual(self.request(argv)[0], 1)
 
-        self.assertEqual(code, 0)
-        self.assertIn("usage: mod-manager.py mods toggle", out.getvalue())
-        load_config.assert_not_called()
+    def test_every_parser_has_descriptions_and_option_help(self):
+        output = self.request(["help", "mods", "list"])[1]
+        for text in ("Filter", "Page number", "descending", "favorites"):
+            self.assertIn(text, output)
+        self.assertIn("respecting filters", self.request(["help", "mods", "install"])[1])
 
-    def test_mods_list_request_prints_mod_page(self):
-        shown = [self.mod_item("weapon.pak", installed=True), self.mod_item("ui.pak")]
+    def test_listing_search_label_page_and_order_share_filters(self):
+        self.add_mods("a.pak", "b.pak", "c.pak")
+        self.assertIn("a.pak", self.request(["mods", "list"])[1])
+        self.assertNotIn("c.pak", self.request(["mods", "list"])[1])
+        self.assertIn("c.pak", self.request(["mods", "page", "2"])[1])
+        self.assertNotIn("a.pak", self.request(["mods", "search", "b"])[1])
+        self.assertEqual(self.request(["mods", "label-add", "combat", "2"])[0], 0)
+        self.assertIn("b.pak", self.request(["mods", "label", "combat"])[1])
+        self.assertNotIn("a.pak", self.request(["mods", "label", "combat"])[1])
+        self.assertIn("1. [ ] c.pak", self.request(["mods", "order", "-name"])[1])
+        self.assertEqual(self.request(["mods", "list", "--order", "-last_managed"])[0], 0)
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {"weapon.pak": "combat"}),
-        ) as mods_view:
-            code, output = self.run_request(["mods", "list", "--search", "pak", "--label", "combat"])
+    def test_install_and_uninstall_respect_page_search_and_source(self):
+        self.add_mods("a.pak", "b.pak", "c.pak")
+        original = {path.name: path.read_bytes() for path in self.source.iterdir()}
+        self.assertEqual(self.request(["mods", "install", "--page", "2"])[0], 0)
+        self.assertEqual([path.name for path in self.game.iterdir()], ["c.pak"])
+        self.assertEqual(self.request(["mods", "uninstall", "--search", "c"])[0], 0)
+        self.assertEqual(list(self.game.iterdir()), [])
+        self.assertEqual({path.name: path.read_bytes() for path in self.source.iterdir()}, original)
 
-        self.assertEqual(code, 0)
-        mods_view.assert_called_once_with(self.cfg, 1, "combat", "pak", "default")
-        self.assertIn("Page 1/1", output)
-        self.assertIn("1. [X] weapon.pak [combat]", output)
-        self.assertIn("2. [ ] ui.pak [-]", output)
+    def test_toggle_deduplicates_indexes_and_updates_managed_state(self):
+        self.add_mods("a.pak", "b.pak")
+        self.assertEqual(self.request(["mods", "toggle", "1,1"])[0], 0)
+        self.assertTrue((self.game / "a.pak").exists())
+        self.assertFalse((self.game / "b.pak").exists())
+        self.assertEqual(storage.load_mod_records()["a.pak"]["state"], "installed")
+        self.assertEqual(self.request(["mods", "toggle", "1"])[0], 0)
+        self.assertFalse((self.game / "a.pak").exists())
+        self.assertEqual(storage.load_mod_records()["a.pak"]["state"], "uninstalled")
 
-    def test_mods_install_request_passes_filters_and_returns_error_on_failures(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.apply_mods_page",
-            return_value=(2, 3, 1),
-        ) as apply_mods_page:
-            code, output = self.run_request(
-                ["mods", "install", "--page", "2", "--label", "combat", "--search", "pak", "--order", "cd"]
-            )
+    def test_label_and_favorite_actions_use_the_filtered_page(self):
+        self.add_mods("a.pak", "b.pak", "c.pak")
+        self.assertEqual(self.request(["mods", "label-add", "combat", "1", "--page", "2"])[0], 0)
+        self.assertEqual(storage.load_labels(), {"c.pak": "combat"})
+        self.assertEqual(self.request(["mods", "favorite-add", "1", "--filter-label", "combat"])[0], 0)
+        output = self.request(["mods", "list", "--favorite"])[1]
+        self.assertIn("c.pak", output)
+        self.assertNotIn("a.pak", output)
+        self.assertEqual(self.request(["mods", "install", "--favorite"])[0], 0)
+        self.assertEqual([path.name for path in self.game.iterdir()], ["c.pak"])
+        self.assertEqual(self.request(["mods", "uninstall", "--favorite"])[0], 0)
+        self.assertFalse((self.game / "c.pak").exists())
+        self.assertEqual(self.request(["mods", "favorite-remove", "1", "--favorite"])[0], 0)
+        self.assertEqual(storage.load_favorites(storage.load_config()), set())
+        self.assertEqual(self.request(["mods", "label-remove", "combat", "1", "--filter-label", "combat"])[0], 0)
+        self.assertEqual(storage.load_labels(), {})
 
+    def test_invalid_selection_refuses_the_whole_operation(self):
+        self.add_mods("a.pak", "b.pak")
+        for command, operands in (("toggle", ["1,3"]), ("label-add", ["combat", "1,3"]), ("favorite-add", ["1,3"])):
+            before = self.snapshot()
+            self.assertEqual(self.request(["mods", command, *operands])[0], 2)
+            self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.request(["mods", "toggle", "1", "--page", "99"])[0], 2)
+        self.assertEqual(list(self.game.iterdir()), [])
+
+    def test_invalid_input_is_usage_error(self):
+        for argv in (["mods", "toggle", "0"], ["mods", "toggle", "1,bad"], ["mods", "toggle", "1,"], ["mods", "toggle", ""], ["mods", "list", "--page", "0"], ["mods", "page", "-1"], ["mods", "list", "--order", "newest"], ["settings", "set", "--mods-source-dir", "x"]):
+            with self.subTest(argv=argv):
+                code, _output, error = self.request(argv)
+                self.assertEqual(code, 2, error)
+                self.assertTrue(error)
+
+    def test_copy_overwrite_requires_flag_and_preserves_source(self):
+        self.add_mods("a.pak")
+        (self.game / "a.pak").write_text("old", encoding="utf-8")
+        self.assertEqual(self.request(["mods", "install"])[0], 0)
+        self.assertEqual((self.game / "a.pak").read_text(), "old")
+        self.cfg["game_profiles"][0]["mod_group_extensions"] = ".pak,.utoc"
+        self.add_mods("a.utoc")
+        self.write_config()
+        self.assertEqual(self.request(["mods", "install"])[0], 1)
+        self.assertEqual((self.game / "a.pak").read_text(), "old")
+        self.assertEqual(self.request(["mods", "install", "--overwrite"])[0], 0)
+        self.assertEqual((self.game / "a.pak").read_text(), "a.pak")
+        self.assertEqual((self.source / "a.pak").read_text(), "a.pak")
+
+    def test_partial_install_reports_failure_and_marks_only_success(self):
+        self.add_mods("a.pak", "b.pak")
+        real_copy = links.copy_path
+        def copy(source, destination, overwrite=False):
+            return (False, "access denied") if source.name == "b.pak" else real_copy(source, destination, overwrite)
+        with patch("mod_manager.links.copy_path", side_effect=copy):
+            code, output, error = self.request(["mods", "install"])
         self.assertEqual(code, 1)
-        apply_mods_page.assert_called_once_with(self.cfg, 2, "combat", "pak", "created_date", False, False)
-        self.assertIn("Installed 2/3 on page 2. Errors: 1.", output)
+        self.assertIn("Installed 1/2", output)
+        self.assertIn("access denied", error)
+        records = storage.load_mod_records()
+        self.assertEqual(records["a.pak"]["state"], "installed")
+        self.assertNotIn("b.pak", records)
 
-    def test_mods_search_command_uses_text_as_search_filter(self):
-        shown = [self.mod_item("hud.pak")]
+    def test_uninstall_and_toggle_failures_return_nonzero(self):
+        self.add_mods("a.pak")
+        self.request(["mods", "install"])
+        for command, operands in (("uninstall", []), ("toggle", ["1"])):
+            with self.subTest(command=command), patch("mod_manager.mods.remove_path", return_value=(False, "locked")):
+                code, output, errors = self.request(["mods", command, *operands])
+            self.assertEqual(code, 1)
+            self.assertIn("Errors: 1", output)
+            self.assertIn("locked", errors)
+            self.assertTrue((self.game / "a.pak").exists())
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 2, 2, {}),
-        ) as mods_view:
-            code, output = self.run_request(["mods", "search", "hud", "--page", "2", "--label", "ui", "--order", "default"])
+    def test_settings_updates_are_validated_together_and_preserve_game_values(self):
+        before = self.config.read_bytes()
+        self.assertEqual(self.request(["settings", "set", "--gui-font-size", "12", "--page-size", "0"])[0], 2)
+        self.assertEqual(self.config.read_bytes(), before)
+        code, _output, error = self.request(["settings", "set", "--page-size", "25", "--gui-theme", "dark", "--archive-import-mode", "separate", "--archive-preserve-structure", "--import-ignore-extensions", ".txt"])
+        self.assertEqual(code, 0, error)
+        cfg = storage.load_config()
+        self.assertEqual(cfg["page_size"], 25)
+        self.assertEqual(cfg["gui_theme"], "dark")
+        self.assertEqual(cfg["mods_source_dir"], str(self.source))
+        self.assertEqual(cfg["archive_import_mode"], "separate")
+        self.assertIs(cfg["archive_preserve_structure"], True)
+        self.assertEqual(cfg["import_ignore_extensions"], ".txt")
 
-        self.assertEqual(code, 0)
-        mods_view.assert_called_once_with(self.cfg, 2, "ui", "hud", "default")
-        self.assertIn("Page 2/2", output)
-
-    def test_mods_label_command_uses_text_as_label_filter(self):
-        shown = [self.mod_item("combat.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {"combat.pak": "combat"}),
-        ) as mods_view:
-            code, _output = self.run_request(["mods", "label", "combat", "--search", "pak", "--order", "created date"])
-
-        self.assertEqual(code, 0)
-        mods_view.assert_called_once_with(self.cfg, 1, "combat", "pak", "created_date")
-
-    def test_mods_page_and_order_commands_translate_positionals_to_view_options(self):
-        shown = [self.mod_item("a.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 4, 5, {}),
-        ) as mods_view:
-            page_code, page_output = self.run_request(["mods", "page", "4", "--search", "a", "--label", "core"])
-
-        self.assertEqual(page_code, 0)
-        mods_view.assert_called_once_with(self.cfg, 4, "core", "a", "default")
-        self.assertIn("Page 4/5", page_output)
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {}),
-        ) as mods_view:
-            order_code, _order_output = self.run_request(["mods", "order", "cd", "--page", "3"])
-
-        self.assertEqual(order_code, 0)
-        mods_view.assert_called_once_with(self.cfg, 3, "", "", "created_date")
-
-    def test_mods_toggle_request_parses_comma_separated_indexes(self):
-        shown = [self.mod_item("a.pak"), self.mod_item("b.pak"), self.mod_item("c.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {}),
-        ), patch(
-            "mod_manager.cli.toggle_mods_by_indexes",
-            return_value="Installed 2/2. Errors: 0.",
-        ) as toggle_mods:
-            code, output = self.run_request(["mods", "toggle", "1,3", "--page", "2", "--search", "pak"])
-
-        self.assertEqual(code, 0)
-        toggle_mods.assert_called_once_with(shown, [1, 3], False)
-        self.assertIn("Installed 2/2. Errors: 0.", output)
-
-    def test_mods_uninstall_request_passes_view_options(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.deactivate_mods_page",
-            return_value=(5, 7),
-        ) as deactivate_page:
-            code, output = self.run_request(
-                ["mods", "uninstall", "--page", "5", "--label", "old", "--search", "pak", "--order", "default"]
-            )
-
-        self.assertEqual(code, 0)
-        deactivate_page.assert_called_once_with(self.cfg, 5, "old", "pak", "default")
-        self.assertIn("Uninstalled 7 on page 5.", output)
-
-    def test_mods_label_add_request_maps_indexes_to_visible_mod_names(self):
-        shown = [self.mod_item("a.pak"), self.mod_item("b.pak"), self.mod_item("c.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {}),
-        ), patch(
-            "mod_manager.cli.add_label_to_mods",
-            return_value="Label added: combat -> a.pak, c.pak",
-        ) as add_label:
-            code, output = self.run_request(["mods", "label-add", "combat", "1,3"])
-
-        self.assertEqual(code, 0)
-        add_label.assert_called_once_with("combat", ["a.pak", "c.pak"])
-        self.assertIn("Label added: combat -> a.pak, c.pak", output)
-
-    def test_mods_label_remove_request_uses_filter_label_option(self):
-        shown = [self.mod_item("a.pak"), self.mod_item("b.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 2, 2, {"a.pak": "combat"}),
-        ) as mods_view, patch(
-            "mod_manager.cli.remove_label_from_mods",
-            return_value="Label removed: combat -> a.pak",
-        ) as remove_label:
-            code, output = self.run_request(
-                ["mods", "label-remove", "combat", "1", "--page", "2", "--filter-label", "combat", "--search", "pak"]
-            )
-
-        self.assertEqual(code, 0)
-        mods_view.assert_called_once_with(self.cfg, 2, "combat", "pak", "default")
-        remove_label.assert_called_once_with("combat", ["a.pak"])
-        self.assertIn("Label removed: combat -> a.pak", output)
-
-    def test_mods_label_add_returns_error_for_invalid_index(self):
-        shown = [self.mod_item("a.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {}),
-        ):
-            code, output = self.run_request(["mods", "label-add", "combat", "9"])
-
-        self.assertEqual(code, 1)
-        self.assertIn("Invalid index.", output)
-
-    def test_favorite_filter_and_actions_use_the_combined_view(self):
-        shown = [self.mod_item("favorite.pak")]
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=(shown, shown, 1, 1, {"favorite.pak": "combat"}),
-        ) as mods_view, patch(
-            "mod_manager.cli.add_favorites_to_mods",
-            return_value="Favorites added: favorite.pak",
-        ) as add_favorites:
-            code, output = self.run_request(
-                [
-                    "mods",
-                    "favorite-add",
-                    "1",
-                    "--filter-label",
-                    "combat",
-                    "--search",
-                    "pak",
-                    "--favorite",
-                ]
-            )
-
-        self.assertEqual(code, 0)
-        mods_view.assert_called_once_with(self.cfg, 1, "combat", "pak", "default", True)
-        add_favorites.assert_called_once_with(self.cfg, ["favorite.pak"])
-        self.assertIn("Favorites added: favorite.pak", output)
-
-    def test_a_copy_profile_refuses_to_replace_existing_files_without_the_flag(self):
-        self.cfg["install_mode"] = "copy"
-        taken = self.mod_item("weapon.pak")
-        taken.copy_install = True
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view", return_value=([taken], [taken], 1, 1, {})
-        ), patch("mod_manager.cli.existing_targets", return_value=["weapon.pak"]), patch(
-            "mod_manager.cli.apply_mods_page"
-        ) as apply_mods:
-            code, output = self.run_request(["mods", "install"])
-
-        self.assertEqual(code, 1)
-        apply_mods.assert_not_called()
-        self.assertIn("1 file(s) already exist", output)
-        self.assertIn("--overwrite", output)
-
-    def test_the_overwrite_flag_reaches_the_page_operation(self):
-        self.cfg["install_mode"] = "copy"
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)
-        ) as apply_mods:
-            code, _output = self.run_request(["mods", "install", "--overwrite"])
-
-        self.assertEqual(code, 0)
-        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", False, True)
-
-    def test_a_link_profile_installs_without_checking_for_existing_files(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.existing_targets"
-        ) as existing, patch("mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)):
-            code, _output = self.run_request(["mods", "install"])
-
-        self.assertEqual(code, 0)
-        existing.assert_not_called()
-
-    def test_install_favorite_filter_reaches_page_operation(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)
-        ) as apply_mods:
-            code, _output = self.run_request(["mods", "install", "--favorite"])
-
-        self.assertEqual(code, 0)
-        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", True, False)
-
-    def test_settings_set_request_saves_changed_values(self):
-        saved = Mock()
-        with patch("mod_manager.cli.save_config", saved):
-            code, output = self.run_request(["settings", "set", "--page-size", "25", "--gui-theme", "dark"])
-
-        self.assertEqual(code, 0)
-        self.assertEqual(self.cfg["page_size"], 25)
-        self.assertEqual(self.cfg["gui_theme"], "dark")
-        saved.assert_called_once_with(self.cfg)
-        self.assertIn("Saved.", output)
-
-    def test_settings_set_request_saves_archive_import_defaults(self):
-        with patch("mod_manager.cli.save_config") as save:
-            code, _output = self.run_request([
-                "settings", "set", "--archive-import-mode", "separate",
-                "--archive-preserve-structure", "--import-ignore-extensions", ".txt,.md",
-            ])
-        self.assertEqual(code, 0)
-        saved = save.call_args.args[0]
-        self.assertEqual(saved["archive_import_mode"], "separate")
-        self.assertTrue(saved["archive_preserve_structure"])
-        self.assertEqual(saved["import_ignore_extensions"], ".txt,.md")
-
-    def test_settings_set_request_rejects_per_game_flags(self):
-        for flag in ("--game-mods-dir", "--mods-source-dir", "--mod-extensions", "--link-prefix"):
-            with self.subTest(flag=flag), patch("sys.stderr", io.StringIO()):
-                with self.assertRaises(SystemExit) as caught:
-                    self.run_request(["settings", "set", flag, "x"])
-                self.assertEqual(caught.exception.code, 2)
-
-    def test_settings_set_request_leaves_per_game_values_alone(self):
-        with patch("mod_manager.cli.save_config"):
-            code, _output = self.run_request(["settings", "set", "--page-size", "25"])
-
-        self.assertEqual(code, 0)
-        self.assertEqual(self.cfg["game_mods_dir"], str(_FAKE_DEST))
-        self.assertEqual(self.cfg["mods_source_dir"], str(_FAKE_SRC))
-
-    def test_settings_show_request_prints_sorted_config_without_saving(self):
-        with patch("mod_manager.cli.save_config") as save_config:
-            code, output = self.run_request(["settings", "show"])
-
-        self.assertEqual(code, 0)
-        save_config.assert_not_called()
+    def test_settings_show_and_empty_set_do_not_save(self):
+        before = self.config.read_bytes()
+        output = self.request(["settings", "show"])[1]
         self.assertLess(output.index("game_mods_dir:"), output.index("mods_source_dir:"))
-        self.assertIn("page_size: 10", output)
+        self.assertEqual(self.request(["settings", "set"])[0], 0)
+        self.assertEqual(self.config.read_bytes(), before)
 
-    def test_settings_set_request_with_no_options_does_not_save(self):
-        with patch("mod_manager.cli.save_config") as save_config:
-            code, output = self.run_request(["settings", "set"])
+    def test_presets_save_list_toggle_delete(self):
+        self.add_mods("a.pak")
+        self.request(["mods", "install"])
+        self.assertEqual(self.request(["presets", "save", "My loadout"])[0], 0)
+        self.assertIn("My loadout", self.request(["presets", "list"])[1])
+        self.assertIn("My loadout", self.request(["presets", "page", "1"])[1])
+        self.assertEqual(self.request(["presets", "toggle", "1"])[0], 0)
+        self.assertFalse((self.game / "a.pak").exists())
+        self.assertEqual(self.request(["presets", "toggle", "1"])[0], 0)
+        self.assertTrue((self.game / "a.pak").exists())
+        self.assertEqual(self.request(["presets", "delete", "1"])[0], 0)
+        self.assertEqual(storage.load_presets(), {})
 
-        self.assertEqual(code, 0)
-        save_config.assert_not_called()
-        self.assertIn("Nothing changed.", output)
+    def test_preset_delete_rejects_mixed_invalid_selection(self):
+        self.presets.write_text(json.dumps({"one": ["a.pak"]}), encoding="utf-8")
+        before = self.snapshot()
+        self.assertEqual(self.request(["presets", "delete", "1,2"])[0], 2)
+        self.assertEqual(self.snapshot(), before)
 
-    def test_presets_list_and_page_requests_use_page_options(self):
-        presets = {"core": ["a.pak"], "extra": ["b.pak"]}
+    def test_deleted_legacy_preset_stays_deleted_after_reload(self):
+        self.presets.write_text(json.dumps({"one": ["a.pak"], "two": ["b.pak"]}), encoding="utf-8")
+        self.assertEqual(self.request(["presets", "delete", "1"])[0], 0)
+        for _ in range(2):
+            self.assertEqual(storage.load_presets(), {"two": ["b.pak"]})
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.presets_view",
-            return_value=(presets, list(presets), ["extra"], 2, 2),
-        ) as presets_view, patch(
-            "mod_manager.cli.mods_view",
-            return_value=([self.mod_item("b.pak", installed=True)], [], 1, 1, {}),
-        ):
-            list_code, list_output = self.run_request(["presets", "list", "--page", "2"])
+    def test_removed_legacy_label_stays_removed_and_preserves_favorites(self):
+        self.add_mods("a.pak")
+        favorites = {"test-game": ["a.pak"]}
+        self.labels.write_text(json.dumps({"a.pak": "combat", storage.FAVORITES_KEY: favorites}), encoding="utf-8")
+        self.assertEqual(self.request(["mods", "label-remove", "combat", "1"])[0], 0)
+        self.assertEqual(storage.load_labels(), {})
+        self.assertEqual(storage.load_labels(), {})
+        self.assertEqual(json.loads(self.labels.read_text())[storage.FAVORITES_KEY], favorites)
 
-        self.assertEqual(list_code, 0)
-        presets_view.assert_called_once_with(self.cfg, 2)
-        self.assertIn("Page 2/2", list_output)
-        self.assertIn("1. [X] extra [1]", list_output)
+    def test_unsafe_profile_identifier_is_refused_without_writes(self):
+        self.cfg["game_profiles"][0]["id"] = "../outside"
+        self.write_config()
+        before = self.snapshot()
+        self.assertEqual(self.request(["presets", "save", "one"])[0], 1)
+        self.assertEqual(self.snapshot(), before)
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.presets_view",
-            return_value=(presets, list(presets), ["core"], 3, 3),
-        ) as presets_view, patch(
-            "mod_manager.cli.mods_view",
-            return_value=([], [], 1, 1, {}),
-        ):
-            page_code, page_output = self.run_request(["presets", "page", "3"])
-
-        self.assertEqual(page_code, 0)
-        presets_view.assert_called_once_with(self.cfg, 3)
-        self.assertIn("Page 3/3", page_output)
-
-    def test_presets_save_and_delete_requests_dispatch_options(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.save_preset_from_installed",
-            return_value=(True, "Preset 'core' saved (2 mods)"),
-        ) as save_preset:
-            save_code, save_output = self.run_request(["presets", "save", "core"])
-
-        self.assertEqual(save_code, 0)
-        save_preset.assert_called_once_with(self.cfg, "core")
-        self.assertIn("Preset 'core' saved (2 mods)", save_output)
-
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.delete_presets_by_indexes",
-            return_value=(2, ["missing"]),
-        ) as delete_presets:
-            delete_code, delete_output = self.run_request(["presets", "delete", "1,3", "--page", "4"])
-
-        self.assertEqual(delete_code, 0)
-        delete_presets.assert_called_once_with(self.cfg, 4, [1, 3])
-        self.assertIn("Deleted: 2. Missing: missing", delete_output)
-
-    def test_presets_toggle_request_prints_messages_and_returns_error_on_failures(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.mods_view",
-            return_value=([], [], 1, 1, {}),
-        ), patch(
-            "mod_manager.cli.toggle_presets_by_indexes",
-            return_value=("Installed: 1, Errors: 1", ["missing.pak: ERR"], True),
-        ) as toggle_presets:
-            code, output = self.run_request(["presets", "toggle", "2,4", "--page", "3"])
-
+    def test_missing_preset_member_is_reported_as_failure(self):
+        self.presets.write_text(json.dumps({"one": ["missing.pak"]}), encoding="utf-8")
+        code, _output, errors = self.request(["presets", "toggle", "1"])
         self.assertEqual(code, 1)
-        toggle_presets.assert_called_once_with(self.cfg, 3, [2, 4], set(), False)
-        self.assertIn("Installed: 1, Errors: 1", output)
-        self.assertIn(" -  missing.pak: ERR", output)
+        self.assertIn("missing.pak", errors)
+        self.assertEqual(self.presets.read_text(), json.dumps({"one": ["missing.pak"]}))
 
-    def test_open_requests_dispatch_source_and_game_targets(self):
-        with patch("mod_manager.cli.open_folder", return_value=(True, "Opened")) as open_folder:
-            source_code, source_output = self.run_request(["open", "source"])
+    def test_preset_deactivation_failure_is_not_success(self):
+        self.add_mods("a.pak")
+        self.request(["mods", "install"])
+        self.request(["presets", "save", "one"])
+        with patch("mod_manager.mods.remove_path", return_value=(False, "locked")):
+            code, _output, errors = self.request(["presets", "toggle", "1"])
+        self.assertEqual(code, 1)
+        self.assertIn("locked", errors)
 
-        self.assertEqual(source_code, 0)
-        open_folder.assert_called_once_with(str(_FAKE_SRC))
-        self.assertIn("Open source folder: OK", source_output)
+    def test_metadata_commands_work_without_game_folders(self):
+        self.source.rmdir()
+        self.game.rmdir()
+        self.presets.write_text(json.dumps({"one": ["a.pak"]}), encoding="utf-8")
+        self.assertEqual(self.request(["presets", "list"])[0], 0)
+        self.assertIn("[?]", self.request(["presets", "list"])[1])
+        self.assertEqual(self.request(["presets", "delete", "1"])[0], 0)
+        for argv in (["games", "list"], ["settings", "show"]):
+            self.assertEqual(self.request(argv)[0], 0)
+        self.assertFalse(self.source.exists())
+        self.assertFalse(self.game.exists())
 
-        with patch("mod_manager.cli.open_folder", return_value=(False, "denied")) as open_folder:
-            game_code, game_output = self.run_request(["open", "game"])
+    def test_read_commands_do_not_create_metadata_or_migrate_legacy(self):
+        self.add_mods("a.pak")
+        self.labels.write_text(json.dumps({"a.pak": "combat"}), encoding="utf-8")
+        self.presets.write_text(json.dumps({"one": ["a.pak"]}), encoding="utf-8")
+        before = self.snapshot()
+        for argv in (["mods", "list"], ["presets", "list"], ["broken", "list"], ["settings", "show"], ["games", "list"], ["doctor"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.request(argv)[0], 0)
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse(self.profiles.exists())
 
-        self.assertEqual(game_code, 1)
-        open_folder.assert_called_once_with(str(_FAKE_DEST))
-        self.assertIn("Open game folder: ERR", game_output)
+    def test_empty_environment_remains_usable_without_writes(self):
+        self.config.unlink()
+        for argv in (["games", "list"], ["settings", "show"], ["presets", "list"]):
+            self.assertEqual(self.request(argv)[0], 0)
+        for argv in (["mods", "list"], ["mods", "install"], ["broken", "list"], ["doctor"]):
+            code, output, errors = self.request(argv)
+            self.assertEqual(code, 1)
+            self.assertNotIn("Traceback", output + errors)
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.profiles.exists())
 
-    def test_broken_list_request_prints_items(self):
-        broken = [self.mod_item("missing-a.pak", installed=True)]
+    def test_invalid_config_is_preserved(self):
+        for value in ("{broken", "[]", "null", '{"page_size":0}', '{"page_size":"bad"}', '{"game_profiles":42}', '{"game_profiles":[1]}', '{"mods_source_dir":42}', '{"mod_recursive_scan":"yes"}'):
+            with self.subTest(value=value):
+                self.config.write_text(value, encoding="utf-8")
+                code, output, errors = self.request(["settings", "set", "--page-size", "20"])
+                self.assertEqual(code, 1)
+                self.assertTrue(errors)
+                self.assertNotIn("Traceback", output + errors)
+                self.assertEqual(self.config.read_text(), value)
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.list_broken_links",
-            return_value=broken,
-        ):
-            code, output = self.run_request(["broken", "list"])
+    def test_invalid_metadata_is_not_silently_replaced(self):
+        for value in ("{broken", "[]", '{"one":{"mods":42}}'):
+            self.presets.write_text(value, encoding="utf-8")
+            self.assertEqual(self.request(["presets", "delete", "1"])[0], 1)
+            self.assertEqual(self.presets.read_text(), value)
 
-        self.assertEqual(code, 0)
-        self.assertIn("1. [!] missing-a.pak (FILE) -> missing source:", output)
+    def test_missing_directories_require_explicit_creation(self):
+        self.source.rmdir()
+        self.game.rmdir()
+        for argv in (["mods", "list"], ["open", "source"], ["doctor"]):
+            self.assertEqual(self.request(argv)[0], 1)
+        code, output, error = self.request(["games", "prepare"])
+        self.assertEqual(code, 0, error)
+        self.assertIn("Missing:", output)
+        self.assertFalse(self.source.exists())
+        self.assertFalse(self.game.exists())
+        self.assertEqual(self.request(["games", "prepare", "--create-dirs"])[0], 0)
+        self.assertTrue(self.source.is_dir())
+        self.assertTrue(self.game.is_dir())
 
-    def test_broken_remove_indexes_request_removes_selected_items_only(self):
-        broken = [
-            self.mod_item("missing-a.pak", installed=True),
-            self.mod_item("missing-b.pak", installed=True),
-            self.mod_item("missing-c.pak", installed=True),
-        ]
+    def test_prepare_rejects_file_path_before_creating_anything(self):
+        self.source.rmdir()
+        self.game.rmdir()
+        self.game.write_text("valuable", encoding="utf-8")
+        self.assertEqual(self.request(["games", "prepare", "--create-dirs"])[0], 1)
+        self.assertFalse(self.source.exists())
+        self.assertEqual(self.game.read_text(), "valuable")
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.list_broken_links",
-            return_value=broken,
-        ), patch("mod_manager.cli.deactivate_mod", return_value=(True, "OK")) as deactivate:
-            code, output = self.run_request(["broken", "remove", "2,99"])
+    def test_overlapping_source_and_game_folders_are_refused(self):
+        self.cfg["game_profiles"][0]["game_mods_dir"] = str(self.source)
+        self.write_config()
+        self.add_mods("a.pak")
+        self.assertEqual(self.request(["mods", "install"])[0], 1)
+        self.assertEqual(self.request(["games", "prepare", "--create-dirs"])[0], 1)
+        self.assertEqual((self.source / "a.pak").read_text(), "a.pak")
 
-        self.assertEqual(code, 0)
-        deactivate.assert_called_once_with(broken[1])
-        self.assertIn("Remove missing-b.pak: OK", output)
+    def test_permission_errors_are_actionable(self):
+        with patch("pathlib.Path.open", side_effect=PermissionError("permission denied")):
+            code, _output, error = self.request(["settings", "show"])
+        self.assertEqual(code, 1)
+        self.assertIn("permission denied", error)
 
-    def test_broken_remove_all_request_removes_each_broken_item(self):
-        broken = [self.mod_item("missing-a.pak", installed=True), self.mod_item("missing-b.pak", installed=True)]
+    def test_failed_atomic_save_preserves_previous_configuration(self):
+        before = self.config.read_bytes()
+        with patch("mod_manager.storage.os.replace", side_effect=PermissionError("locked")):
+            code, _output, error = self.request(["settings", "set", "--page-size", "20"])
+        self.assertEqual(code, 1)
+        self.assertIn("locked", error)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
 
-        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
-            "mod_manager.cli.list_broken_links",
-            return_value=broken,
-        ), patch(
-            "mod_manager.cli.deactivate_mod",
-            side_effect=[(True, "OK"), (False, "Already removed")],
-        ) as deactivate:
-            code, output = self.run_request(["broken", "remove", "--all"])
+    def test_open_never_creates_a_missing_directory(self):
+        with patch("mod_manager.folder_actions.os.startfile", create=True) as startfile:
+            self.assertEqual(self.request(["open", "source"])[0], 0)
+            startfile.assert_called_once_with(str(self.source))
+        self.source.rmdir()
+        self.assertEqual(self.request(["open", "source"])[0], 1)
+        self.assertFalse(self.source.exists())
 
-        self.assertEqual(code, 0)
-        self.assertEqual(deactivate.call_count, 2)
-        self.assertIn("Remove missing-a.pak: OK", output)
-        self.assertIn("Remove missing-b.pak: ERR", output)
+    def test_game_profile_commands_share_persistent_data(self):
+        self.assertEqual(self.request(["games", "add", "Other Game", "--install-mode", "copy"])[0], 0)
+        cfg = storage.load_config()
+        other = cfg["active_game_profile_id"]
+        self.assertNotEqual(other, "test-game")
+        self.assertEqual(self.request(["games", "edit", other, "--name", "Renamed"])[0], 0)
+        self.assertIn("Renamed", self.request(["games", "list"])[1])
+        self.assertEqual(self.request(["games", "select", "test-game"])[0], 0)
+        self.assertEqual(storage.load_config()["active_game_profile_id"], "test-game")
+        self.assertEqual(self.request(["games", "delete", other])[0], 0)
+        self.assertEqual(len(storage.load_config()["game_profiles"]), 1)
+        self.assertEqual(self.request(["games", "select", "absent"])[0], 1)
 
-    def test_commands_that_need_paths_return_error_before_dispatch_when_paths_are_missing(self):
-        with patch("mod_manager.cli.ensure_paths", return_value=False), patch("mod_manager.cli.mods_view") as mods_view:
-            mods_code, _mods_output = self.run_request(["mods", "list"])
+    def test_empty_names_are_refused(self):
+        for argv in (["games", "add", ""], ["presets", "save", " "]):
+            self.assertEqual(self.request(argv)[0], 2)
 
-        self.assertEqual(mods_code, 1)
-        mods_view.assert_not_called()
+    def test_profiles_with_same_name_created_in_one_second_have_independent_ids(self):
+        with patch("mod_manager.storage._now_iso", return_value="2026-10-24 12:00:00"):
+            for _ in range(2):
+                self.assertEqual(self.request(["games", "add", "Same Game"])[0], 0)
+        profiles = storage.load_config()["game_profiles"]
+        self.assertEqual(len({profile["id"] for profile in profiles}), 3)
+        self.assertEqual(storage.load_config()["active_game_profile_id"], profiles[-1]["id"])
 
-        with patch("mod_manager.cli.ensure_paths", return_value=False), patch(
-            "mod_manager.cli.presets_view"
-        ) as presets_view:
-            presets_code, _presets_output = self.run_request(["presets", "list"])
+    def test_deleting_last_profile_does_not_recreate_it_from_legacy_paths(self):
+        self.assertEqual(self.request(["games", "delete", "test-game"])[0], 0)
+        cfg = storage.load_config()
+        self.assertEqual(cfg["game_profiles"], [])
+        self.assertEqual(cfg["active_game_profile_id"], "")
+        self.assertEqual(cfg["mods_source_dir"], "")
+        self.assertTrue(self.source.is_dir())
+        self.assertTrue(self.game.is_dir())
 
-        self.assertEqual(presets_code, 1)
-        presets_view.assert_not_called()
+    def test_link_install_and_uninstall_preserve_source_folder(self):
+        folder = self.source / "FolderMod"
+        folder.mkdir()
+        (folder / "keep.pak").write_text("keep", encoding="utf-8")
+        self.assertEqual(self.request(["games", "edit", "test-game", "--install-mode", "link"])[0], 0)
+        code, _output, error = self.request(["mods", "install"])
+        self.assertEqual(code, 0, error)
+        self.assertTrue((self.game / "FolderMod" / "keep.pak").is_file())
+        self.assertEqual(self.request(["mods", "uninstall"])[0], 0)
+        self.assertEqual((folder / "keep.pak").read_text(), "keep")
+        self.assertFalse((self.game / "FolderMod").exists())
 
-        with patch("mod_manager.cli.ensure_paths", return_value=False), patch(
-            "mod_manager.cli.list_broken_links"
-        ) as list_broken:
-            broken_code, _broken_output = self.run_request(["broken", "list"])
+    def test_broken_remove_requires_an_explicit_selection(self):
+        self.assertEqual(self.request(["broken", "remove"])[0], 2)
+        self.assertEqual(self.request(["broken", "remove", "1", "--all"])[0], 2)
+        self.assertEqual(self.request(["broken", "remove", "--all"])[0], 0)
 
-        self.assertEqual(broken_code, 1)
-        list_broken.assert_not_called()
+    def test_broken_junction_after_source_deletion_is_detected_and_removed(self):
+        target = self.source / "folder"
+        target.mkdir()
+        destination = self.game / "linked"
+        ok, message = links.mklink(target, destination)
+        self.assertTrue(ok, message)
+        target.rmdir()
+        regular = self.game / "regular.pak"
+        regular.write_text("keep", encoding="utf-8")
+        self.assertIn("linked", self.request(["broken", "list"])[1])
+        self.assertEqual(self.request(["broken", "remove", "1"])[0], 0)
+        self.assertFalse(is_junction(destination))
+        self.assertFalse(destination.is_symlink())
+        self.assertEqual(regular.read_text(), "keep")
+        self.assertTrue(self.source.exists())
 
-    def test_invalid_order_request_exits_with_argparse_error(self):
-        with patch("sys.stderr", io.StringIO()):
-            with self.assertRaises(SystemExit) as exc:
-                run_cli(["mods", "list", "--order", "newest"])
+    def test_broken_cleanup_refuses_regular_files_and_live_links(self):
+        target = self.source / "folder"
+        target.mkdir()
+        destination = self.game / "linked"
+        self.assertTrue(links.mklink(target, destination)[0])
+        self.assertFalse(links.unlink_broken_link(destination)[0])
+        regular = self.game / "regular"
+        regular.write_text("keep")
+        self.assertFalse(links.unlink_broken_link(regular)[0])
+        self.assertEqual(regular.read_text(), "keep")
+        self.assertTrue(target.is_dir())
+        self.assertTrue(links.unlink_path(destination)[0])
 
-        self.assertEqual(exc.exception.code, 2)
+    def test_junction_cleanup_supports_python_without_path_is_junction(self):
+        target = self.source / "folder"
+        target.mkdir()
+        destination = self.game / "linked"
+        self.assertTrue(links.mklink(target, destination)[0])
+        target.rmdir()
+        with patch.object(Path, "is_junction", None, create=True):
+            self.assertIn("linked", self.request(["broken", "list"])[1])
+            self.assertEqual(self.request(["broken", "remove", "--all"])[0], 0)
+        self.assertFalse(is_junction(destination))
+        self.assertFalse(destination.is_symlink())
 
+    def test_broken_remove_failure_returns_error(self):
+        with patch("mod_manager.cli.list_broken_links", return_value=[type("Broken", (), {"dest": self.game / "gone"})()]), patch("mod_manager.cli.unlink_broken_link", return_value=(False, "locked")):
+            code, _output, error = self.request(["broken", "remove", "--all"])
+        self.assertEqual(code, 1)
+        self.assertIn("locked", error)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_invalid_page_size_raises_validation_error_in_shared_helper(self):
+        for size in (0, -1, "bad", None):
+            with self.subTest(size=size), self.assertRaisesRegex(ValueError, "Mods per page"):
+                paginate(1, 1, {"page_size": size})
+
+    def test_storage_policy_is_restored_after_failure(self):
+        with self.assertRaises(ValueError), storage_policy():
+            storage.load_json(self.source, {})
+        self.assertEqual(storage.load_json(self.source, {}), {})
+
+    def test_keyboard_interrupt_returns_130(self):
+        with patch("mod_manager.cli.load_config", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.request(["mods", "list"])[0], 130)

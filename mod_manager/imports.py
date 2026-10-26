@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 import shutil
 import os
 import stat
@@ -13,6 +15,7 @@ from .archive_backend import ARCHIVE_EXTENSIONS, ArchiveError, extract_archive, 
 from .import_registry import register_directory_mod
 from .import_io import check_cancelled, copy_import_file
 from .log import logger
+from .progress import report
 from .mods import IMAGE_EXTENSIONS, ensure_mod_records, import_mod_image, parse_extensions, parse_group_extensions
 
 
@@ -71,7 +74,7 @@ def scan_units(root: Path, cfg: dict) -> list[ImportUnit]:
     members = []
     for source in sorted(root.rglob("*"), key=lambda path: path.as_posix().casefold()):
         if source.is_symlink() or (hasattr(source, "is_junction") and source.is_junction()):
-            raise ArchiveError(f"Linked import paths are unsupported: {source.name}")
+            raise ArchiveError(t('linked_import_paths_are_unsupported_value0', value0=f'{source.name}'))
         if not source.is_file() or ignored_file(source, cfg) or source.suffix.lower() in IMAGE_EXTENSIONS:
             continue
         if not show_all and extensions and source.suffix.lower() not in extensions:
@@ -98,6 +101,7 @@ def group_members(members: list[Path], grouped: list[str], directories: set[Path
 
 
 def prepare_archive(source: Path, cfg: dict, cancelled: Event | None = None) -> PreparedArchive:
+    report("progress_preparing_archive", source.name)
     owner = tempfile.TemporaryDirectory(prefix="mods-archive-")
     root = Path(owner.name) / "content"
     root.mkdir()
@@ -106,7 +110,7 @@ def prepare_archive(source: Path, cfg: dict, cancelled: Event | None = None) -> 
         if source.is_dir():
             for path in source.rglob("*"):
                 if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
-                    raise ArchiveError(f"Linked import paths are unsupported: {path.name}")
+                    raise ArchiveError(t('linked_import_paths_are_unsupported_value0', value0=f'{path.name}'))
             shutil.copytree(source, root, dirs_exist_ok=True, copy_function=lambda source, target: copy_import_file(Path(source), Path(target), cancelled))
         else:
             snapshot = Path(owner.name) / f"source{source.suffix.lower()}"
@@ -115,7 +119,7 @@ def prepare_archive(source: Path, cfg: dict, cancelled: Event | None = None) -> 
         check_cancelled(cancelled)
         units = scan_units(root, cfg)
         if not units:
-            raise ArchiveError(f"No supported mod files in {source.name}.")
+            raise ArchiveError(t('no_supported_mod_files_in_value0', value0=f'{source.name}'))
         prepared = PreparedArchive(
             source.name if source.is_dir() else source.stem, root, units, owner,
             str(cfg.get("archive_import_mode") or "together"),
@@ -177,7 +181,8 @@ def resolve_plans(cfg: dict, plans: list[PlannedMod], choose: ConflictResolver, 
     existing = {path.name.casefold() for path in root.iterdir()} if root.exists() else set()
     existing.update(name.casefold() for name in (existing_names or set()))
     accepted = []
-    for plan in plans:
+    for index, plan in enumerate(plans):
+        report("progress_importing_archives", plan.name, index, len(plans))
         safe_relative_path(plan.name)
         taken = existing | {name.casefold() for accepted_plan in accepted for name in accepted_plan.targets} | {"images"}
         names = {name.casefold() for name in plan.targets}
@@ -247,7 +252,7 @@ def _publish_files(cfg: dict, plan: PlannedMod, cancelled: Event | None) -> tupl
         payload.mkdir()
         check_cancelled(cancelled)
         if safe_relative_path(plan.name).name != plan.name or plan.name.casefold() == "images":
-            raise ValueError(f"Invalid mod name: {plan.name}")
+            raise ValueError(t('invalid_mod_name_value0', value0=f'{plan.name}'))
         for relative in plan.directories:
             (payload / safe_relative_path(relative.as_posix())).mkdir(parents=True, exist_ok=True)
         for source, relative in plan.files:
@@ -260,7 +265,7 @@ def _publish_files(cfg: dict, plan: PlannedMod, cancelled: Event | None) -> tupl
             check_cancelled(cancelled)
             if target.exists() or target.is_symlink():
                 if not plan.replace_existing:
-                    raise FileExistsError(f"Already exists: {target.name}")
+                    raise FileExistsError(t('already_exists_value0', value0=f'{target.name}'))
                 backup = workspace / f"backup-{index}"
                 original = next((path for path in root.iterdir() if path.name.casefold() == target.name.casefold()), target)
                 original.rename(backup)
@@ -286,14 +291,14 @@ def _publish_files(cfg: dict, plan: PlannedMod, cancelled: Event | None) -> tupl
                 recovery_errors.append(str(recovery_error))
         if recovery_errors:
             retain_backups = True
-            return False, f"{plan.name}: {exc}. Recovery incomplete. Original data retained at {workspace}. {'; '.join(recovery_errors)}"
+            return False, t('value0_value1_recovery_incomplete_original_data_retained_at_value2_value', value0=f'{plan.name}', value1=f'{exc}', value2=f'{workspace}', value3=f"{'; '.join(recovery_errors)}")
         return False, f"{plan.name}: {exc}"
     finally:
         if not retain_backups:
             try:
                 _remove_import_path(workspace)
             except OSError as exc:
-                logger.warning("Cannot remove import staging directory %s: %s", workspace, exc)
+                logger.warning(t('cannot_remove_import_staging_directory_s_s'), workspace, exc)
     return True, plan.name
 
 
@@ -305,21 +310,23 @@ def publish_plan(cfg: dict, plan: PlannedMod, cancelled: Event | None = None) ->
         try:
             ok, message = import_mod_image(cfg, plan.name, plan.image)
             if not ok:
-                return True, f"{plan.name} (preview failed: {message})"
+                return True, t('value0_preview_failed_value1', value0=f'{plan.name}', value1=f'{message}')
         except Exception as exc:
-            return True, f"{plan.name} (preview failed: {exc})"
+            return True, t('value0_preview_failed_value1', value0=f'{plan.name}', value1=f'{exc}')
     return True, plan.name
 
 
 def execute_plans(cfg: dict, plans: list[PlannedMod], cancelled: Event | None = None) -> tuple[list[str], list[str]]:
     imported, failed = [], []
-    for plan in plans:
+    for index, plan in enumerate(plans):
+        report("progress_importing_archives", plan.name, index, len(plans))
         if cancelled is not None and cancelled.is_set():
-            failed.append("Import cancelled.")
+            failed.append(t('import_cancelled'))
             break
         try:
             ok, message = publish_plan(cfg, plan, cancelled)
         except (OSError, ValueError) as exc:
             ok, message = False, f"{plan.name}: {exc}"
         (imported if ok else failed).append(message)
+        report("progress_importing_archives", plan.name, index + 1, len(plans))
     return imported, failed

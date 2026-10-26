@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...models import ModItem
@@ -7,7 +9,7 @@ from ...mods import mod_image_path
 from .. import icons
 from ..theme import colors, tokens
 
-NO_IMAGE_TEXT = "No image"
+NO_IMAGE_TEXT = t('no_image')
 EMPTY_LABEL = "-"
 
 
@@ -21,6 +23,7 @@ def qcolor(value) -> QtGui.QColor:
 
 class TileDelegate(QtWidgets.QStyledItemDelegate):
     favoriteToggled = QtCore.Signal(str)
+    labelsRequested = QtCore.Signal(object, object)
 
     def __init__(self, cfg: dict, palette: colors.Palette | None = None, parent=None):
         super().__init__(parent)
@@ -53,10 +56,9 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
         painter.save()
         mod = index.data(QtCore.Qt.UserRole)
-        label = index.model().labels.get(mod.name, EMPTY_LABEL)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
         rect = self._content_rect(option)
-        self._draw_acrylic_card(painter, rect, selected)
+        self._draw_card(painter, rect, selected)
 
         image_rect = self._image_rect(rect)
         pixmap = self._pixmap_for(mod, image_rect.size())
@@ -86,17 +88,14 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             self._draw_badge(painter, badge, accent)
             self._draw_badge_check(painter, badge, foreground)
 
-        label_badge_text = self._label_badge_text(label)
-        if label_badge_text:
-            badge = self._label_badge_rect(rect, painter.fontMetrics(), label_badge_text)
+        for badge, text, _label in self._label_badges(option, index):
             self._draw_badge(painter, badge, accent)
             painter.setPen(foreground)
             inset = tokens.TILE_LABEL_TEXT_INSET
-            painter.drawText(badge.adjusted(inset, 0, -inset, 0), QtCore.Qt.AlignCenter, label_badge_text)
+            painter.drawText(badge.adjusted(inset, 0, -inset, 0), QtCore.Qt.AlignCenter, text)
 
         name_badge = self._name_badge_rect(rect, image_rect)
-        self._draw_badge(painter, name_badge, accent)
-        painter.setPen(foreground)
+        painter.setPen(qcolor(self.palette_colors.fg))
         inset = tokens.TILE_NAME_TEXT_INSET
         painter.drawText(
             name_badge.adjusted(inset, 0, -inset, 0),
@@ -107,9 +106,10 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
         if favorite or hovered:
             favorite_rect = self._favorite_rect(image_rect)
+            self._draw_badge(painter, favorite_rect, qcolor(self.palette_colors.panel))
             icon = icons.glyph_icon(
                 "favorite_filled" if favorite else "favorite",
-                foreground,
+                qcolor(self.palette_colors.control_fg),
             )
             icon.paint(painter, favorite_rect, QtCore.Qt.AlignCenter)
         painter.restore()
@@ -120,6 +120,11 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             rect = self._content_rect(option)
             favorite_rect = self._favorite_rect(self._image_rect(rect))
             pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            for badge, _text, label in self._label_badges(option, index):
+                if label is None and badge.contains(pos):
+                    if event.type() == QtCore.QEvent.MouseButtonRelease:
+                        self.labelsRequested.emit(self._labels(index), event.globalPosition().toPoint())
+                    return True
             if mod is not None and favorite_rect.contains(pos):
                 if event.type() == QtCore.QEvent.MouseButtonPress:
                     return True
@@ -135,31 +140,13 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         QtWidgets.QToolTip.hideText()
         return super().helpEvent(event, view, option, index)
 
-    def _draw_acrylic_card(self, painter, rect: QtCore.QRect, selected: bool) -> None:
+    def _draw_card(self, painter, rect: QtCore.QRect, selected: bool) -> None:
         theme = self.palette_colors
         base = qcolor(theme.tile_base_selected if selected else theme.tile_base)
-        border = qcolor(theme.tile_border_selected if selected else theme.tile_border)
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(qcolor(theme.tile_shadow))
-        painter.drawRoundedRect(
-            rect.adjusted(0, tokens.TILE_SHADOW_OFFSET, 0, tokens.TILE_SHADOW_OFFSET),
-            tokens.TILE_CARD_RADIUS,
-            tokens.TILE_CARD_RADIUS,
-        )
-        gradient = QtGui.QLinearGradient(rect.topLeft(), rect.bottomRight())
-        gradient.setColorAt(0, qcolor(theme.tile_shine))
-        gradient.setColorAt(tokens.TILE_GRADIENT_MID, base)
-        gradient.setColorAt(1, qcolor(theme.tile_end))
-        painter.setBrush(gradient)
+        border = self.accent_color if selected else qcolor(theme.tile_border)
+        painter.setBrush(base)
         painter.setPen(QtGui.QPen(border))
         painter.drawRoundedRect(rect, tokens.TILE_CARD_RADIUS, tokens.TILE_CARD_RADIUS)
-        painter.setPen(QtGui.QPen(qcolor(theme.tile_inner)))
-        painter.setBrush(QtCore.Qt.NoBrush)
-        painter.drawRoundedRect(
-            rect.adjusted(tokens.BORDER_WIDTH, tokens.BORDER_WIDTH, -tokens.BORDER_WIDTH, -tokens.BORDER_WIDTH),
-            tokens.TILE_CARD_INNER_RADIUS,
-            tokens.TILE_CARD_INNER_RADIUS,
-        )
 
     def _draw_badge(self, painter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
         painter.setBrush(color)
@@ -227,16 +214,13 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         metrics = QtGui.QFontMetrics(option.font)
         rect = self._content_rect(option)
         image_rect = self._image_rect(rect)
-        label = (index.model().labels.get(mod.name, "") or "").strip()
-        label_badge_text = self._label_badge_text(label)
-        if label_badge_text:
-            label_badge = self._label_badge_rect(rect, metrics, label_badge_text)
-            if label_badge.contains(pos) and label != label_badge_text:
-                return label
+        for badge, text, label in self._label_badges(option, index):
+            if badge.contains(pos):
+                return (label if label != text else "") if label else "\n".join(self._labels(index))
         name_badge = self._name_badge_rect(rect, image_rect)
         favorite_rect = self._favorite_rect(image_rect)
         if favorite_rect.contains(pos):
-            return "Remove from favorites" if mod.name in self.favorites else "Add to favorites"
+            return t('remove_from_favorites') if mod.name in self.favorites else t('add_to_favorites')
         if name_badge.contains(pos):
             elided = self._elided_mod_name(metrics, mod.name, name_badge.width() - tokens.TILE_NAME_TEXT_INSET * 2)
             if elided != mod.name:
@@ -247,13 +231,44 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         mod = index.data(QtCore.Qt.UserRole)
         if mod is None:
             return ""
-        label = (index.model().labels.get(mod.name, "") or "").strip()
-        label_badge_text = self._label_badge_text(label)
-        if not label_badge_text:
-            return ""
+        return next((label or "" for badge, _text, label in self._label_badges(option, index) if badge.contains(pos)), "")
+
+    def _labels(self, index) -> tuple[str, ...]:
+        mod = index.data(QtCore.Qt.UserRole)
+        return index.model().label_memberships.get(mod.name, ()) if mod else ()
+
+    def _label_badges(self, option, index):
+        labels = self._labels(index)
+        if not labels:
+            return []
         rect = self._content_rect(option)
         metrics = QtGui.QFontMetrics(option.font)
-        return label if self._label_badge_rect(rect, metrics, label_badge_text).contains(pos) else ""
+        if len(labels) == 1:
+            text = self._label_badge_text(labels[0])
+            return [(self._label_badge_rect(rect, metrics, text), text, labels[0])]
+        mod = index.data(QtCore.Qt.UserRole)
+        available = rect.width() - tokens.TILE_BADGE_MARGIN * 2
+        if mod.installed:
+            available -= tokens.TILE_CHECK_BADGE_WIDTH + tokens.SPACE_SM
+        entries = []
+        for i, label in enumerate(labels):
+            text = self._label_badge_text(label)
+            width = max(tokens.TILE_LABEL_BADGE_MIN_WIDTH, metrics.horizontalAdvance(text) + tokens.TILE_LABEL_BADGE_PADDING)
+            remaining = len(labels) - i - 1
+            reserve = (metrics.horizontalAdvance(f"+{remaining}") + tokens.TILE_LABEL_BADGE_PADDING + tokens.SPACE_SM) if remaining else 0
+            if width + reserve > available:
+                text = f"+{len(labels) - i}"
+                width = min(available, metrics.horizontalAdvance(text) + tokens.TILE_LABEL_BADGE_PADDING)
+                entries.append((max(1, width), text, None))
+                break
+            entries.append((width, text, label))
+            available -= width + tokens.SPACE_SM
+        x = rect.right() - tokens.TILE_BADGE_MARGIN - sum(width for width, _text, _label in entries) - tokens.SPACE_SM * (len(entries) - 1)
+        badges = []
+        for width, text, label in entries:
+            badges.append((QtCore.QRect(x, rect.top() + tokens.TILE_BADGE_MARGIN, width, tokens.TILE_BADGE_HEIGHT), text, label))
+            x += width + tokens.SPACE_SM
+        return badges
 
     def _pixmap_for(self, mod: ModItem, size: QtCore.QSize) -> QtGui.QPixmap:
         key = (mod.name, max(size.width(), size.height()))

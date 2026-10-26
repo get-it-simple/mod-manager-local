@@ -1,77 +1,65 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 MODS_TOOLBAR_SECTIONS = (
-    ("game", "Game", ()),
-    ("filter", "Search", (
-        ("search", "filter_apply", "Apply search, label and favorite filters"),
-        ("clear", "filter_clear", "Clear search, label and favorite filters"),
-        ("favorite_filter", "favorite", "Show favorite mods only"),
+    ("filter", t('search'), (
+        ("search", "filter_apply", t('apply_search_label_and_favorite_filters')),
+        ("clear", "filter_clear", t('clear_search_label_and_favorite_filters')),
+        ("favorite_filter", "favorite", t('show_favorite_mods_only')),
     )),
-    ("order", "Order", ()),
-    ("view", "View", (
-        ("view_list", "list", "Show mods as a list"),
-        ("view_tiles", "image", "Show mods as tiles"),
+    ("order", t('order'), ()),
+    ("view", t('view'), (
+        ("view_list", "list", t('show_mods_as_a_list')),
+        ("view_tiles", "tiles", t('show_mods_as_tiles')),
     )),
-    ("manage", "Manage", (
-        ("presets", "save", "Open presets"),
-        ("settings", "settings", "Open settings"),
-        ("broken", "broken", "Open broken links cleanup"),
-    )),
+    ("import", t('import'), ()),
 )
 
 MODS_ACTION_SECTIONS = (
-    ("page", "Page", ()),
-    ("state", "Install", (
-        ("install_page", "install", "Install all mods on the current page"),
-        ("uninstall_page", "uninstall", "Uninstall all mods on the current page"),
-        ("toggle_selected", "toggle", "Toggle selected mods"),
+    ("state", t('install_action'), (
+        ("install_page", "install", t('install_all_mods_on_the_current_page')),
+        ("uninstall_page", "uninstall", t('uninstall_all_mods_on_the_current_page')),
     )),
-    ("label", "Label", (
-        ("add_label", "add", "Add label to selected mods"),
-        ("remove_label", "remove", "Remove label from selected mods"),
-        ("favorite_selected", "favorite", "Add or remove selected mods from favorites"),
+    ("preview", t('preview'), (
+        ("set_image", "image", t('set_preview_image_for_selected_mods_from_the_clipboard_or_a_file_confirm')),
     )),
-    ("import", "Import", (
-        ("import_files", "import", "Import mod files"),
-        ("import_folder", "folder", "Import a mod folder"),
-        ("set_image", "image", "Set preview image for the selected mod"),
-    )),
+    ("page", t('page'), ()),
 )
 
 PRESETS_TOOLBAR_SECTIONS = (
-    ("page", "Page", ()),
-    ("preset", "Presets", (
-        ("save", "save", "Save the installed mods as a preset"),
-        ("toggle", "toggle", "Toggle selected presets"),
-        ("delete", "delete", "Delete selected presets"),
+    ("preset", t('presets'), (
+        ("save", "save", t('save_the_installed_mods_as_a_preset')),
+        ("toggle", "toggle", t('toggle_selected_presets')),
+        ("delete", "delete", t('delete_selected_presets')),
     )),
+    ("page", t('page'), ()),
 )
 
 BROKEN_TOOLBAR_SECTIONS = (
-    ("cleanup", "Broken links", (
-        ("remove_selected", "remove", "Remove selected broken links"),
-        ("remove_all", "delete", "Remove all broken links"),
+    ("cleanup", t('broken_links'), (
+        ("remove_selected", "remove", t('remove_selected_broken_links')),
+        ("remove_all", "delete", t('remove_all_broken_links')),
     )),
 )
 
 GAMES_TOOLBAR_SECTIONS = (
-    ("choose", "Game", (
-        ("select", "submit", "Select the highlighted game"),
+    ("choose", t('game'), (
+        ("select", "submit", t('select_the_highlighted_game')),
     )),
-    ("profiles", "Profiles", (
-        ("add", "add", "Add a game profile"),
-        ("edit", "edit", "Edit the highlighted game profile"),
-        ("delete", "delete", "Delete the highlighted game profile"),
+    ("profiles", t('profiles'), (
+        ("edit", "edit", t('edit_the_highlighted_game_profile')),
+        ("delete", "delete", t('delete_the_highlighted_game_profile')),
     )),
 )
 
 SETTINGS_TOOLBAR_SECTIONS = (
-    ("settings", "Settings", (
-        ("save_settings", "save", "Save settings"),
+    ("settings", t('settings'), (
+        ("save_settings", "save", t('save_settings')),
     )),
 )
 
-SELECTION_ACTIONS = ("toggle_selected", "add_label", "remove_label", "favorite_selected", "set_image")
+SELECTION_ACTIONS = ("install_selected", "uninstall_selected", "set_image")
 
 
 def section_keys(specs) -> tuple[str, ...]:

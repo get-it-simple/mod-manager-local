@@ -8,7 +8,7 @@ from unittest.mock import patch
 from tests.qt_support import qt_available
 from tests.window_fixture import WindowTestCase
 
-from mod_manager.models import ModFile, ModItem
+from mod_manager.models import ModFile, ModItem, OperationResult
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
@@ -79,7 +79,7 @@ class OverwritePromptTest(WindowTestCase):
 
     def test_installing_the_page_asks_before_replacing_existing_files(self):
         with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True) as question, patch(
-            "mod_manager.ui.app.apply_mods_page", return_value=(1, 1, 0)
+            "mod_manager.ui.app.change_mods_page", return_value=(1, OperationResult())
         ) as apply_mods, patch.object(self.window, "refresh_mods"), patch.object(self.window, "refresh_presets"):
             self.window._install_page()
 
@@ -89,7 +89,7 @@ class OverwritePromptTest(WindowTestCase):
 
     def test_declining_the_prompt_installs_nothing(self):
         with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False) as question, patch(
-            "mod_manager.ui.app.apply_mods_page"
+            "mod_manager.ui.app.change_mods_page"
         ) as apply_mods:
             self.window._install_page()
 
@@ -99,7 +99,7 @@ class OverwritePromptTest(WindowTestCase):
 
     def test_toggling_selected_mods_asks_before_replacing_existing_files(self):
         with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False) as question, patch(
-            "mod_manager.ui.app.toggle_mods_by_indexes"
+            "mod_manager.ui.app.change_mods"
         ) as toggle:
             self.window._toggle_selected_indexes([1])
 
@@ -109,7 +109,7 @@ class OverwritePromptTest(WindowTestCase):
     def test_a_free_destination_installs_without_a_prompt(self):
         self.window.current_mods_shown = [self._mod("free.pak", copy_install=True)]
 
-        with patch("mod_manager.ui.app.apply_mods_page", return_value=(1, 1, 0)) as apply_mods, patch.object(
+        with patch("mod_manager.ui.app.change_mods_page", return_value=(1, OperationResult())) as apply_mods, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window._install_page()
@@ -119,9 +119,10 @@ class OverwritePromptTest(WindowTestCase):
     def test_a_preset_toggle_asks_for_the_mods_it_would_install(self):
         pending = [self._mod("weapon.pak", copy_install=True)]
 
-        with patch("mod_manager.ui.app.preset_mods_to_install", return_value=(pending, [])), patch(
+        self.window.presets_table.selectRow(1)
+        with patch("mod_manager.preset_plan.load_presets", return_value={"ui": [pending[0].name]}), patch("mod_manager.preset_plan.discover_mods", return_value=pending), patch(
             "mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False
-        ) as question, patch("mod_manager.ui.app.toggle_presets_by_names") as toggle:
+        ) as question, patch("mod_manager.ui.app.execute_preset_plan") as toggle:
             self.window._toggle_selected_presets()
 
         question.assert_called_once()
@@ -153,7 +154,7 @@ class LinkProfileNeverPromptsTest(WindowTestCase):
         super().tearDown()
 
     def test_installing_a_link_profile_never_opens_a_prompt(self):
-        with patch("mod_manager.ui.app.apply_mods_page", return_value=(1, 1, 0)) as apply_mods, patch.object(
+        with patch("mod_manager.ui.app.change_mods_page", return_value=(1, OperationResult())) as apply_mods, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window._install_page()

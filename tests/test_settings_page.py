@@ -16,7 +16,6 @@ if qt_available():
     from PySide6 import QtGui, QtWidgets
 
     from mod_manager.ui.theme import tokens
-    from mod_manager.ui.widgets.style_utils import TOOLBAR_SECTION
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
@@ -24,7 +23,7 @@ class SettingsFormTest(WindowTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.use_inline_runner()
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.form = self.window.settings_form
 
     def test_every_setting_is_rendered_once(self):
@@ -43,7 +42,7 @@ class SettingsFormTest(WindowTestCase):
     def test_sections_are_rendered_in_schema_order(self):
         self.assertEqual(list(self.form.sections), [title for title, _specs in schema.SETTINGS_SECTIONS])
         for section in self.form.sections.values():
-            self.assertEqual(section.property("variant"), TOOLBAR_SECTION)
+            self.assertEqual(section.property("variant"), "formSection")
 
     def test_compact_fields_use_token_widths(self):
         self.assertEqual(self.form.fields["page_size"].width(), tokens.FORM_SHORT_FIELD_WIDTH)
@@ -64,6 +63,8 @@ class SettingsFormTest(WindowTestCase):
             self.assertIs(self.form.rows[first], self.form.rows[second], (first, second))
 
     def test_compact_fields_align_left_with_other_inputs(self):
+        self.window.show()
+        self.qt_app.processEvents()
         section = self.form.sections["Appearance"]
         theme_x = self.form.fields["gui_theme"].mapTo(section, self.form.fields["gui_theme"].rect().topLeft()).x()
         font_size = self.form.fields["gui_font_size"]
@@ -102,7 +103,7 @@ class OlderConfigTest(WindowTestCase):
         for key in ("ui_scale_percent", "gui_font_size", "placeholder_image_col_width"):
             self.window.cfg.pop(key, None)
         self.use_inline_runner()
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
     def test_missing_keys_fall_back_to_the_defaults(self):
         for key in ("ui_scale_percent", "gui_font_size", "placeholder_image_col_width"):
@@ -121,7 +122,7 @@ class SettingsColorTest(WindowTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.use_inline_runner()
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
         self.form = self.window.settings_form
 
     def test_custom_color_rows_are_hidden_in_system_mode(self):
@@ -164,7 +165,7 @@ class SettingsSaveTest(WindowTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.use_inline_runner()
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
     def test_saving_coerces_numeric_fields(self):
         self.window.settings_form.fields["page_size"].setText("25")
@@ -219,7 +220,7 @@ class SettingsKeepGameProfilesTest(WindowTestCase):
         self.config_overrides = two_game_profiles()
         super().setUp()
         self.use_inline_runner()
-        self.window._open_settings_dialog()
+        self.window._open_settings_page()
 
     def test_saving_settings_leaves_every_game_profile_untouched(self):
         before = deepcopy(self.window.cfg["game_profiles"])

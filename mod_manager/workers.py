@@ -11,8 +11,10 @@ from typing import Any, Callable
 
 def _run_import_batch(cfg: dict, tasks: list) -> tuple:
     from .mods import import_mod_file, import_mod_image
+    from .progress import report
     imported, skipped = [], []
-    for kind, path, mod_name, replace in tasks:
+    for index, (kind, path, mod_name, replace) in enumerate(tasks):
+        report("progress_importing", mod_name or str(path), index, len(tasks))
         if kind == "group":
             from .imports import publish_plan
 
@@ -25,6 +27,7 @@ def _run_import_batch(cfg: dict, tasks: list) -> tuple:
             else:
                 ok, msg = import_mod_file(cfg, path, replace)
         (imported if ok else skipped).append(msg)
+        report("progress_importing", mod_name or str(path), index + 1, len(tasks))
     return imported, skipped
 
 

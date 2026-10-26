@@ -4,27 +4,29 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ... import settings_schema
 from ...settings_schema import INT, SETTINGS_SECTIONS
+from ...i18n import t
 from ...workers import _run_save_settings
 from .. import icons
 from ..dialogs import prompts
-from ..dialogs.base import themed_dialog
-from ..pages.toolbar_specs import SETTINGS_TOOLBAR_SECTIONS
 from ..theme import colors, tokens
-from ..widgets import FormBuilder, IconToolbar, apply_margins
+from ..widgets import FormBuilder, IconToolbar, apply_margins, write_field
+from ..widgets.workspace import WorkspacePage
+from ..widgets.font_preview import FontPreview
+from ..widgets.style_utils import set_variant
 from .widget_registry import ACTIONS
 
-TITLE = "Settings"
-SAVED_MESSAGE = "Settings saved."
-PREVIEW_LABEL = "Theme preview"
-FONT_PREVIEW_LABEL = "Font preview"
-FONT_PREVIEW_TEXT = "Aa — The quick brown fox 0123456789"
+TITLE = t('settings')
+SAVED_MESSAGE = t('settings_saved')
+PREVIEW_LABEL = t('theme_preview')
+FONT_PREVIEW_LABEL = t('font_preview')
+FONT_PREVIEW_TEXT = t('aa_the_quick_brown_fox_0123456789')
 ACCENT_KEY = "gui_accent_color"
 TEXT_KEY = "gui_text_color"
 MODE_SUFFIX = "_mode"
 
 COLOR_ACTIONS = {
-    ACCENT_KEY: ("choose_accent", "image", "Choose the accent colour"),
-    TEXT_KEY: ("choose_text", "image", "Choose the text colour"),
+    ACCENT_KEY: ("choose_accent", "image", t('choose_the_accent_colour')),
+    TEXT_KEY: ("choose_text", "image", t('choose_the_text_colour')),
 }
 
 THEME_KEYS = (
@@ -42,7 +44,7 @@ class SettingsController(QtCore.QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.dialog = themed_dialog(window, TITLE, tokens.LARGE_DIALOG_SIZE)
+        self.page = WorkspacePage(TITLE, t('changes_apply_only_when_you_save_drafts_remain_here_while_you_navigate'))
         self._build()
 
     @property
@@ -86,7 +88,7 @@ class SettingsController(QtCore.QObject):
             if pending_int is not None:
                 pending_spec, pending_value = pending_int
                 self.form.add_spec(pending_spec, pending_value)
-            if title == "Appearance":
+            if title == t('appearance'):
                 self.form.add_widget(FONT_PREVIEW_LABEL, self._build_font_preview())
                 self.form.add_widget(PREVIEW_LABEL, self._build_preview_row())
 
@@ -98,18 +100,35 @@ class SettingsController(QtCore.QObject):
         self.fields["gui_font_size"].textChanged.connect(self.update_font_preview)
         self.update_font_preview()
 
-        self.toolbar = IconToolbar(self.dialog)
-        self.toolbar.build(SETTINGS_TOOLBAR_SECTIONS)
-        self.toolbar.connect({"save_settings": self.save})
+        self.toolbar = IconToolbar(self.page)
+        section = self.toolbar.add_section("settings", t('settings'))
+        button = section.add_text_action("save_settings", t('save'), "save", t('save_settings'), self.save)
+        set_variant(button, "primary")
+        section.add_text_action("reset_settings", t('reset_changes'), "reset", t('restore_the_last_saved_settings'), self.reset)
         self.window.registry.extend(ACTIONS, self.toolbar.buttons.values())
         self.toolbar.add_stretch()
 
         wrapper_layout.addWidget(host)
         wrapper_layout.addStretch(1)
         scroll.setWidget(wrapper)
-        layout = QtWidgets.QVBoxLayout(self.dialog)
+        layout = self.page.body
         layout.addWidget(scroll)
         layout.addWidget(self.toolbar)
+        self.draft_status = QtWidgets.QLabel(t("all_saved"))
+        layout.addWidget(self.draft_status)
+        for field in self.fields.values():
+            signal = next((getattr(field, name) for name in ("changed", "toggled", "currentTextChanged", "textChanged")
+                           if hasattr(field, name)), None)
+            if signal is not None:
+                signal.connect(self.update_dirty)
+
+    def update_dirty(self, *_args) -> None:
+        saved = settings_schema.read_settings(self.cfg)
+        values = self.form.values()
+        dirty = any(str(values[key]) != str(saved[key]) for key in values)
+        self.draft_status.setText(t("unsaved_changes") if dirty else t("all_saved"))
+        if hasattr(self.window, "workspace"):
+            self.window.workspace.set_dirty("settings", dirty)
 
     def _preview_badge(self, tooltip: str, handler, text: str = "") -> QtWidgets.QToolButton:
         badge = QtWidgets.QToolButton()
@@ -122,10 +141,10 @@ class SettingsController(QtCore.QObject):
         return badge
 
     def _build_preview_row(self) -> QtWidgets.QWidget:
-        self.accent_badge = self._preview_badge("Click to toggle accent color mode", lambda: self.toggle_color_mode(ACCENT_KEY))
-        self.accent_button = QtWidgets.QPushButton("Active")
+        self.accent_badge = self._preview_badge(t('click_to_toggle_accent_color_mode'), lambda: self.toggle_color_mode(ACCENT_KEY))
+        self.accent_button = QtWidgets.QPushButton(t('active'))
         self.accent_button.setEnabled(False)
-        self.text_badge = self._preview_badge("Click to toggle text color mode", lambda: self.toggle_color_mode(TEXT_KEY), "Aa")
+        self.text_badge = self._preview_badge(t('click_to_toggle_text_color_mode'), lambda: self.toggle_color_mode(TEXT_KEY), t('aa'))
         container = QtWidgets.QWidget()
         row = apply_margins(QtWidgets.QHBoxLayout(container), margins=None)
         row.addWidget(self.accent_badge)
@@ -134,11 +153,21 @@ class SettingsController(QtCore.QObject):
         row.addStretch(1)
         return container
 
-    def _build_font_preview(self) -> QtWidgets.QLabel:
-        self.font_preview = QtWidgets.QLabel(FONT_PREVIEW_TEXT)
-        self.font_preview.setMinimumHeight(tokens.FONT_PREVIEW_MIN_HEIGHT)
-        self.font_preview.setAlignment(QtCore.Qt.AlignCenter)
-        return self.font_preview
+    def _build_font_preview(self) -> QtWidgets.QWidget:
+        self.font_preview = FontPreview(FONT_PREVIEW_TEXT)
+        container = QtWidgets.QWidget()
+        row = apply_margins(QtWidgets.QVBoxLayout(container), margins=None)
+        row.addWidget(self.font_preview)
+        self.font_preview.heightChanged.connect(container.setMinimumHeight)
+        self.font_preview.heightChanged.connect(self._refresh_font_layout)
+        container.setMinimumHeight(self.font_preview.minimumHeight())
+        return container
+
+    def _refresh_font_layout(self, _height: int) -> None:
+        section = self.form.sections[t('appearance')]
+        section.form_layout.invalidate()
+        section.layout().invalidate()
+        section.updateGeometry()
 
     def update_font_preview(self, _value: str = "") -> None:
         font = self.window.theme.base_font
@@ -168,7 +197,7 @@ class SettingsController(QtCore.QObject):
         current = QtGui.QColor(self.fields[key].text())
         if not current.isValid():
             current = self.fallback_color(key)
-        chosen = prompts.choose_color(self.dialog, current, f"Choose {settings_schema.label_for(key).lower()}")
+        chosen = prompts.choose_color(self.window, current, t('choose_value0', value0=f'{settings_schema.label_for(key).lower()}'))
         if chosen.isValid():
             self.fields[key].setText(chosen.name())
             self.update_preview()
@@ -211,10 +240,19 @@ class SettingsController(QtCore.QObject):
         try:
             settings_schema.coerce_settings(values)
         except ValueError as error:
-            prompts.show_error(self.dialog, TITLE, str(error))
+            prompts.show_error(self.window, TITLE, str(error))
             return
 
         def done(new_cfg):
             self.window.apply_saved_settings(new_cfg, old_theme != self.theme_settings(new_cfg))
 
-        self.window._run_action("Saving settings...", lambda: _run_save_settings(self.cfg, values), done)
+        self.window._run_action(t('saving_settings'), lambda: _run_save_settings(self.cfg, values), done)
+
+    def reset(self) -> None:
+        for key, value in settings_schema.read_settings(self.cfg).items():
+            write_field(self.fields[key], value)
+        self.update_color_rows()
+        self.update_preview()
+        self.update_font_preview()
+        if hasattr(self, "draft_status"):
+            self.update_dirty()

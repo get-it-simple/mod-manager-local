@@ -1,21 +1,23 @@
 from __future__ import annotations
 
+from .i18n import t
+
 from typing import Dict, List, Tuple
 
-from .models import ModItem
-from .mods import discover_mods, list_installed_mods, apply_mods_batch, deactivate_mod
+from .models import ModItem, OperationItem, OperationResult
+from .mods import discover_mods, list_installed_mods, apply_mods_batch_result, deactivate_mod_result
 from .storage import load_presets, save_presets, load_preset_records, mark_preset_managed
-from .cli_utils import page_slice, paginate
+from .collection_utils import page_slice, paginate
 
 def save_preset_from_installed(cfg: Dict, name: str) -> Tuple[bool, str]:
     presets = load_presets()
     installed = list_installed_mods(cfg)
     if not installed:
-        return False, "No installed mods to save"
+        return False, t('no_installed_mods_to_save')
     presets[name] = [m.name for m in installed]
     save_presets(presets)
     mark_preset_managed(name, "saved")
-    return True, f"Preset '{name}' saved ({len(installed)} mods)"
+    return True, t('preset_value0_saved_value1_mods', value0=f'{name}', value1=f'{len(installed)}')
 
 def delete_presets_by_names(names: List[str]) -> Tuple[int, List[str]]:
     presets = load_presets()
@@ -53,26 +55,42 @@ def toggle_presets_by_names(
     installed_set: set[str],
     overwrite: bool = False,
 ) -> Tuple[str, List[str], bool]:
+    summary, result, messages = _toggle_presets_result(cfg, names, installed_set, overwrite)
+    return summary, messages, bool(result.errors)
+
+
+def toggle_presets_result(
+    cfg: Dict, names: List[str], installed_set: set[str], overwrite: bool = False,
+) -> Tuple[str, OperationResult]:
+    summary, result, _messages = _toggle_presets_result(cfg, names, installed_set, overwrite)
+    return summary, result
+
+
+def _toggle_presets_result(
+    cfg: Dict, names: List[str], installed_set: set[str], overwrite: bool,
+) -> Tuple[str, OperationResult, List[str]]:
     presets = load_presets()
     last_operation = ""
-    messages: List[str] = []
-    has_errors = False
+    items = []
+    messages = []
     for name in names:
         mods = presets.get(name, [])
         if name not in presets:
-            messages.append(f"Skipped: {name} (preset not found)")
-            has_errors = True
+            items.append(OperationItem(name, "missing", False, t('preset_not_found')))
+            messages.extend(_preset_messages(OperationResult((items[-1],))))
             continue
         all_on = bool(mods) and all(nm in installed_set for nm in mods)
         if all_on:
-            okc, errc, msgs = deactivate_preset(cfg, name)
-            last_operation = f"Deactivated: {okc}, Errors: {errc}"
+            result = deactivate_preset_result(cfg, name)
+            label = t('deactivated')
         else:
-            okc, errc, msgs = apply_preset(cfg, name, overwrite)
-            last_operation = f"Installed: {okc}, Errors: {errc}"
-            has_errors = has_errors or errc > 0
-        messages.extend(msgs)
-    return last_operation, messages, has_errors
+            result = apply_preset_result(cfg, name, overwrite)
+            label = t('installed_mods')
+        successes = sum(item.success for item in result.items)
+        last_operation = f"{label}: {successes}, Errors: {result.errors}"
+        items.extend(result.items)
+        messages.extend(_preset_messages(result, install=not all_on))
+    return last_operation, OperationResult(tuple(items)), messages
 
 def presets_view(cfg: Dict, page: int, order_mode: str = "d") -> Tuple[Dict, List[str], List[str], int, int]:
     presets = load_presets()
@@ -118,52 +136,47 @@ def toggle_presets_by_indexes(
     return toggle_presets_by_names(cfg, names, installed_set, overwrite)
 
 def apply_preset(cfg: Dict, name: str, overwrite: bool = False) -> Tuple[int, int, List[str]]:
-    ok = 0
-    err = 0
-    msgs: List[str] = []
+    result = apply_preset_result(cfg, name, overwrite)
+    return sum(item.success for item in result.items), result.errors, _preset_messages(result, install=True)
 
+
+def _preset_messages(result: OperationResult, *, install: bool = False) -> List[str]:
+    messages = [
+        t('skipped_value0_value1', value0=f'{item.name}', value1=f'{item.message}') if item.action == "missing"
+        else f"{item.name}: {'OK' if item.success else 'ERR'} ({item.message})"
+        for item in result.items
+    ]
+    if install and not any(item.action == "installed" for item in result.items):
+        messages.append(t('nothing_to_install_all_present_or_missing'))
+    return messages
+
+
+def apply_preset_result(cfg: Dict, name: str, overwrite: bool = False) -> OperationResult:
     work, skipped_missing = preset_mods_to_install(cfg, [name])
-    total = len(work)
-    for nm in skipped_missing:
-        msgs.append(f"Skipped: {nm} (not in source)")
-
-    if total == 0:
-        msgs.append("Nothing to install (all present or missing).")
+    missing = tuple(OperationItem(nm, "missing", False, t('text_09edde0d290d')) for nm in skipped_missing)
+    installed = apply_mods_batch_result(work, overwrite)
+    result = OperationResult(missing + installed.items)
+    if not result.errors:
         mark_preset_managed(name, "applied")
-        return ok, err, msgs
-
-    for idx, mod in enumerate(work, start=1):
-        print(f"[{idx}/{total}] Installing {mod.name} ...")
-
-    results = apply_mods_batch(work, overwrite)
-    for mod, (success, msg) in zip(work, results):
-        if success:
-            ok += 1
-        else:
-            err += 1
-        msgs.append(f"{mod.name}: {'OK' if success else 'ERR'} ({msg})")
-
-    print(f"Done: installed {ok}/{total}. Errors: {err}.")
-    mark_preset_managed(name, "applied")
-    return ok, err, msgs
+    return result
 
 def deactivate_preset(cfg: Dict, name: str) -> Tuple[int, int, List[str]]:
+    result = deactivate_preset_result(cfg, name)
+    return sum(item.success for item in result.items), result.errors, _preset_messages(result)
+
+
+def deactivate_preset_result(cfg: Dict, name: str) -> OperationResult:
     presets = load_presets()
     mods = {m.name: m for m in discover_mods(cfg)}
     names = presets.get(name, [])
-    ok = 0
-    fail = 0
-    msgs = []
+    items = []
     for nm in names:
         m = mods.get(nm)
         if not m or not m.installed:
             continue
-        success, msg = deactivate_mod(m)
-        if success:
-            ok += 1
-        else:
-            fail += 1
-        msgs.append(f"{nm}: {'OK' if success else 'ERR'} ({msg})")
-    mark_preset_managed(name, "deactivated")
-    return ok, fail, msgs
+        items.append(deactivate_mod_result(m))
+    result = OperationResult(tuple(items))
+    if not result.errors:
+        mark_preset_managed(name, "deactivated")
+    return result
     

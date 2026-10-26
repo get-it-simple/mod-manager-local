@@ -1,6 +1,26 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtGui, QtWidgets
+
+
+def review_preset_plan(parent, plan) -> bool:
+    from ..widgets.preset_review import PresetReview
+    dialog = PresetReview(parent, plan)
+    try:
+        return dialog.exec() == QtWidgets.QDialog.Accepted
+    finally:
+        dialog.deleteLater()
+
+
+def review_plan(parent, title: str, rows, summary: str = "") -> bool:
+    from ..widgets.plan_review import PlanReview
+    dialog = PlanReview(parent, title, rows, summary)
+    try:
+        return dialog.exec() == QtWidgets.QDialog.Accepted
+    finally:
+        dialog.deleteLater()
 
 
 def show_error(parent, title: str, message: str) -> None:
@@ -15,12 +35,13 @@ def show_info(parent, title: str, message: str) -> None:
     QtWidgets.QMessageBox.information(parent, title, message)
 
 
-def ask_yes_no(parent, title: str, message: str) -> bool:
+def ask_yes_no(parent, title: str, message: str, *, default_no: bool = False) -> bool:
     answer = QtWidgets.QMessageBox.question(
         parent,
         title,
         message,
         QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No if default_no else QtWidgets.QMessageBox.NoButton,
     )
     return answer == QtWidgets.QMessageBox.Yes
 
@@ -43,13 +64,32 @@ def choose_color(parent, current: QtGui.QColor, title: str) -> QtGui.QColor:
     return QtWidgets.QColorDialog.getColor(current, parent, title)
 
 
+def choose_preview_image(parent, source, count: int, clipboard: bool = False) -> str:
+    from .preview_confirmation import PreviewConfirmationDialog
+
+    dialog = PreviewConfirmationDialog(parent, source, count, clipboard)
+    try:
+        dialog.exec()
+        return dialog.choice
+    finally:
+        dialog.deleteLater()
+
+
+def choose_item(parent, title: str, label: str, items: list[str], current: int = 0) -> tuple[str, bool]:
+    return QtWidgets.QInputDialog.getItem(parent, title, label, items, current, False)
+
+
+def choose_text(parent, title: str, label: str, text: str = "") -> tuple[str, bool]:
+    return QtWidgets.QInputDialog.getText(parent, title, label, text=text)
+
+
 def choose_import_conflict(parent, name: str) -> str:
     dialog = QtWidgets.QMessageBox(parent)
-    dialog.setWindowTitle("Import name conflict")
-    dialog.setText(f"The import target '{name}' already exists. Choose how to import the new mod.")
-    replace = dialog.addButton("Replace", QtWidgets.QMessageBox.DestructiveRole)
-    keep = dialog.addButton("Keep both", QtWidgets.QMessageBox.AcceptRole)
-    skip = dialog.addButton("Skip", QtWidgets.QMessageBox.RejectRole)
+    dialog.setWindowTitle(t('import_name_conflict'))
+    dialog.setText(t('the_import_target_value0_already_exists_choose_how_to_import_the_new_mod', value0=f'{name}'))
+    replace = dialog.addButton(t('replace'), QtWidgets.QMessageBox.DestructiveRole)
+    keep = dialog.addButton(t('keep_both'), QtWidgets.QMessageBox.AcceptRole)
+    skip = dialog.addButton(t('skip'), QtWidgets.QMessageBox.RejectRole)
     dialog.setDefaultButton(keep)
     dialog.setEscapeButton(skip)
     dialog.exec()

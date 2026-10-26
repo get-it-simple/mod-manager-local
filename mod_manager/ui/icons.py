@@ -42,10 +42,15 @@ FALLBACK_ICON = "SP_FileIcon"
 
 
 def standard_icon(name: str, style=None) -> QtGui.QIcon:
-    if name in CUSTOM_ICONS:
+    if name in CUSTOM_ICONS or name in tokens.GLYPH_PATHS:
         app = QtWidgets.QApplication.instance()
         palette = app.palette() if app is not None else QtGui.QPalette()
-        return glyph_icon(name, palette.color(QtGui.QPalette.ButtonText))
+        color = palette.color(QtGui.QPalette.ButtonText)
+        icon = QtGui.QIcon()
+        for factor in tokens.ICON_SCALE_FACTORS:
+            size = tokens.ICON_SIZE * factor
+            icon.addPixmap(glyph_icon(name, color, size).pixmap(size, size))
+        return icon
     style = style or QtWidgets.QApplication.style()
     pixmap_name = STANDARD_ICONS.get(name, FALLBACK_ICON)
     return style.standardIcon(getattr(QtWidgets.QStyle, pixmap_name))
@@ -80,6 +85,7 @@ def _star_path(size: int) -> QtGui.QPainterPath:
     path = QtGui.QPainterPath()
     for index in range(tokens.STAR_POINTS * 2):
         radius = tokens.STAR_OUTER_RADIUS if index % 2 == 0 else tokens.STAR_INNER_RADIUS
+        radius *= size / tokens.ICON_SIZE
         angle = math.radians(tokens.STAR_START_DEGREES + index * tokens.STAR_STEP_DEGREES)
         point = QtCore.QPointF(center + math.cos(angle) * radius, center + math.sin(angle) * radius)
         if index == 0:
@@ -98,12 +104,17 @@ def _scaled_path(points, size: int) -> QtGui.QPainterPath:
 def glyph_icon(name: str, color, size: int = tokens.ICON_SIZE) -> QtGui.QIcon:
     pixmap = _transparent_pixmap(size)
     painter = _painter(pixmap)
-    pen = _round_pen(color, tokens.GLYPH_PEN)
+    pen = _round_pen(color, tokens.GLYPH_PEN * size / tokens.ICON_SIZE)
     painter.setPen(pen)
     painter.setBrush(QtCore.Qt.NoBrush)
     scale = size / tokens.ICON_SIZE
 
-    if name in {"favorite", "favorite_filled"}:
+    if name in tokens.GLYPH_PATHS:
+        for points in tokens.GLYPH_PATHS[name]:
+            painter.drawPath(_scaled_path(points, size))
+        if name in tokens.GLYPH_CIRCLES:
+            painter.drawEllipse(QtCore.QRectF(*(part * scale for part in tokens.GLYPH_CIRCLES[name])))
+    elif name in {"favorite", "favorite_filled"}:
         path = _star_path(size)
         if name == "favorite_filled":
             painter.setBrush(QtGui.QColor(color))
@@ -154,14 +165,21 @@ def glyph_icon(name: str, color, size: int = tokens.ICON_SIZE) -> QtGui.QIcon:
     return QtGui.QIcon(pixmap)
 
 
-def check_icon(color, size: int = tokens.ICON_SIZE, transparent: bool = False) -> QtGui.QIcon:
+def _check_pixmap(color, size: int, transparent: bool) -> QtGui.QPixmap:
     pixmap = _transparent_pixmap(size)
     if not transparent:
         painter = _painter(pixmap)
         painter.setPen(_round_pen(color, max(tokens.CHECK_PEN_MIN, size * tokens.CHECK_PEN_RATIO)))
         painter.drawPath(_path([(size * x, size * y) for x, y in tokens.CHECK_PATH]))
         painter.end()
-    return QtGui.QIcon(pixmap)
+    return pixmap
+
+
+def check_icon(color, size: int = tokens.ICON_SIZE, transparent: bool = False) -> QtGui.QIcon:
+    icon = QtGui.QIcon()
+    for factor in tokens.ICON_SCALE_FACTORS:
+        icon.addPixmap(_check_pixmap(color, size * factor, transparent))
+    return icon
 
 
 def sort_direction_icon(descending: bool, color, size: int = tokens.ICON_SIZE) -> QtGui.QIcon:
@@ -189,7 +207,7 @@ def sort_direction_icon(descending: bool, color, size: int = tokens.ICON_SIZE) -
 def state_icon(active: bool, palette, size: int = tokens.STATE_ICON_SIZE) -> QtGui.QIcon:
     pixmap = _transparent_pixmap(size)
     painter = _painter(pixmap)
-    painter.setPen(_round_pen(palette.state_ok if active else palette.state_bad, tokens.STATE_ICON_PEN))
+    painter.setPen(_round_pen(palette.state_ok if active else palette.muted, tokens.STATE_ICON_PEN))
     if active:
         painter.drawPath(_path(tokens.STATE_CHECK_PATH))
     else:

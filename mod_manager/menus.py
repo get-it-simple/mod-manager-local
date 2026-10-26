@@ -1,684 +1,228 @@
 from __future__ import annotations
 
-import os
-import shlex
+import argparse
+import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
-from app_paths import APP_NAME, APP_VERSION, PRINT_SIZE
-
+from . import cli_menu_io as console
 from . import settings_schema
-from .platform_utils import is_windows
-from .storage import (
-    create_game_profile,
-    delete_game_profile,
-    game_abbreviation,
-    load_config,
-    save_config,
-    set_active_game_profile,
-    update_game_profile,
-)
-from .mods import (
-    discover_mods,
-    existing_targets,
-    list_broken_links,
-    deactivate_mod,
-    mods_by_indexes,
-    mods_view,
-    add_label_to_mods,
-    overwrite_message,
-    remove_label_from_mods,
-    deactivate_mods_page,
-    apply_mods_page,
-    toggle_mods_by_indexes,
-)
-from .presets import save_preset_from_installed, delete_presets_by_indexes, presets_view, toggle_presets_by_indexes
-from .cli_utils import (
-    prompt,
-    pause,
-    ensure_paths,
-    parse_multi_choice,
-    parse_page_choice,
-    paginate,
-    page_slice,
-    print_pager,
-    open_folder,
-    smart_prompt,
-    truncate_text,
-    format_order_short,
-)
+from .cli import selected_items
+from .cli_collection_menus import menu_fix_broken, menu_mods_toggle, menu_presets
+from .cli_environment import prepare_paths
+from .cli_menu_actions import action_label, print_actions
+from .cli_navigation import MenuNavigation
+from .cli_utils import parse_multi_choice
+from .storage import load_config, save_config
+from .storage_policy import storage_policy
 
-def _ask_yes_no(question: str, current: bool = False) -> bool:
-    answer = prompt(f"{question} (y/n) [{'y' if current else 'n'}]: ").strip().lower()
-    return (answer in {"y", "yes"}) if answer else current
-
-def _confirm_overwrite(mods: List) -> bool | None:
-    """None cancels the operation, otherwise whether existing files may be replaced."""
-    names = existing_targets(mods)
-    if not names:
-        return False
-    print(overwrite_message(names))
-    return True if _ask_yes_no("Replace them?") else None
-
-def _clear():
-    os.system("cls" if is_windows() else "clear")
-
-def _as_int(s: str) -> int | None:
-    if s and s.isdigit():
-        return int(s)
-    return None
-
-def _shown_name(shown, idx_str: str) -> str | None:
-    n = _as_int(idx_str)
-    if n is None:
-        return None
-    if 1 <= n <= len(shown):
-        return shown[n - 1].name
-    return None
-
-def _parse_slash(choice: str) -> Tuple[str, List[str]] | None:
-    raw = (choice or "").strip()
-    if not raw.startswith("/"):
-        return None
-    if raw == "/":
-        return "/", []
-    try:
-        args = shlex.split(raw[1:])
-    except ValueError:
-        return None
-    if not args:
-        return "/", []
-    cmd = args[0].lower()
-    return cmd, args[1:]
-
-def _mods_cmds() -> List[str]:
-    return [
-        "/help",
-        "/search",
-        "/l ",
-        "/l+ ",
-        "/l- ",
-        "/order default",
-        "/order created date",
-        "/toggle ",
-        "/uninstall",
-        "/install",
-        "/page ",
-        "/back",
-        "/exit",
-    ]
-
-def _presets_cmds() -> List[str]:
-    return [
-        "/help",
-        "/toggle ",
-        "/save ",
-        "/delete ",
-        "/page ",
-        "/back",
-        "/exit",
-    ]
-
-def _filter_text(label_filter: str, search_query: str) -> str:
-    parts = []
-    if label_filter:
-        parts.append(f"l:{label_filter}")
-    if search_query:
-        parts.append(f"s:{search_query}")
-    return " | ".join(parts) if parts else "-"
-
-def _mod_display_name(cfg: Dict, name: str) -> str:
-    return truncate_text(name, int(cfg.get("max_mod_name_len", 28)))
-
-def _preset_display_name(cfg: Dict, name: str) -> str:
-    return truncate_text(name, int(cfg.get("max_preset_name_len", 28)))
-
-def _label_display_name(cfg: Dict, name: str) -> str:
-    return truncate_text(name, int(cfg.get("max_label_name_len", 12)))
-
-def _print_mods_help():
-    print("Commands — Mods")
-    print("=" * PRINT_SIZE)
-    print('use "text 1" for text with spaces')
-    print("/search <text>         Search mods by name (empty = clear)")
-    print('/l <label>             Filter by label (empty = clear)')
-    print("/l+ <label> <indexes>  Add label to items on current page")
-    print("/l- <label> <indexes>  Remove label from items on current page (if matches)")
-    print("/order default         Sort by default")
-    print("/order created date    Sort by created date")
-    print("/toggle 1,3,5          Toggle indexes (install/uninstall)")
-    print("/uninstall [page]      Uninstall all on page (current if omitted)")
-    print("/install [page]        Install all on page (current if omitted)")
-    print("/page <n>              Go to page")
-    print("/back                  Back")
-    print("/exit                  Exit")
-    print("\nExamples:")
-    print("/search ui")
-    print("/l label_1")
-    print("/l+ label_1 3")
-    print("/l+ label_1 1,2,3,4,5,11")
-    print("/l- label_1 3")
-    print("/l- label_1 1,2,3,4,5,11")
-    print("/toggle 1,3,5")
-    print("/install 2")
-    print("/uninstall")
-
-def _print_presets_help():
-    print("Commands — Presets")
-    print("=" * PRINT_SIZE)
-    print("/toggle 1,3,5          Toggle presets (apply/deactivate)")
-    print("/save <name>           Save current installed mods as preset")
-    print("/delete 1,3,5          Delete presets by indexes on current page")
-    print("/page <n>              Go to page")
-    print("/back                  Back")
-    print("/exit                  Exit")
-    print("\nExamples:")
-    print('/save "My preset"')
-    print("/toggle 1")
-    print("/delete 2,4")
+_ask_yes_no = console.ask_yes_no
+_confirm_overwrite = console.confirm_overwrite
 
 
-def menu_fix_broken(cfg: Dict):
-    if not ensure_paths(cfg):
-        return
-    page = 1
-    while True:
-        _clear()
-        broken = list_broken_links(cfg)
-        if not broken:
-            print("No broken links detected.")
-            return
-        page, pages = paginate(len(broken), page, cfg)
-        shown = page_slice(broken, page, cfg)
-        print("Fix broken links — remove game links whose source is missing")
-        print("=" * PRINT_SIZE)
-        for i, m in enumerate(shown, 1):
-            kind = "DIR" if m.is_dir else "FILE"
-            print(f"{i:2d}) [!] {m.name} ({kind})  -> missing source: {m.src}")
-        print_pager(pages, page)
-        print("0) Back  |  pN to change page  |  a) Remove ALL on page  |  numbers (comma-separated) to remove selected")
-        choice = prompt("> ").strip().lower()
-        if choice == "0":
-            return
-        if choice == "a":
-            for m in shown:
-                deactivate_mod(m)
-            print("Removed all broken links on this page.")
-            continue
-        page_sel = parse_page_choice(choice)
-        if page_sel:
-            page = page_sel
-            continue
-        nums = parse_multi_choice(choice)
-        for num in nums:
-            if 1 <= num <= len(shown):
-                m = shown[num - 1]
-                ok, msg = deactivate_mod(m)
-                print(f"Remove {m.dest.name}: {'OK' if ok else 'ERR'} — {msg}")
-
-def menu_settings(cfg: Dict):
-    while True:
-        _clear()
-        print("Settings")
-        print("=" * PRINT_SIZE)
-        print(f"1) Page size: {cfg.get('page_size') or 10}")
-        print(f"2) Max mod name length: {cfg.get('max_mod_name_len') or 28}")
-        print(f"3) Max preset name length: {cfg.get('max_preset_name_len') or 28}")
-        print(f"4) Max label name length: {cfg.get('max_label_name_len') or 12}")
-        print("\n0) Save and back\n")
-        choice = prompt("Select [0-4]: ").strip()
-        if choice == "1":
-            p = prompt("Enter page size: ").strip()
-            if p.isdigit() and int(p) > 0:
-                cfg["page_size"] = int(p)
-            else:
-                print("incorect format, please enter a number")
-        elif choice == "2":
-            p = prompt("Enter max mod name length: ").strip()
-            if p.isdigit() and int(p) > 0:
-                cfg["max_mod_name_len"] = int(p)
-        elif choice == "3":
-            p = prompt("Enter max preset name length: ").strip()
-            if p.isdigit() and int(p) > 0:
-                cfg["max_preset_name_len"] = int(p)
-        elif choice == "4":
-            p = prompt("Enter max label name length: ").strip()
-            if p.isdigit() and int(p) > 0:
-                cfg["max_label_name_len"] = int(p)
-        elif choice == "0":
-            save_config(cfg)
-            print("Saved.")
-            return
-
-def _prompt_game_profile(existing: Dict | None = None) -> Dict | None:
+def _prompt_game_profile(existing: dict | None = None) -> dict | None:
     existing = existing or {}
-    name = prompt(f"Game name [{existing.get('name', '')}]: ").strip() or existing.get("name", "")
+    name = console.read_text("Game name", current=existing.get("name", ""), description=settings_schema.GAME_NAME_FIELD.tooltip)
     if not name:
-        print("Canceled - empty game name.")
+        print("Cancelled: empty game name.")
         return None
     values = {"name": name}
     for spec in settings_schema.MODS_FIELDS:
+        print(spec.tooltip)
         if spec.kind == settings_schema.FLAG:
-            values[spec.key] = _ask_yes_no(spec.label, bool(existing.get(spec.key)))
+            values[spec.key] = console.ask_yes_no(spec.label, bool(existing.get(spec.key)))
             continue
         current = str(existing.get(spec.key, ""))
         hint = f" ({'/'.join(spec.choices)})" if spec.kind == settings_schema.CHOICE else ""
-        value = prompt(f"{spec.label}{hint} [{current}]: ").strip().strip('"')
+        value = console.read_text(spec.label + hint, current=current, description=spec.tooltip).strip('"')
         if spec.kind == settings_schema.PATH and value:
             value = str(Path(value).expanduser())
-        values[spec.key] = value or current
+        if spec.kind == settings_schema.CHOICE and value and value not in spec.choices:
+            raise ValueError(f"{spec.label}: choose {' or '.join(spec.choices)}.")
+        values[spec.key] = value
     return settings_schema.coerce_game_profile(values)
 
-def menu_games(cfg: Dict):
+
+def _profile_arguments(values: dict) -> list[str]:
+    arguments = []
+    for spec in settings_schema.MODS_FIELDS:
+        value = values[spec.key]
+        flag = "--" + spec.key.replace("_", "-")
+        if spec.kind == settings_schema.FLAG:
+            arguments.append(flag if value else "--no-" + spec.key.replace("_", "-"))
+        else:
+            arguments.extend([flag, value])
+    return arguments
+
+
+@console.interactive
+def _game_action(command: str, args: list[str], cfg: dict) -> None:
+    if command == "prepare":
+        print("\n".join(prepare_paths(cfg)))
+        if console.ask_yes_no("Create the missing folders?"):
+            console.execute(["games", "prepare", "--create-dirs"])
+        return
+    if command == "add":
+        values = _prompt_game_profile()
+        if values:
+            console.execute(["games", "add", values["name"], *_profile_arguments(values)])
+        return
+    profiles = cfg.get("game_profiles", [])
+    if not profiles:
+        print(f"No games available. Choose {action_label('Games', 'add')} first.")
+        return
+    indexes = parse_multi_choice(" ".join(args)) if args else console.read_indexes(profiles, "game to " + command, single=True)
+    if indexes is None:
+        return
+    if len(indexes) != 1:
+        raise ValueError("Choose exactly one game number; for example edit 1.")
+    profile = selected_items(profiles, indexes)[0]
+    title = {"edit": "Editing", "delete": "Deleting", "select": "Selecting"}[command]
+    print(f"{title}: {profile['name']} (#{indexes[0]})")
+    if command == "edit":
+        values = _prompt_game_profile(profile)
+        if values:
+            console.execute(["games", "edit", profile["id"], "--name", values["name"], *_profile_arguments(values)])
+    else:
+        console.execute(["games", command, profile["id"]])
+
+
+@console.interactive
+def menu_games(cfg: dict) -> None:
     while True:
-        _clear()
         cfg = load_config()
-        active_id = cfg.get("active_game_profile_id", "")
-        profiles = cfg.get("game_profiles", []) or []
-        print("Games")
-        print("=" * PRINT_SIZE)
-        if not profiles:
-            print("No game profiles.")
-        for i, profile in enumerate(profiles, 1):
-            mark = "*" if profile.get("id") == active_id else " "
-            print(f"{i}) [{mark}] {game_abbreviation(profile.get('name', ''))} {profile.get('name')}")
-        print("\na) Add  |  eN Edit  |  dN Delete  |  number Select  |  0 Back")
-        choice = prompt("> ").strip().lower()
-        if choice == "0":
+        console.header("Games", cfg)
+        print("\nItems")
+        for index, profile in enumerate(cfg.get("game_profiles", []), 1):
+            mark = "*" if profile["id"] == cfg.get("active_game_profile_id") else " "
+            print(f"  #{index} [{mark}] {profile['name']}")
+        if not cfg.get("game_profiles"):
+            print(f"No game profiles. Choose {action_label('Games', 'add')}.")
+        print_actions("Games")
+        command, args = console.read_action("Games")
+        if command == "back":
             return
-        if choice == "a":
-            values = _prompt_game_profile()
-            if values:
-                create_game_profile(values.pop("name"), values, cfg)
-                save_config(cfg)
-            continue
-        if choice.startswith("e") and choice[1:].isdigit():
-            idx = int(choice[1:]) - 1
-            if 0 <= idx < len(profiles):
-                values = _prompt_game_profile(profiles[idx])
-                if values:
-                    update_game_profile(cfg, profiles[idx]["id"], values)
-                    save_config(cfg)
-            continue
-        if choice.startswith("d") and choice[1:].isdigit():
-            idx = int(choice[1:]) - 1
-            if 0 <= idx < len(profiles):
-                delete_game_profile(cfg, profiles[idx]["id"])
-                save_config(cfg)
-            continue
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(profiles):
-                set_active_game_profile(cfg, profiles[idx]["id"])
-                save_config(cfg)
-            continue
+        _game_action(command, args, cfg)
 
-def menu_mods_toggle(cfg: Dict):
-    if not ensure_paths(cfg):
+
+def _setting_value(spec, value: str):
+    if spec.kind == settings_schema.FLAG:
+        if value.lower() not in {"y", "yes", "true", "n", "no", "false"}:
+            raise ValueError("Enter y or n.")
+        return value.lower() in {"y", "yes", "true"}
+    if spec.kind == settings_schema.CHOICE and value not in spec.choices:
+        raise ValueError(f"Choose one of: {', '.join(spec.choices)}.")
+    if spec.kind == settings_schema.COLOR and not settings_schema.normalize_hex(value):
+        raise ValueError("Enter a hexadecimal color.")
+    return settings_schema.coerce_value(spec, value)
+
+
+def _print_settings(pending: dict) -> None:
+    print("\nItems")
+    offset = 0
+    for caption, fields in settings_schema.SETTINGS_SECTIONS:
+        print(caption)
+        for spec in fields:
+            offset += 1
+            print(f"  #{offset} {spec.label}: {pending.get(spec.key, '')}")
+
+
+@console.interactive
+def _edit_setting(pending: dict) -> None:
+    specs = list(settings_schema.all_specs())
+    indexes = console.read_indexes(specs, "setting to edit", single=True)
+    if indexes is None:
         return
-    page = 1
-    last_operation = ""
-    search_query = ""
-    label_filter = ""
-    order_mode = "d"
+    spec = specs[indexes[0] - 1]
+    print(f"Editing: {spec.label}")
+    print(spec.tooltip)
+    if spec.choices:
+        print("Choices: " + ", ".join(spec.choices))
     while True:
-        _clear()
-        from .cli_utils import _PT_AVAILABLE
-        if not _PT_AVAILABLE:
-            print("Advanced completion disabled. Install: pip install prompt_toolkit\n")
-        items, shown, page, pages, labels = mods_view(cfg, page, label_filter, search_query, order_mode)
-
-        print(f"Page {page}/{pages}    Order: {format_order_short(order_mode)}    Filter: {_filter_text(label_filter, search_query)}")
-        print("=" * PRINT_SIZE)
-
-        if not items:
-            print("No mods.")
-        else:
-            idx_w = max(2, len(str(int(cfg.get("page_size", 10)))))
-
-            name_cells = []
-            label_cells = []
-
-            for m in shown:
-                name_cells.append(_mod_display_name(cfg, m.name))
-                lbl = labels.get(m.name) if labels else None
-                label_cells.append(_label_display_name(cfg, lbl) if lbl else "-")
-
-            name_w = max(1, max((len(x) for x in name_cells), default=1))
-
-            for i, m in enumerate(shown, 1):
-                mark = "[X]" if m.installed else "[ ]"
-                name_disp = name_cells[i - 1]
-                lbl_disp = label_cells[i - 1]
-                print(
-                    f"{i:>{idx_w}}.  {mark} "
-                    f"{name_disp:<{name_w}}  "
-                    f"- [{lbl_disp}]"
-                )
-
-        if last_operation:
-            print(f"\n{last_operation}")
-        print("\nType / for commands")
-
-        choice = smart_prompt("> ", _mods_cmds).strip()
-        if not choice:
-            print("Type / for commands")
-            continue
-
-        parsed = _parse_slash(choice)
-        if parsed:
-            cmd, args = parsed
-            if cmd in ["help"]:
-                _print_mods_help()
-                pause()
-                continue
-            if cmd in ["back"]:
-                return
-            if cmd in ["exit"]:
-                raise SystemExit(0)
-            if cmd in ["search"]:
-                if args:
-                    search_query = " ".join(args).strip()
-                else:
-                    search_query = prompt("Search: ").strip()
-                page = 1
-                continue
-            if cmd in ["l"]:
-                label_filter = " ".join(args).strip().strip('"') if args else ""
-                page = 1
-                continue
-            if cmd in ["l+", "l-"]:
-                if len(args) < 2:
-                    last_operation = "Use: /l+ <label> <indexes> or /l- <label> <indexes>"
-                    continue
-                label_name = args[0]
-                idxs = parse_multi_choice(" ".join(args[1:]))
-                if not idxs:
-                    last_operation = "Invalid index."
-                    continue
-                targets = [shown[num - 1].name for num in idxs if 1 <= num <= len(shown)]
-                if not targets:
-                    last_operation = "Invalid index."
-                    continue
-                if cmd == "l+":
-                    last_operation = add_label_to_mods(label_name, targets)
-                else:
-                    last_operation = remove_label_from_mods(label_name, targets)
-                continue
-            if cmd in ["order"]:
-                mode = " ".join(args).strip().lower()
-                if mode in ["d", "default"]:
-                    order_mode = "d"
-                    last_operation = "Order mode set to: default"
-                elif mode in ["cd", "created date"]:
-                    order_mode = "cd"
-                    last_operation = "Order mode set to: created date"
-                else:
-                    last_operation = "Invalid order mode."
-                continue
-            if cmd in ["page"]:
-                if args and args[0].isdigit():
-                    page = max(1, int(args[0]))
-                continue
-            if cmd in ["uninstall", "install"]:
-                target_page = max(1, int(args[0])) if args and args[0].isdigit() else page
-                if cmd == "uninstall":
-                    target_page, _count = deactivate_mods_page(cfg, target_page, label_filter, search_query, order_mode)
-                    last_operation = f"All on page {target_page} uninstalled."
-                else:
-                    overwrite = _confirm_overwrite([m for m in shown if not m.installed])
-                    if overwrite is None:
-                        continue
-                    target_page, total, err = apply_mods_page(
-                        cfg, target_page, label_filter, search_query, order_mode, False, overwrite
-                    )
-                    if total > 0 and err > 0:
-                        pause()
-                    last_operation = f"Installed {total - err}/{total} on page {target_page}. Errors: {err}."
-                continue
-            if cmd in ["toggle"]:
-                nums = parse_multi_choice(" ".join(args))
-                last_operation = _toggle_shown(shown, nums)
-                continue
-            if cmd == "/":
-                continue
-
-        low = choice.lower()
-        if low == "0":
+        value = console.read_text(spec.label, current=str(pending.get(spec.key, "")), description=spec.tooltip)
+        try:
+            pending[spec.key] = _setting_value(spec, value)
             return
-        if low == "clear":
-            search_query = ""
-            label_filter = ""
-            page = 1
-            continue
-        if low.startswith("f ") or low.startswith("find "):
-            search_query = choice.split(" ", 1)[1].strip()
-            page = 1
-            continue
-        if low.startswith("l ") or low.startswith("l:"):
-            label_filter = choice.split(" ", 1)[1].strip().strip('"')
-            page = 1
-            continue
-        if low.startswith("label "):
-            try:
-                args = shlex.split(choice)
-            except ValueError:
-                continue
-            if len(args) == 4 and args[1].lower() in ["add", "remove"]:
-                action = args[1].lower()
-                label_name = args[2]
-                file_name = _shown_name(shown, args[3]) or args[3]
-                if action == "add":
-                    last_operation = add_label_to_mods(label_name, [file_name])
-                else:
-                    last_operation = remove_label_from_mods(label_name, [file_name])
-            else:
-                last_operation = 'Use: label add/remove "file name" "labelName"'
-            continue
-        if low.startswith("o "):
-            arg = low.split(" ", 1)[1].strip()
-            if arg in ["d", "default"]:
-                order_mode = "d"
-                last_operation = "Order mode set to: default"
-            elif arg in ["cd", "created date"]:
-                order_mode = "cd"
-                last_operation = "Order mode set to: created date"
-            else:
-                last_operation = "Invalid order mode. Use: d, default, cd, or created date."
-            continue
-        if low == "a":
-            deactivate_mods_page(cfg, page, label_filter, search_query, order_mode)
-            last_operation = "All on this page uninstalled."
-            continue
-        if low == "i":
-            overwrite = _confirm_overwrite([m for m in shown if not m.installed])
-            if overwrite is None:
-                continue
-            _target_page, total, err = apply_mods_page(
-                cfg, page, label_filter, search_query, order_mode, False, overwrite
-            )
-            if total > 0 and err > 0:
-                pause()
-            continue
-        page_sel = parse_page_choice(choice)
-        if page_sel:
-            page = page_sel
-            continue
-        nums = parse_multi_choice(choice)
-        last_operation = _toggle_shown(shown, nums)
+        except ValueError as error:
+            print(f"Error: {error}", file=sys.stderr)
 
-def _toggle_shown(shown: List, indexes: List[int]) -> str:
-    overwrite = _confirm_overwrite([m for m in mods_by_indexes(shown, indexes) if not m.installed])
-    if overwrite is None:
-        return "Canceled."
-    return toggle_mods_by_indexes(shown, indexes, overwrite)
 
-def menu_presets(cfg: Dict):
-    if not ensure_paths(cfg):
-        return
-    last_operation = ""
-    page = 1
+@console.interactive
+def _leave_settings(pending: dict, saved: dict) -> bool:
+    if pending == saved:
+        return True
+    print("There are unsaved settings changes.")
+    print_actions("Unsaved changes")
+    command, _args = console.read_action("Unsaved changes")
+    if command == "back":
+        return False
+    if command == "save":
+        save_config(pending)
+        print("Saved.")
+    else:
+        print("Changes discarded.")
+    return True
+
+
+@console.interactive
+def menu_settings(cfg: dict) -> None:
+    saved = dict(cfg)
+    pending = dict(cfg)
     while True:
-        _clear()
-        from .cli_utils import _PT_AVAILABLE
-        if not _PT_AVAILABLE:
-            print("Advanced completion disabled. Install: pip install prompt_toolkit\n")
-        presets, keys, page_keys, page, pages = presets_view(cfg, page)
+        console.header("Settings", cfg)
+        _print_settings(pending)
+        print_actions("Settings")
+        try:
+            command, _args = console.read_action("Settings")
+            if command == "back":
+                if _leave_settings(pending, saved):
+                    return
+            elif command == "edit":
+                _edit_setting(pending)
+            elif command == "save":
+                save_config(pending)
+                saved = dict(pending)
+                cfg.update(saved)
+                print("Saved.")
+            elif command == "discard":
+                pending = dict(saved)
+                print("Changes discarded.")
+        except MenuNavigation as navigation:
+            if _leave_settings(pending, saved):
+                raise navigation
+        except (OSError, ValueError) as error:
+            print(f"Error: {error}", file=sys.stderr)
 
-        items = discover_mods(cfg)
-        installed_set = {m.name for m in items if m.installed}
 
-        print(f"Page {page}/{pages}    Order: d    Filter: -")
-        print("=" * PRINT_SIZE)
-        if not keys:
-            print("No presets saved.")
-        else:
-            idx_w = max(2, len(str(int(cfg.get("page_size", 10)))))
-            for i, key in enumerate(page_keys, 1):
-                mods = presets[key]
-                all_on = bool(mods) and all(nm in installed_set for nm in mods)
-                mark = "[X]" if all_on else "[ ]"
-                key_disp = _preset_display_name(cfg, key)
-                print(f"{i:>{idx_w}}.  {mark} {key_disp} - [{len(mods)}]")
-
-        if last_operation:
-            print(f"\n{last_operation}")
-        print("\nType / for commands")
-
-        choice = smart_prompt("> ", _presets_cmds).strip()
-        if not choice:
-            print("Type / for commands")
-            continue
-
-        parsed = _parse_slash(choice)
-        parsed = _parse_slash(choice)
-        if parsed:
-            cmd, args = parsed
-            if cmd in ["help"]:
-                _print_presets_help()
-                pause()
-                continue
-            if cmd in ["back"]:
-                return
-            if cmd in ["exit"]:
-                raise SystemExit(0)
-            if cmd in ["page"]:
-                if args and args[0].isdigit():
-                    page = max(1, int(args[0]))
-                continue
-            if cmd in ["save"]:
-                name = " ".join(args).strip() if args else prompt("Enter new preset name: ").strip()
-                if not name:
-                    last_operation = "Canceled — empty name"
-                else:
-                    ok, msg = save_preset_from_installed(cfg, name)
-                    last_operation = msg
-                continue
-            if cmd in ["delete"]:
-                after = " ".join(args).strip()
-                nums = parse_multi_choice(after)
-                count, missing = delete_presets_by_indexes(cfg, page, nums)
-                last_operation = f"Deleted: {count}. Missing: {', '.join(missing) if missing else 'none'}"
-                continue
-            if cmd in ["toggle"]:
-                nums = parse_multi_choice(" ".join(args))
-                last_operation, msgs, has_errors = toggle_presets_by_indexes(cfg, page, nums, installed_set)
-                if has_errors:
-                    pause()
-                for m in msgs:
-                    print(" - ", m)
-                continue
-            if cmd == "/":
-                continue
-
-        low = choice.strip().lower()
-        if low == "0":
-            return
-        if low == "s" or low == "s:":
-            name = prompt("Enter new preset name: ").strip()
-            if not name:
-                print("Canceled — empty name")
-            else:
-                ok, msg = save_preset_from_installed(cfg, name)
-                print(msg)
-            continue
-        if low.startswith("s ") or low.startswith("s:"):
-            rest = choice.strip()[1:]
-            if rest.startswith(":"):
-                rest = rest[1:]
-            rest = rest.strip()
-            if not rest:
-                print('Error: missing preset name. Use: s <name> or s "name with spaces"')
-                continue
-            try:
-                args = shlex.split(rest)
-            except ValueError:
-                print('Error: invalid name format. If you need spaces use: s "імя"')
-                continue
-            if len(args) != 1:
-                print('Error: preset name must be exactly 1 argument. If you need spaces use: s "імя"')
-                continue
-            name = args[0].strip()
-            if not name:
-                print("Canceled — empty name")
-                continue
-            ok, msg = save_preset_from_installed(cfg, name)
-            print(msg)
-            continue
-        if low.startswith("d ") or low.startswith("del "):
-            after = low.split(" ", 1)[1].strip()
-            nums = parse_multi_choice(after)
-            count, missing = delete_presets_by_indexes(cfg, page, nums)
-            last_operation = f"Deleted: {count}. Missing: {', '.join(missing) if missing else 'none'}"
-            continue
-        page_sel = parse_page_choice(choice)
-        if page_sel:
-            page = page_sel
-            continue
-        nums = parse_multi_choice(choice)
-        last_operation, msgs, has_errors = toggle_presets_by_indexes(cfg, page, nums, installed_set)
-        if has_errors:
-            pause()
-        for m in msgs:
-            print(" - ", m)
-
-def main_menu():
-    cfg = load_config()
-    while True:
-        _clear()
-        print(f"{APP_NAME} v{APP_VERSION} — Menu")
-        print("=" * PRINT_SIZE)
-        active = next((p for p in cfg.get("game_profiles", []) if p.get("id") == cfg.get("active_game_profile_id")), None)
-        print(f"Game: {active.get('name') if active else '-not selected-'}")
-        print("1) 🎮 Games")
-        print("2) ⚙️ Settings")
-        print("3) 🔄 Mods    - list, toggle, search")
-        print("4) 🗃️ Presets - save,  apply, toggle, delete")
-        print("5) 📋 Open mods source folder")
-        print("6) 📂 Open game mods folder")
-        print("7) 🛠️ Fix missing mods")
-        print("0) 🏠 Exit")
-        choice = prompt("Select [0-7]: ").strip()
-        if choice == "1":
-            menu_games(cfg)
-            cfg = load_config()
-        elif choice == "2":
-            menu_settings(cfg)
-            cfg = load_config()
-        elif choice == "3":
-            menu_mods_toggle(cfg)
-        elif choice == "4":
-            menu_presets(cfg)
-        elif choice == "5":
-            ms = load_config().get("mods_source_dir", "")
-            ok, msg = open_folder(ms)
-            print(f"Open source folder: {'OK' if ok else 'ERR'} — {msg}")
-        elif choice == "6":
-            gs = load_config().get("game_mods_dir", "")
-            ok, msg = open_folder(gs)
-            print(f"Open game folder: {'OK' if ok else 'ERR'} — {msg}")
-        elif choice == "7":
-            menu_fix_broken(cfg)
-        elif choice == "0":
-            print("Goodbye!")
-            return
+def main_menu() -> int:
+    try:
+        with storage_policy():
+            while True:
+                try:
+                    cfg = load_config()
+                    console.header("Menu", cfg)
+                    print_actions("Main")
+                    command, _args = console.read_action("Main")
+                    sections = {"games": menu_games, "settings": menu_settings, "mods": menu_mods_toggle, "presets": menu_presets, "broken": menu_fix_broken}
+                    if command in sections:
+                        sections[command](cfg)
+                    elif command == "back":
+                        print("Goodbye!")
+                        return 0
+                    elif command in {"open-source", "open-game"}:
+                        console.execute(["open", "source" if command == "open-source" else "game"])
+                    elif command == "doctor":
+                        console.execute(["doctor"])
+                except MenuNavigation as navigation:
+                    if navigation.target == "exit":
+                        return 0
+                    if navigation.target == "back":
+                        print("Already at the main menu.")
+    except EOFError:
+        print("\nEnd of input.")
+        return 0
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return 130
+    except (OSError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..i18n import t
+
 import importlib.util
 import os
 
@@ -19,12 +21,15 @@ def apply_ui_scale(cfg: dict) -> None:
 
 def run_gui() -> int:
     if not qt_available():
-        print("PySide6 is required for the GUI. Install dependencies with: pip install -r requirements.txt")
+        print(t('pyside6_is_required_for_the_gui_install_dependencies_with_pip_install_r_'))
         return 2
 
     from ..storage import load_config
 
-    apply_ui_scale(load_config())
+    cfg = load_config()
+    from ..i18n import setup
+    setup(cfg.get("gui_language", "en"))
+    apply_ui_scale(cfg)
 
     from .app import start
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..theme import tokens
 from .style_utils import apply_margins
 
-PAGE_LABEL = "Page {page}/{pages}"
+PAGE_LABEL = t('page_page_pages')
 
 
 def page_text(page: int, pages: int) -> str:
@@ -20,7 +22,7 @@ class PageControl(QtWidgets.QWidget):
         self._page = 1
         self._pages = 1
         layout = apply_margins(QtWidgets.QHBoxLayout(self), margins=None, spacing=tokens.SPACE_SM)
-        layout.addWidget(QtWidgets.QLabel("Page", self))
+        layout.addWidget(QtWidgets.QLabel(t('page'), self))
         self.input = QtWidgets.QLineEdit("1", self)
         self.input.setAlignment(QtCore.Qt.AlignCenter)
         self.input.setFixedWidth(tokens.PAGE_INPUT_WIDTH)

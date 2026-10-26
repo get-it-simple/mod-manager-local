@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from ..theme import tokens
@@ -40,7 +42,7 @@ class ArchiveSelector(QtWidgets.QListView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("variant", "archiveSelector")
-        self.setAccessibleName("Archives")
+        self.setAccessibleName(t('archives'))
         self.setFlow(QtWidgets.QListView.LeftToRight)
         self.setWrapping(False)
         self.setResizeMode(QtWidgets.QListView.Adjust)
@@ -61,7 +63,7 @@ class ArchiveSelector(QtWidgets.QListView):
         self.selectionModel().currentChanged.connect(self._show_current)
 
     def item_height(self) -> int:
-        return max(tokens.ICON_SIZE, self.fontMetrics().height()) + tokens.BUTTON_PADDING[0] * 2
+        return max(tokens.ICON_BUTTON_SIZE, max(tokens.ICON_SIZE, self.fontMetrics().height()) + (tokens.BUTTON_PADDING[0] + tokens.BORDER_WIDTH) * 2)
 
     def _limited_text(self, text: str) -> str:
         if len(text) > tokens.ARCHIVE_NAME_MAX_CHARS:
@@ -81,7 +83,7 @@ class ArchiveSelector(QtWidgets.QListView):
     def _relayout(self) -> None:
         minimum = tokens.ARCHIVE_SWITCHER_MIN_WIDTH + tokens.SPACE_XS * 2
         overflow = self.model().rowCount() * minimum > self.viewport().width()
-        scrollbar = self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent) if overflow else 0
+        scrollbar = self.horizontalScrollBar().sizeHint().height() if overflow else 0
         self.setFixedHeight(self.item_height() + scrollbar)
         self.doItemsLayout()
         self._show_current()

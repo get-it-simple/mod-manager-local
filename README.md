@@ -6,7 +6,7 @@ A symlink-based mod manager for Unreal Engine games and most other engines, supp
 
 ---
 
-![Mod Manager demo](assets/2026-07-31_084946.jpg)
+![Mod Manager interface](assets/interface.png)
 
 ---
 
@@ -17,7 +17,7 @@ A symlink-based mod manager for Unreal Engine games and most other engines, supp
 ## Quick Start
 
 ```bash
-# Optional: enable tab-completion in CLI
+# Install GUI, completion and development dependencies
 pip install -r requirements.txt
 
 # Prepare archive support (requires internet on the first run)
@@ -31,6 +31,8 @@ python mod-manager.py gui
 ```
 
 > **Windows note:** Directory junctions do not require elevation. For file symlinks, Administrator rights may be needed if the account lacks the *Create symbolic links* privilege — this can be avoided by enabling [Developer Mode](https://learn.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development).
+
+> **File system support:** exFAT and FAT32 destinations cannot store symbolic links or junctions. Use **Games → Edit → Install method → copy**, or a destination with link support such as NTFS. Administrator rights and Developer Mode do not add link support to exFAT or FAT32.
 
 ---
 
@@ -89,19 +91,63 @@ python build-gui-exe.py --pyz
 - Group several file types into one mod, for example `.pak` + `.utoc` + `.ucas` sharing a name; the detail panel lists every file of the group
 - Game profiles with separate game folders, source folders, presets, labels, and active default selection
 - Presets — save and restore named mod sets
-- Labels — tag and filter mods by category
+- Labels — assign several manual labels to a mod, or automatically match labels by name fragments
 - Profile-scoped favorites — star mods independently from labels and combine the favorite, label, and search filters
-- Pagination, search, and ordering
+- Pagination, search, and ordering; filter suggestions use the complete library and show full names on hover
+- Combine search, labels, favorites and **All / Installed / Not installed**. Active filter chips can be removed individually; the result count includes the complete library before filtering.
+- Separate **Install selected / Uninstall selected** and **Install page / Uninstall page** actions show how many mods will change. Page actions affect only the current filtered page.
+- Preset actions open a review of installations, removals, unchanged entries and missing mods before applying changes. Shared mods follow the displayed preset order; unrelated mods keep their current state.
+- Archive import shows the future folder tree and the combined selection from all archives. Review the final destinations after resolving name conflicts and before importing.
+- Background operations display their stage and available item progress, followed by success, skipped and failure counts. Import failures join the session error history.
+- Empty library results explain whether to import mods, clear filters or correct a game profile's folder paths. Narrow library layouts can scroll while keeping the active game and installation method visible.
+- Combine search, labels, favorites and **All / Installed / Not installed**. Active filter chips can be removed individually; the result count includes the complete library before filtering.
+- Separate **Install selected / Uninstall selected** and **Install page / Uninstall page** actions show how many mods will change. Page actions affect only the current filtered page.
+- Preset actions open a review of installations, removals, unchanged entries and missing mods before applying changes. Shared mods follow the displayed preset order; unrelated mods keep their current state.
+- Archive import shows the future folder tree and the combined selection from all archives. Review the final destinations after resolving name conflicts and before importing.
+- Background operations display their stage and available item progress, followed by success, skipped and failure counts. Import failures join the session error history.
+- Empty library results explain whether to import mods, clear filters or correct a game profile's folder paths. Narrow library layouts can scroll while keeping the active game and installation method visible.
 - Broken link detection and cleanup
 - GUI (PySide6/Qt) and CLI interfaces
+- The GUI sidebar opens Library, Labels, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
+- **Labels** lists the active game's labels, their modes and matching mod counts. Narrowing the list shows only a mode icon and mod count; hover for the full label details. Select a label to rename it, choose **Manual** or **Automatic**, and inspect matching mods. Manual mode uses checked mods. Switching modes retains both sets of choices.
+- **Automatic** matches any name fragment, ignoring letter case. Numbered fragment chips wrap to the available width and scroll after four rows. Click a chip or its pencil to edit; click the pencil again or press Enter to confirm, and use its trash icon to remove it. Add fragments beside **Name fragments** and press Enter to start another. Chips display up to 32 characters; hover for the full text, which remains saved and editable. The matching table shows every matching fragment number; numbers update after deletion. New matching mods join automatically when the library refreshes.
+- Labels, fragments and manual assignments save automatically after a 600 ms pause, including input entered without pressing Enter. Duplicate or empty label names and invalid fragments remain editable without overwriting saved values. Automatic labels need at least one fragment. Pending valid changes save before switching profiles or closing; invalid drafts remain separate for each profile during the session. Write errors offer retry, and conflicting edits can be resolved by reloading saved labels. Existing single-label data remains supported.
+- Mod details provide actions to create or assign a label. Each manual label has a removal icon; automatic labels have an edit-rule icon. With several mods selected, labels show membership counts and removal affects only selected mods. Clicking a label name filters the library. Label removal and management are available through details rather than the context menu.
+- Search and label fields use available toolbar width. Dropdowns and suggestions can extend beyond their fields while staying inside the screen. Selecting a suggestion applies it immediately; typed filters apply after a short pause. Pagination and installation actions stay at the bottom of Library, with a separator between page and selection actions.
+- Preset reviews show each operation above a status/name/extension table, without preset names, using one shared scrollbar. Archive destination trees remain fully expanded.
+- The **Details** button shows or hides the selected mod's information beside both list and tile views. Visibility and panel width are remembered between launches.
+- Right-click a mod in the list or tile view for an icon menu with install/uninstall, favorites, labels, preview image, Explorer locations, and details actions. Right-clicking a selected mod targets the whole selection; right-clicking another mod targets only that mod. Opening or dismissing the menu preserves selection. **Show details** is always available, including when the details panel is hidden. Close the panel with its close button or the **Details** header button.
+- Settings keep unsaved edits while you move between pages. **Save** applies them; **Reset changes** restores the saved values. Closing the application discards unsaved edits.
+- Settings and Labels indicate unsaved drafts in navigation. Label drafts remain separate for each game profile.
+- **Settings → Keyboard shortcuts** is collapsed initially; use the centered arrow to expand it. Each field contains its command and recorded combination. Enable or disable bindings, or clear them with the field's clear button, Backspace or Delete. **Restore defaults** edits the draft; **Save** validates conflicts and applies it. Shortcuts respect text editing and modal dialogs.
+- Default shortcuts include **Ctrl+F** for library search, **F5** for refreshing the current page, **Ctrl+S** for saving Settings or Labels, and **F1** for keyboard help. The help button and tooltips show the saved assignments. Existing paste, navigation and tile zoom shortcuts remain available.
+- The interface currently ships in English. Language catalogs use one `strings.json` per language under `mod_manager/i18n/<language>/`; additional catalogs are discovered automatically and missing entries fall back to English. The Language setting applies after saving and restarting.
+- The GUI status bar shows a clickable error count for mod operations. Open it to review failed files, full source/destination paths, and error descriptions from the current session, including batch and preset actions. History remains available across game profile changes and resets when the application closes.
+- Source and destination paths in the mod details show the two nearest directories and the file or folder name, up to 100 characters. Longer text is shortened in the middle to fit; hover to see the full path or click to locate it in Explorer.
 - Drag, drop, paste, or pick mod files/folders in the GUI
 - Import nested ZIP, 7z and RAR archives, with a manager for choosing separate variants or adding them together
-- Optional local image for mods
+- Optional local image for mods, including assigning one preview to multiple selected mods with confirmation
 - List and tile view modes in the GUI
 - Tile view preview images, installed markers, keyboard navigation, and zoom
 - Virtual rendering keeps off-screen mod rows and tiles from being drawn beyond a one-row buffer
 
 ---
+
+</details>
+
+<details>
+<summary>Mod preview images</summary>
+
+Select a mod and press **Ctrl+V** to set a copied image file, browser image, or screenshot as its preview.
+With multiple mods selected, a confirmation shows the image and the number of previews that will be replaced.
+Paste one image at a time. Without a selection, pasting an image lets you choose a mod.
+
+**Set preview image** first offers a usable image from the clipboard, with a thumbnail.
+Choose **Use image** to apply it, **Choose file...** to select another image, or **Cancel** to stop.
+If no single usable image is available, the file chooser opens directly.
+Applying to multiple mods always requires confirmation; accepting the clipboard offer also confirms that batch.
+Preview files are stored locally in the source folder's `images` directory. Original image files are preserved.
+In the details panel, previews automatically fit the space below the mod information, including enlarging small images, while preserving their proportions and showing the whole image.
 
 </details>
 
@@ -177,6 +223,105 @@ pip install -r requirements.txt
 
 All commands follow the pattern: `python mod-manager.py <command> <subcommand> [args] [flags]`
 
+CLI and GUI share game profiles, settings and mod state. Launch the GUI directly
+with `python mod-manager-gui.py`, or use the `gui` command. Ordinary CLI commands
+do not require Qt; interactive completion is optional.
+
+### Getting started and checking configuration
+
+```bash
+python mod-manager.py doctor
+python mod-manager.py games add "My Game" --mods-source-dir "D:/Mods/MyGame" --game-mods-dir "D:/Games/MyGame/Mods"
+python mod-manager.py games prepare
+python mod-manager.py games prepare --create-dirs
+python mod-manager.py mods list
+```
+
+`doctor` checks the active profile, paths, stored metadata and optional components
+without changing files. `games prepare` lists the folder status; only
+`--create-dirs` authorizes creating missing folders. Source and game mods folders
+must be separate and must not contain each other. Listing and opening folders do
+not create them. Presets can be listed and deleted before paths are ready;
+`[?]` means their installation state is unavailable.
+
+Missing configuration starts with defaults. Invalid configuration or metadata is
+reported without replacing the file. Correct the reported value or permissions
+and retry. Exit codes are `0` for success, `1` for configuration or operation
+failures, `2` for invalid arguments, and `130` for interruption. Partial operation
+failures return a nonzero code and show the affected items on stderr.
+
+### Interactive navigation
+
+Run `python mod-manager.py` without arguments to open the menus. Each section
+shows the active game, an **Items** list marked with `#` numbers, and separate
+**Actions**, one per line. Enter an action number first; the application then
+asks for the item number or value needed by that action.
+
+For example, to edit game #1:
+
+```text
+Items
+  #1 [*] My Game
+
+Actions
+  1) Add a game
+  2) Edit a game
+  3) Delete a game
+  4) Select the active game
+  5) Prepare folders
+  0) Back
+  ?) Help
+
+Choose an action: 2
+Enter game number to edit (1–1, for example 1), or 0 to cancel: 1
+Editing: My Game (#1)
+```
+
+In Mods, use **Toggle selected mods**, **Install current page**, **Uninstall
+current page**, **Search mods**, **Labels**, **Favorites**, **Sort mods**, or
+**Pages**. Labels, Favorites and Pages offer their own numbered actions.
+Presets and Broken links use the same action-then-selection pattern.
+
+| Command | Action |
+|---|---|
+| `?`, `/help` or `/` | Explain the current menu and show shortcut examples |
+| `0` | Go back; at an item-selection prompt, cancel the action |
+| `/back` | Return to the previous menu; cancel an unfinished edit |
+| `/home` | Return to the main menu; cancel an unfinished edit |
+| `/exit` | Exit the application |
+| `/next`, `/prev`, `/page N` | Navigate paged lists |
+| `/refresh` | Reload the current list |
+| `/clear` | Clear mod search, label and favorite filters |
+| `/favorite` | Toggle the mod favorites filter |
+
+Bare numbers now choose actions, not items. To toggle mod #1, choose
+**1) Toggle selected mods**, then enter `1`, or use the explicit `/toggle 1`
+shortcut. In Games, `e1`, `e 1` and `edit 1` edit game #1; `d1`, `d 1` and
+`delete 1` delete it; `select 1` selects it. Enter an actual number, not the
+placeholder letter N.
+
+Other shortcuts remain available: `p2` opens page 2, `f text` searches,
+`l:label` filters labels, `i` installs the current mod page, and `a` uninstalls
+the current mod page. In Presets, `s "My loadout"` saves and `d 1,2` deletes.
+Games offers **Prepare folders** with a confirmation before creating folders.
+
+Settings offers **1) Edit a setting**, **2) Save changes** and **3) Discard
+changes**. Choose Edit, then a field number from the grouped list. When leaving
+with staged changes, choose **1) Save changes and leave**, **2) Discard changes
+and leave**, or **0) Back** to keep editing. `s` also saves changes.
+
+At selection prompts, `0` cancels and returns one level. In text fields, Enter
+keeps the current value and `/back` cancels; the text `0` remains a valid value.
+Ctrl+C cancels an input or operation without saving unfinished edits; EOF exits
+the session. At the main menu Ctrl+C exits with code `130`. One-shot commands
+and their arguments retain their existing syntax.
+
+Use positive indexes separated by commas, such as `1,3,5`. Duplicates are applied
+once. An invalid or out-of-range index rejects the entire selection before any
+change. Indexes refer to the currently displayed page: repeat the same page,
+filters and order when invoking a separate command. `install` and `uninstall`
+operate on the entire selected page; `toggle` acts only on the given indexes.
+
 ### `games` — Manage game profiles
 
 | Subcommand | Description |
@@ -186,6 +331,7 @@ All commands follow the pattern: `python mod-manager.py <command> <subcommand> [
 | `select <profile-id>` | Select the active profile for the next launch |
 | `edit <profile-id>` | Update profile name or game-specific settings |
 | `delete <profile-id>` | Delete a profile |
+| `prepare [--create-dirs]` | Inspect active game folders; explicitly create missing folders |
 
 **Profile options:**
 
@@ -208,6 +354,8 @@ All commands follow the pattern: `python mod-manager.py <command> <subcommand> [
 `--mod-group-extensions` joins several file types into a single mod. With `.pak,.utoc,.ucas`, the files `Weapon.pak`, `Weapon.utoc` and `Weapon.ucas` become one mod listed as `Weapon.pak` — named after the first extension in the list that is actually present — and installing, uninstalling, or applying a preset covers every member at once. A grouped mod counts as installed only when all of its files are in the game folder; a half-installed group completes on the next install. Grouped extensions are always treated as mod files even when `--mod-extensions` does not list them, and files are only grouped with siblings in the same folder, so a recursive scan never merges two same-named mods from different subfolders.
 
 `--install-mode` selects how mods reach the game folder. `link` (the default) creates symlinks and junctions as before. `copy` physically copies the mod files, for games that refuse to load linked content; uninstalling then deletes those copies from the game folder and never touches your source mods. In copy mode an install that would replace an existing file asks for confirmation first — the GUI shows a dialog listing the affected files, and the CLI prints them and stops unless `--overwrite` is given.
+
+When the destination file system reports no link support, the GUI and interactive text menus offer to save `copy` in the current game profile and retry only the failed installations. Declining keeps the profile unchanged. Existing successful links and installations stay in place; replacing a conflicting file requires separate confirmation. Failed attempts remain in the GUI session error history. One-shot CLI commands never prompt or change the install method automatically: use `games edit <profile-id> --install-mode copy`, then retry the failed installations.
 
 **Examples:**
 
@@ -363,7 +511,7 @@ python mod-manager.py settings set --gui-text-color-mode custom --gui-text-color
 
 | Subcommand | Description |
 |---|---|
-| `list` | List all broken symlinks in the game directory |
+| `list` | List broken symlinks and Windows junctions in the game mods directory |
 | `remove <indexes>` | Remove specific broken links by index |
 | `remove --all` | Remove all broken links |
 
@@ -372,6 +520,10 @@ python mod-manager.py broken list
 python mod-manager.py broken remove 1,2
 python mod-manager.py broken remove --all
 ```
+
+Cleanup checks links in the destination folder, including links whose source
+mod has disappeared. Regular files, copied mods and live links are preserved.
+Choose indexes or `--all`; invoking `remove` without either is an error.
 
 ---
 

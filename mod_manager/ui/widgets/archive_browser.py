@@ -3,8 +3,12 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...imports import PreparedArchive
+from ...import_preview import destination_rows, preview_plans
+from ...i18n import t
+from .plan_review import PlanTree
 from ...settings_schema import label_for, spec_for
 from ..models.archive_model import ArchiveModModel
+from ..models.columns import configure_header
 from ..theme import tokens
 from .archive_selector import ArchiveSelector
 from .style_utils import apply_margins
@@ -25,7 +29,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
         self.filename = QtWidgets.QLabel(self)
         self.filename.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self.filename.setWordWrap(True)
-        self.together = QtWidgets.QCheckBox("Add files together", self)
+        self.together = QtWidgets.QCheckBox(t('add_files_together'), self)
         self.together.setToolTip(spec_for("archive_import_mode").tooltip)
         self.preserve = QtWidgets.QCheckBox(label_for("archive_preserve_structure"), self)
         self.preserve.setToolTip(spec_for("archive_preserve_structure").tooltip)
@@ -34,6 +38,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
         self.model = ArchiveModModel(self)
         self.table = QtWidgets.QTableView(self)
         self.table.setModel(self.model)
+        configure_header(self.table, self.model.COLUMNS)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -44,16 +49,16 @@ class ArchiveBrowser(QtWidgets.QWidget):
         self.table.setAcceptDrops(True)
         self.table.viewport().setAcceptDrops(True)
         self.table.viewport().installEventFilter(self)
-        self.preview = QtWidgets.QLabel("Select a mod to assign a preview", self)
+        self.preview = QtWidgets.QLabel(t('select_a_mod_to_assign_a_preview'), self)
         self.preview.setAlignment(QtCore.Qt.AlignCenter)
         self.preview.setWordWrap(True)
         self.preview.setFixedSize(tokens.ARCHIVE_PREVIEW_SIZE, tokens.ARCHIVE_PREVIEW_SIZE)
         self.toolbar = IconToolbar(self)
-        selection = self.toolbar.add_section("selection", "Selection")
-        selection.add_text_action("select_all", "Select all", "add", "Select every mod", lambda: self.model.select_all(True))
-        selection.add_text_action("select_none", "Select none", "clear", "Clear the mod selection", lambda: self.model.select_all(False))
-        artwork = self.toolbar.add_section("preview", "Preview")
-        artwork.add_action("clear_image", "clear", "Clear the selected mod preview", self.clear_preview)
+        selection = self.toolbar.add_section("selection", t('selection'))
+        selection.add_text_action("select_all", t('select_all'), "add", t('select_every_mod'), lambda: self.model.select_all(True))
+        selection.add_text_action("select_none", t('select_none'), "clear", t('clear_the_mod_selection'), lambda: self.model.select_all(False))
+        artwork = self.toolbar.add_section("preview", t('preview'))
+        artwork.add_action("clear_image", "clear", t('clear_the_selected_mod_preview'), self.clear_preview)
         self.toolbar.add_stretch()
         options = apply_margins(QtWidgets.QHBoxLayout(), spacing=tokens.SPACE_LG)
         options.addWidget(self.together)
@@ -68,6 +73,22 @@ class ArchiveBrowser(QtWidgets.QWidget):
         layout.addLayout(options)
         layout.addWidget(self.toolbar)
         layout.addLayout(content, 1)
+        self.destination_root = ""
+        self.destination_summary = QtWidgets.QLabel(self)
+        self.destination_summary.setWordWrap(True)
+        self.destination_tree = PlanTree(self)
+        layout.addWidget(self.destination_summary)
+        layout.addWidget(self.destination_tree, 1)
+        self.model.dataChanged.connect(self.update_destination_preview)
+        self.model.modelReset.connect(self.update_destination_preview)
+
+    def update_destination_preview(self, *_args) -> None:
+        if not hasattr(self, "destination_tree"):
+            return
+        plans = preview_plans(self.archives)
+        self.destination_summary.setText(t("import_selection_summary", mods=len(plans), archives=len(self.archives),
+                                           files=sum(len(plan.files) for plan in plans)))
+        self.destination_tree.set_rows(destination_rows(self.destination_root, plans))
 
     @property
     def archive(self) -> PreparedArchive | None:
@@ -105,6 +126,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
         self._update_actions()
         self.update_preview()
         self.archiveChanged.emit(current.row())
+        self.update_destination_preview()
 
     def _update_actions(self) -> None:
         separate = self.archive is not None and self.archive.mode == "separate"
@@ -121,6 +143,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
     def _preserve_changed(self, preserve: bool) -> None:
         if self.archive is not None:
             self.archive.preserve_structure = preserve
+            self.update_destination_preview()
 
     def update_preview(self, *_args) -> None:
         archive = self.archive
@@ -128,7 +151,7 @@ class ArchiveBrowser(QtWidgets.QWidget):
         pixmap = QtGui.QPixmap(str(path)) if path else QtGui.QPixmap()
         self.preview.clear()
         if pixmap.isNull():
-            self.preview.setText("Select a mod to assign a preview" if archive and archive.mode == "separate" else "Files will be added together")
+            self.preview.setText(t('select_a_mod_to_assign_a_preview') if archive and archive.mode == "separate" else t('files_will_be_added_together'))
         else:
             self.preview.setPixmap(pixmap.scaled(self.preview.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
 

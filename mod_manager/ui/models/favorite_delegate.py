@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .. import icons
@@ -53,7 +55,7 @@ class FavoriteDelegate(QtWidgets.QStyledItemDelegate):
     def helpEvent(self, event, view, option, index) -> bool:
         mod = index.data(QtCore.Qt.UserRole)
         if mod is not None and self.star_rect(option.rect).contains(event.pos()):
-            action = "Remove from favorites" if mod.name in self.favorites else "Add to favorites"
+            action = t('remove_from_favorites') if mod.name in self.favorites else t('add_to_favorites')
             QtWidgets.QToolTip.showText(event.globalPos(), action, view)
             return True
         return super().helpEvent(event, view, option, index)

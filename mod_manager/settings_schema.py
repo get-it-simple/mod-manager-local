@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app_paths import DEFAULT_CONFIG
+from .i18n import available_languages, t
+from .keyboard import validate_bindings
 
 from .ui.theme.colors import normalize_hex
 
@@ -13,6 +15,7 @@ CHOICE = "choice"
 FLAG = "flag"
 COLOR = "color"
 FONT = "font"
+SHORTCUTS = "shortcuts"
 
 INTERNAL_KEYS = frozenset({
     "active_game_profile_id",
@@ -46,54 +49,66 @@ class FieldSpec:
 
 GAME_NAME_FIELD = FieldSpec(
     key="name",
-    label="Game name",
-    tooltip="Name shown in the game switcher. The two letter abbreviation on the game button is derived from it.",
+    label=t('game_name'),
+    tooltip=t('name_shown_in_the_game_switcher_the_two_letter_abbreviation_on_the_game_'),
     kind=TEXT,
+)
+
+LABEL_NAME_FIELD = FieldSpec("label_name", t('label_name'), t('unique_name_shown_in_the_library_and_label_filters'), TEXT)
+LABEL_MODE_FIELD = FieldSpec(
+    "label_mode", t('mode'), t('manual_uses_selected_mods_automatic_matches_any_name_fragment_ignoring_l'),
+    CHOICE, choices=(t('manual'), t('automatic')),
+)
+LABEL_TERMS_FIELD = FieldSpec(
+    "label_terms", t('name_fragments'), t('enter_a_fragment_and_press_enter_to_add_another_edit_or_delete_existing_'), TEXT,
+)
+LABEL_MEMBERS_FIELD = FieldSpec(
+    "label_members", t('manual_mods'), t('check_mods_to_assign_this_label_manually_these_choices_are_retained_when'), TEXT,
 )
 
 MODS_FIELDS = (
     FieldSpec(
         key="mods_source_dir",
-        label="Mods source folder",
-        tooltip="Folder that holds your downloaded mod files and folders. Imported mods are copied here and are never changed when you install or uninstall.",
+        label=t('mods_source_folder'),
+        tooltip=t('folder_that_holds_your_downloaded_mod_files_and_folders_imported_mods_ar'),
         kind=PATH,
         browse=True,
     ),
     FieldSpec(
         key="game_mods_dir",
-        label="Game mods folder",
-        tooltip="Folder inside the game where install links are created. Uninstalling removes only those links, never your source mods.",
+        label=t('game_mods_folder'),
+        tooltip=t('folder_inside_the_game_where_install_links_are_created_uninstalling_remo'),
         kind=PATH,
         browse=True,
     ),
     FieldSpec(
         key="mod_extensions",
-        label="Mod file extensions",
-        tooltip="Comma separated file extensions treated as mods, for example .pak,.utoc. Leave empty to accept every non image file. Add 'folders' to also treat subfolders as mods.",
+        label=t('mod_file_extensions'),
+        tooltip=t('comma_separated_file_extensions_treated_as_mods_for_example_pak_utoc_lea'),
         kind=TEXT,
     ),
     FieldSpec(
         key="mod_group_extensions",
-        label="Grouped extensions",
-        tooltip="Comma separated extensions joined into a single mod when the files share a name, for example .pak,.utoc,.ucas. Installing or uninstalling then applies to every file of the group.",
+        label=t('grouped_extensions'),
+        tooltip=t('comma_separated_extensions_joined_into_a_single_mod_when_the_files_share'),
         kind=TEXT,
     ),
     FieldSpec(
         key="mod_recursive_scan",
-        label="Scan subfolders",
-        tooltip="Also look inside subfolders of the mods source folder when listing available mods.",
+        label=t('scan_subfolders'),
+        tooltip=t('also_look_inside_subfolders_of_the_mods_source_folder_when_listing_avail'),
         kind=FLAG,
     ),
     FieldSpec(
         key="link_prefix",
-        label="Link name prefix",
-        tooltip="Text added to the start of created link names in the game mods folder. Applies to linked files only, not to folders.",
+        label=t('link_name_prefix'),
+        tooltip=t('text_added_to_the_start_of_created_link_names_in_the_game_mods_folder_ap'),
         kind=TEXT,
     ),
     FieldSpec(
         key="install_mode",
-        label="Install method",
-        tooltip="Link creates a symlink or junction in the game mods folder. Copy physically copies the mod files there for games that cannot load linked files.",
+        label=t('install_method'),
+        tooltip=t('link_creates_a_symlink_or_junction_in_the_game_mods_folder_copy_physical'),
         kind=CHOICE,
         choices=("link", "copy"),
     ),
@@ -102,32 +117,32 @@ MODS_FIELDS = (
 LIST_FIELDS = (
     FieldSpec(
         key="page_size",
-        label="Mods per page",
-        tooltip="How many mods are shown on a single page in the mods list and in paged command line output.",
+        label=t('mods_per_page'),
+        tooltip=t('how_many_mods_are_shown_on_a_single_page_in_the_mods_list_and_in_paged_c'),
         kind=INT,
         minimum=1,
         maximum=1000,
     ),
     FieldSpec(
         key="max_mod_name_len",
-        label="Max mod name length",
-        tooltip="Longest mod name shown before it is shortened with an ellipsis. Display only, your files are never renamed.",
+        label=t('max_mod_name_length'),
+        tooltip=t('longest_mod_name_shown_before_it_is_shortened_with_an_ellipsis_display_o'),
         kind=INT,
         minimum=4,
         maximum=200,
     ),
     FieldSpec(
         key="max_preset_name_len",
-        label="Max preset name length",
-        tooltip="Longest preset name shown before it is shortened in the presets list.",
+        label=t('max_preset_name_length'),
+        tooltip=t('longest_preset_name_shown_before_it_is_shortened_in_the_presets_list'),
         kind=INT,
         minimum=4,
         maximum=200,
     ),
     FieldSpec(
         key="max_label_name_len",
-        label="Max label length",
-        tooltip="Longest label text shown before it is shortened on tiles and in the Label column.",
+        label=t('max_label_length'),
+        tooltip=t('longest_label_text_shown_before_it_is_shortened_on_tiles_and_in_the_labe'),
         kind=INT,
         minimum=2,
         maximum=64,
@@ -135,59 +150,66 @@ LIST_FIELDS = (
 )
 
 APPEARANCE_FIELDS = (
+    FieldSpec("gui_language", t("language_label"), t("language_help"), CHOICE, choices=available_languages()),
+    FieldSpec(
+        key="mod_details_visible",
+        label=t('details'),
+        tooltip=t('show_the_selected_mod_details_beside_the_library_in_list_and_tile_views_'),
+        kind=FLAG,
+    ),
     FieldSpec(
         key="gui_theme",
-        label="Theme",
-        tooltip="Follow the operating system appearance, or always use the light or the dark colour scheme.",
+        label=t('theme'),
+        tooltip=t('follow_the_operating_system_appearance_or_always_use_the_light_or_the_da'),
         kind=CHOICE,
         choices=("system", "light", "dark"),
     ),
     FieldSpec(
         key="gui_accent_color_mode",
-        label="Accent colour",
-        tooltip="Use the accent colour of the operating system, or pick a fixed custom accent colour.",
+        label=t('accent_colour'),
+        tooltip=t('use_the_accent_colour_of_the_operating_system_or_pick_a_fixed_custom_acc'),
         kind=CHOICE,
         choices=("system", "custom"),
     ),
     FieldSpec(
         key="gui_accent_color",
-        label="Custom accent colour",
-        tooltip="Colour used for selection highlights, tile badges and checked buttons. Used only while the accent colour is set to custom.",
+        label=t('custom_accent_colour'),
+        tooltip=t('colour_used_for_selection_highlights_tile_badges_and_checked_buttons_use'),
         kind=COLOR,
         depends_on=("gui_accent_color_mode", "custom"),
     ),
     FieldSpec(
         key="gui_text_color_mode",
-        label="Text colour",
-        tooltip="Use the default text colour of the theme, or pick a fixed custom text colour.",
+        label=t('text_colour'),
+        tooltip=t('use_the_default_text_colour_of_the_theme_or_pick_a_fixed_custom_text_col'),
         kind=CHOICE,
         choices=("system", "custom"),
     ),
     FieldSpec(
         key="gui_text_color",
-        label="Custom text colour",
-        tooltip="Colour used for window, button, input and tooltip text. Used only while the text colour is set to custom.",
+        label=t('custom_text_colour'),
+        tooltip=t('colour_used_for_window_button_input_and_tooltip_text_used_only_while_the'),
         kind=COLOR,
         depends_on=("gui_text_color_mode", "custom"),
     ),
     FieldSpec(
         key="gui_font_family",
-        label="Font family",
-        tooltip="Font used across the whole interface. Leave empty to use the system default font.",
+        label=t('font_family'),
+        tooltip=t('font_used_across_the_whole_interface_leave_empty_to_use_the_system_defau'),
         kind=FONT,
     ),
     FieldSpec(
         key="gui_font_size",
-        label="Font size",
-        tooltip="Point size of the interface font. Applies immediately after saving.",
+        label=t('font_size'),
+        tooltip=t('point_size_of_the_interface_font_applies_immediately_after_saving'),
         kind=INT,
         minimum=6,
         maximum=40,
     ),
     FieldSpec(
         key="ui_scale_percent",
-        label="Interface scale",
-        tooltip="Scales the whole interface, in percent. Restart the application for a change to take effect.",
+        label=t('interface_scale'),
+        tooltip=t('scales_the_whole_interface_in_percent_restart_the_application_for_a_chan'),
         kind=INT,
         minimum=50,
         maximum=400,
@@ -197,23 +219,23 @@ APPEARANCE_FIELDS = (
 MODS_VIEW_FIELDS = (
     FieldSpec(
         key="mod_view_mode",
-        label="Mods view",
-        tooltip="Show mods as a details list, or as image tiles with a preview panel next to them.",
+        label=t('mods_view'),
+        tooltip=t('show_mods_as_a_details_list_or_as_image_tiles_with_a_preview_panel_next_'),
         kind=CHOICE,
         choices=("list", "tiles"),
     ),
     FieldSpec(
         key="tile_size",
-        label="Tile size",
-        tooltip="Width in pixels of a mod tile in tile view. Ctrl together with the mouse wheel changes this while browsing.",
+        label=t('tile_size'),
+        tooltip=t('width_in_pixels_of_a_mod_tile_in_tile_view_ctrl_together_with_the_mouse_'),
         kind=INT,
         minimum=96,
         maximum=280,
     ),
     FieldSpec(
         key="placeholder_image_col_width",
-        label="State column width",
-        tooltip="Width in pixels of the leading install state column in the mods list.",
+        label=t('state_column_width'),
+        tooltip=t('width_in_pixels_of_the_leading_install_state_column_in_the_mods_list'),
         kind=INT,
         minimum=16,
         maximum=400,
@@ -223,30 +245,31 @@ MODS_VIEW_FIELDS = (
 IMPORT_FIELDS = (
     FieldSpec(
         key="archive_import_mode",
-        label="Default archive import mode",
-        tooltip="Together creates one folder named after the archive. Separate imports each selected file or related file group as a mod.",
+        label=t('default_archive_import_mode'),
+        tooltip=t('together_creates_one_folder_named_after_the_archive_separate_imports_eac'),
         kind=CHOICE,
         choices=("together", "separate"),
     ),
     FieldSpec(
         key="archive_preserve_structure",
-        label="Preserve archive folder structure",
-        tooltip="Keep paths inside the archive. Separate mode creates a folder for each mod. Turn off to flatten the imported files.",
+        label=t('preserve_archive_folder_structure'),
+        tooltip=t('keep_paths_inside_the_archive_separate_mode_creates_a_folder_for_each_mo'),
         kind=FLAG,
     ),
     FieldSpec(
         key="import_ignore_extensions",
-        label="Ignored import extensions",
-        tooltip="Comma-separated extensions to exclude from new files, folders and archives, for example .txt,.md. Existing mods and explicitly assigned preview images are unaffected.",
+        label=t('ignored_import_extensions'),
+        tooltip=t('comma_separated_extensions_to_exclude_from_new_files_folders_and_archive'),
         kind=TEXT,
     ),
 )
 
 SETTINGS_SECTIONS = (
-    ("Lists", LIST_FIELDS),
-    ("Import", IMPORT_FIELDS),
-    ("Appearance", APPEARANCE_FIELDS),
-    ("Mods view", MODS_VIEW_FIELDS),
+    (t('lists'), LIST_FIELDS),
+    (t('import'), IMPORT_FIELDS),
+    (t('appearance'), APPEARANCE_FIELDS),
+    (t('mods_view'), MODS_VIEW_FIELDS),
+    (t('shortcuts_label'), (FieldSpec("keyboard_shortcuts", t("shortcuts_label"), t("shortcuts_help"), SHORTCUTS),)),
 )
 
 GAME_PROFILE_FIELDS = (GAME_NAME_FIELD, *MODS_FIELDS)
@@ -279,9 +302,9 @@ def parse_int(spec: FieldSpec, value) -> int:
     try:
         number = int(str(value).strip().rstrip("%"))
     except (TypeError, ValueError):
-        raise ValueError(f"{spec.label} must be a whole number.") from None
+        raise ValueError(t('value0_must_be_a_whole_number', value0=f'{spec.label}')) from None
     if spec.minimum is not None and spec.maximum is not None and not spec.minimum <= number <= spec.maximum:
-        raise ValueError(f"{spec.label} must be {spec.range_text}.")
+        raise ValueError(t('value0_must_be_value1', value0=f'{spec.label}', value1=f'{spec.range_text}'))
     return number
 
 
@@ -297,6 +320,8 @@ def normalize_color(spec: FieldSpec, value) -> str:
 
 def read_value(spec: FieldSpec, cfg: dict):
     value = cfg.get(spec.key, DEFAULT_CONFIG.get(spec.key, ""))
+    if spec.kind == SHORTCUTS:
+        return validate_bindings(value or {})
     if spec.kind == FLAG:
         return bool(value)
     return str(value if value is not None else "")
@@ -311,6 +336,11 @@ def default_settings() -> dict:
 
 
 def coerce_value(spec: FieldSpec, value):
+    if spec.kind == SHORTCUTS:
+        if isinstance(value, str):
+            import json
+            value = json.loads(value)
+        return validate_bindings(value)
     if spec.kind == FLAG:
         return bool(value)
     if spec.kind == INT:

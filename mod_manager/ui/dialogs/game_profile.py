@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtWidgets
 
 from ...settings_schema import GAME_PROFILE_FIELDS
@@ -7,8 +9,8 @@ from ..theme import tokens
 from ..widgets.form import FormBuilder
 from . import prompts
 
-TITLE = "Game profile"
-MISSING_NAME = "Enter game name."
+TITLE = t('game_profile')
+MISSING_NAME = t('enter_game_name')
 
 
 class GameProfileDialog(QtWidgets.QDialog):

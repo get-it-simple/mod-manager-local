@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 import ctypes
 import queue
 from pathlib import Path
@@ -71,7 +73,7 @@ class QtWindowsDropTarget:
             hr = ole32.OleInitialize(None)
             self._ole_initialized = hr in (S_OK, 1)
             if hr not in (S_OK, 1):
-                logger.warning("dragdrop: OleInitialize returned 0x%x", hr & 0xFFFFFFFF)
+                logger.warning(t('dragdrop_oleinitialize_returned_0x_x'), hr & 0xFFFFFFFF)
 
             cf_filedesc = user32.RegisterClipboardFormatW("FileGroupDescriptorW")
             cf_filecontents = user32.RegisterClipboardFormatW("FileContents")
@@ -122,7 +124,7 @@ class QtWindowsDropTarget:
                     else:
                         pdwEffect[0] = DROPEFFECT_NONE
                 except Exception as exc:
-                    logger.error("dragdrop: Drop error: %s", exc, exc_info=True)
+                    logger.error(t('dragdrop_drop_error_s'), exc, exc_info=True)
                     pdwEffect[0] = DROPEFFECT_NONE
                 return S_OK
 
@@ -165,7 +167,7 @@ class QtWindowsDropTarget:
             logger.info("dragdrop: COM drop target registered hwnd=%s", hwnd)
             self._start_poll()
         except Exception as exc:
-            logger.error("dragdrop: QtWindowsDropTarget.enable failed: %s", exc, exc_info=True)
+            logger.error(t('dragdrop_qtwindowsdroptarget_enable_failed_s'), exc, exc_info=True)
 
     def disable(self) -> None:
         self._disposed = True
@@ -173,7 +175,7 @@ class QtWindowsDropTarget:
             try:
                 self._ole32.RevokeDragDrop(ctypes.c_void_p(self._hwnd))
             except Exception as exc:
-                logger.error("dragdrop: RevokeDragDrop failed: %s", exc)
+                logger.error(t('dragdrop_revokedragdrop_failed_s'), exc)
             self.enabled = False
         if self._timer is not None:
             self._timer.stop()
@@ -200,7 +202,7 @@ class QtWindowsDropTarget:
                 paths, x, y = self._pending.get_nowait()
                 self.callback(paths, x, y)
             except Exception as exc:
-                logger.error("dragdrop: callback error: %s", exc, exc_info=True)
+                logger.error(t('dragdrop_callback_error_s'), exc, exc_info=True)
 
 
 def dropped_paths(mime) -> list[Path]:

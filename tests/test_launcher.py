@@ -8,13 +8,15 @@ from unittest.mock import patch
 
 class LauncherTests(unittest.TestCase):
     def test_plain_script_mode_starts_interactive_menu(self):
-        with patch("sys.argv", ["mod-manager.py"]), patch("mod_manager.menus.main_menu") as main_menu, patch(
+        with patch("sys.argv", ["mod-manager.py"]), patch("mod_manager.menus.main_menu", return_value=0) as main_menu, patch(
             "mod_manager.cli.run_cli"
         ) as run_cli:
-            runpy.run_path("mod-manager.py", run_name="__main__")
+            with self.assertRaises(SystemExit) as result:
+                runpy.run_path("mod-manager.py", run_name="__main__")
 
         main_menu.assert_called_once_with()
         run_cli.assert_not_called()
+        self.assertEqual(result.exception.code, 0)
 
     def test_script_with_arguments_delegates_to_cli_and_exits_with_cli_code(self):
         with patch("sys.argv", ["mod-manager.py", "help", "mods"]), patch(
@@ -34,9 +36,11 @@ class LauncherTests(unittest.TestCase):
             "mod_manager.menus.main_menu",
             side_effect=KeyboardInterrupt,
         ), patch("sys.stdout", out):
-            runpy.run_path("mod-manager.py", run_name="__main__")
+            with self.assertRaises(SystemExit) as result:
+                runpy.run_path("mod-manager.py", run_name="__main__")
 
         self.assertIn("Exit", out.getvalue())
+        self.assertEqual(result.exception.code, 130)
 
 
 if __name__ == "__main__":

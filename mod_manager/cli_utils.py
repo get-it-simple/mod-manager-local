@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import os
-import platform
-import subprocess
-from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+import sys
+from typing import Callable, List
+from collections.abc import Mapping
 
-from .models import ModItem
-from .platform_utils import is_windows
-from .storage import load_labels
+from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
+from .folder_actions import ensure_paths, open_folder, select_in_explorer
+from .storage import load_label_state
+from .cli_commands import command_description
 
 _PT_AVAILABLE = False
 
 def prompt(msg: str) -> str:
-    try:
-        return input(msg)
-    except EOFError:
-        return ""
+    return input(msg)
 
 def pause(msg: str = "Press Enter to continue...") -> None:
     prompt(f"{msg}")
@@ -41,39 +37,20 @@ def format_order_short(order_mode: str) -> str:
     suffix = " desc" if reverse else " asc"
     return f"{mode}{suffix}"
 
-def ensure_paths(cfg: Dict) -> bool:
-    gs = cfg.get("game_mods_dir")
-    ms = cfg.get("mods_source_dir")
-    if not gs or not ms:
-        print("Please configure paths first.")
-        return False
-    Path(gs).mkdir(parents=True, exist_ok=True)
-    Path(ms).mkdir(parents=True, exist_ok=True)
-    return True
-
 def parse_multi_choice(choice: str) -> List[int]:
-    parts = [p.strip() for p in choice.split(",") if p.strip()]
-    nums = []
-    for p in parts:
-        if p.isdigit():
-            nums.append(int(p))
-    return nums
+    if not choice.strip():
+        return []
+    parts = [part.strip() for part in choice.split(",")]
+    if any(not part.isascii() or not part.isdecimal() or int(part) < 1 for part in parts):
+        raise ValueError("Use positive indexes separated by commas, for example 1,3,5.")
+    return list(dict.fromkeys(int(part) for part in parts))
+
 
 def parse_page_choice(choice: str) -> int | None:
     c = choice.strip().lower()
     if c.startswith("p") and c[1:].isdigit():
         return int(c[1:])
     return None
-
-def paginate(total: int, page: int, cfg: Dict) -> Tuple[int, int]:
-    pages = max(1, (total + int(cfg.get("page_size", 10)) - 1) // int(cfg.get("page_size", 10)))
-    page = max(1, min(page, pages))
-    return page, pages
-
-def page_slice(items: List, page: int, cfg: Dict) -> List:
-    start = (page - 1) * int(cfg.get("page_size", 10))
-    end = start + int(cfg.get("page_size", 10))
-    return items[start:end]
 
 def print_pager(pages: int, current: int):
     if pages <= 1:
@@ -85,108 +62,6 @@ def print_pager(pages: int, current: int):
     for i in range(0, len(labels), 10):
         print(" ".join(labels[i:i+10]))
 
-def _windows_explorer_select_arg(target: Path) -> str:
-    return f'/select,"{target}"'
-
-def _windows_shell_select_path(target: Path) -> bool:
-    try:
-        import ctypes
-        import ctypes.wintypes
-
-        ole32 = ctypes.windll.ole32
-        shell32 = ctypes.windll.shell32
-        pidl = ctypes.c_void_p()
-        attrs = ctypes.c_ulong(0)
-        co_initialized = False
-
-        ole32.CoInitialize.argtypes = [ctypes.c_void_p]
-        ole32.CoInitialize.restype = ctypes.c_long
-        ole32.CoUninitialize.argtypes = []
-        ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
-        shell32.SHParseDisplayName.argtypes = [
-            ctypes.wintypes.LPCWSTR,
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.c_ulong,
-            ctypes.POINTER(ctypes.c_ulong),
-        ]
-        shell32.SHParseDisplayName.restype = ctypes.c_long
-        shell32.SHOpenFolderAndSelectItems.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_ulong]
-        shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long
-
-        co_hr = ole32.CoInitialize(None)
-        co_initialized = co_hr in (0, 1)
-        parse_hr = shell32.SHParseDisplayName(str(target), None, ctypes.byref(pidl), 0, ctypes.byref(attrs))
-        if parse_hr != 0 or not pidl.value:
-            return False
-        return shell32.SHOpenFolderAndSelectItems(pidl, 0, None, 0) == 0
-    except Exception:
-        return False
-    finally:
-        try:
-            if "pidl" in locals() and pidl.value:
-                ole32.CoTaskMemFree(pidl)
-            if "co_initialized" in locals() and co_initialized:
-                ole32.CoUninitialize()
-        except Exception:
-            pass
-
-def select_in_explorer(path: Path) -> None:
-    target = Path(path).expanduser()
-    try:
-        if is_windows():
-            target = target.absolute()
-            if target.exists() or target.is_symlink():
-                if _windows_shell_select_path(target):
-                    return
-                subprocess.Popen(
-                    ["explorer", _windows_explorer_select_arg(target)],
-                    creationflags=0x08000000,
-                )
-            elif target.parent.exists():
-                subprocess.Popen(
-                    ["explorer", str(target.parent.absolute())],
-                    creationflags=0x08000000,
-                )
-        elif platform.system() == "Darwin":
-            if target.exists():
-                subprocess.Popen(["open", "-R", str(target)])
-            elif target.parent.exists():
-                subprocess.Popen(["open", str(target.parent)])
-    except Exception:
-        pass
-
-
-def open_folder(path_str: str) -> Tuple[bool, str]:
-    try:
-        if not path_str:
-            return False, "Path is empty"
-        p = Path(path_str).expanduser()
-        p.mkdir(parents=True, exist_ok=True)
-        if is_windows():
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif platform.system() == "Darwin":
-            subprocess.Popen(["open", str(p)])
-        else:
-            subprocess.Popen(["xdg-open", str(p)])
-        return True, "Opened"
-    except Exception as e:
-        return False, str(e)
-
-def filter_items_by_query(items: List[ModItem], query: str) -> List[ModItem]:
-    q = (query or "").lower()
-    if not q:
-        return items
-    return [m for m in items if q in m.name.lower()]
-
-def sort_items(items: List[ModItem], order_mode: str) -> List[ModItem]:
-    if order_mode in ["cd", "created date"]:
-        try:
-            return sorted(items, key=lambda m: m.src.stat().st_ctime, reverse=True)
-        except Exception:
-            pass
-    return sorted(items, key=lambda m: ((not m.is_dir), m.name.lower()))
-
 def _normalize_label(s: str) -> str:
     s = (s or "").strip().lower().replace("_", " ")
     s = " ".join(s.split())
@@ -194,12 +69,12 @@ def _normalize_label(s: str) -> str:
 
 def _labels_for_completion() -> List[str]:
     try:
-        data = load_labels() or {}
+        values = list(load_label_state().definitions)
     except Exception:
-        data = {}
+        values = []
     seen = set()
     out: List[str] = []
-    for _k, v in data.items():
+    for v in values:
         if not v:
             continue
         disp = " ".join(str(v).replace("_", " ").split())
@@ -221,14 +96,11 @@ def _try_prompt_toolkit():
         return None, None
 
 class _CmdCompleter:
-    def __init__(self, get_cmds: Callable[[], List[str]]):
+    def __init__(self, get_cmds: Callable[[], list[str] | Mapping[str, str]]):
         self.get_cmds = get_cmds
 
     def get_completions(self, document, complete_event):
         text = document.text or ""
-        if not text.startswith("/"):
-            return
-
         from prompt_toolkit.completion import Completion
 
         base = text.lower()
@@ -236,7 +108,8 @@ class _CmdCompleter:
 
         for c in cmds:
             if c.lower().startswith(base):
-                yield Completion(c, start_position=-len(text), display=c)
+                description = cmds[c] if isinstance(cmds, Mapping) else command_description(c)
+                yield Completion(c, start_position=-len(text), display=c, display_meta=description)
 
         prefix = ""
         if base.startswith("/l+ "):
@@ -264,19 +137,13 @@ class _CmdCompleter:
 
 def smart_prompt(
     msg: str,
-    get_commands: Callable[[], List[str]] | None = None,
-    placeholder: str = "Type / for commands",
+    get_commands: Callable[[], list[str] | Mapping[str, str]] | None = None,
+    placeholder: str = "Choose an action number; type ? for help",
 ) -> str:
-    pt_prompt, FormattedText = _try_prompt_toolkit()
+    pt_prompt, FormattedText = _try_prompt_toolkit() if sys.stdin.isatty() else (None, None)
 
     if not pt_prompt or not get_commands:
         text = prompt(msg)
-        if text.strip() == "/" and get_commands:
-            print("\nAvailable commands:")
-            for c in get_commands():
-                print(" ", c)
-            prompt("\nPress Enter to continue...")
-            return ""
         return text
 
     completer = _CmdCompleter(get_commands)
@@ -289,12 +156,9 @@ def smart_prompt(
         except Exception:
             return ""
 
-    try:
-        return pt_prompt(
-            msg,
-            completer=completer,
-            complete_while_typing=True,
-            bottom_toolbar=bottom_toolbar,
-        )
-    except (EOFError, KeyboardInterrupt):
-        return ""
+    return pt_prompt(
+        msg,
+        completer=completer,
+        complete_while_typing=True,
+        bottom_toolbar=bottom_toolbar,
+    )

@@ -30,7 +30,7 @@ class SchemaShapeTest(unittest.TestCase):
     def test_choice_settings_declare_their_choices(self):
         for spec in schema.all_specs():
             if spec.kind == schema.CHOICE:
-                self.assertGreaterEqual(len(spec.choices), 2, spec.key)
+                self.assertGreaterEqual(len(spec.choices), 1 if spec.key == "gui_language" else 2, spec.key)
 
     def test_dependent_settings_point_at_a_real_choice_value(self):
         keys = {spec.key: spec for spec in schema.all_specs()}

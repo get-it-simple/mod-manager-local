@@ -31,7 +31,13 @@ def alignment(columns, section: int):
 
 def configure_header(view: QtWidgets.QTableView, columns, fixed_widths: dict | None = None) -> None:
     view.setShowGrid(False)
+    view.setFrameShape(QtWidgets.QFrame.NoFrame)
+    view.setAlternatingRowColors(False)
+    view.setMinimumWidth(0)
+    view.setTextElideMode(QtCore.Qt.ElideMiddle)
+    view.verticalHeader().setDefaultSectionSize(max(tokens.TABLE_ROW_HEIGHT, view.fontMetrics().height() + tokens.SPACE_2XL))
     header = view.horizontalHeader()
+    header.setDefaultAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
     header.setStretchLastSection(False)
     header.setHighlightSections(False)
     for section, (key, _title, resize, _align) in enumerate(columns):
