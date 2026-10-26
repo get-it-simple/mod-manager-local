@@ -27,6 +27,7 @@ class CopyRecoveryGuiTests(WindowTestCase):
         source.write_text("source payload", encoding="utf-8")
         self.mod = ModItem(source.name, source, self.game / source.name, False, False)
         self.mods[:] = [self.mod]
+        self.presets["core"] = [self.mod.name]
         self.window.current_mods_shown = self.mods
         profile = {
             "id": "recovery", "name": "Recovery game", "mods_source_dir": str(self.source),

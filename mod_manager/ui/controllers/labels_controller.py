@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from copy import deepcopy
 
 from PySide6 import QtCore, QtGui
@@ -18,7 +20,7 @@ class LabelsController(QtCore.QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.page = WorkspacePage("Labels", "Manage manual labels and automatic name matches. Save to apply your changes.")
+        self.page = WorkspacePage(t('labels'), t('manage_manual_labels_and_automatic_name_matches_save_to_apply_your_chang'))
         self.editor = LabelEditor()
         self.page.body.addWidget(self.editor)
         self.drafts: dict[str, LabelState] = {}
@@ -47,7 +49,7 @@ class LabelsController(QtCore.QObject):
         try:
             current = load_label_state()
         except (OSError, ValueError) as error:
-            prompts.show_error(self.window, "Labels", str(error))
+            prompts.show_error(self.window, t('labels'), str(error))
             return False
         unfinished = any(draft.unfinished for draft in self.fragments.get(self.profile_id, {}).values())
         if self.profile_id not in self.drafts or (self.drafts[self.profile_id] == self.saved.get(self.profile_id) and not unfinished):
@@ -86,7 +88,7 @@ class LabelsController(QtCore.QObject):
             self.editor.manual_model.set_choices([], set())
             self.editor.details.setEnabled(False)
             self.editor.matches_model.set_matches([], [])
-            self.editor.matches_heading.setText("Matching mods (0)")
+            self.editor.matches_heading.setText(t('matching_mods_0'))
             self._loading = False
         self.editor.toolbar.set_enabled("delete", bool(names))
         self._update_status()
@@ -119,6 +121,7 @@ class LabelsController(QtCore.QObject):
             self.state.rename(old, name)
         except ValueError as error:
             self.editor.status.setText(str(error))
+            self.window.workspace.set_dirty("labels", True)
             return
         self.selected = name.strip()
         draft = self.fragments[self.profile_id].pop(old, None)
@@ -146,7 +149,7 @@ class LabelsController(QtCore.QObject):
         names = [mod for mod in self.window.current_mod_names if self.selected in self.state.members(mod)]
         definition = self.state.definitions[self.selected]
         self.editor.matches_model.set_matches(names, definition.terms if definition.mode == AUTOMATIC else [])
-        self.editor.matches_heading.setText(f"Matching mods ({len(names)})")
+        self.editor.matches_heading.setText(t('matching_mods_value0', value0=f'{len(names)}'))
         item = self.editor.list_model.itemFromIndex(self.editor.list_view.currentIndex())
         update_label_item(item, self.selected, definition.mode, len(names))
         self._update_status()
@@ -154,14 +157,18 @@ class LabelsController(QtCore.QObject):
     def _update_status(self) -> None:
         unfinished = any(draft.unfinished for draft in self.fragments[self.profile_id].values())
         changed = self.state != self.saved[self.profile_id] or unfinished
-        self.editor.status.setText("Unsaved changes" if changed else "All changes saved")
+        self.editor.status.setText(t('unsaved_changes') if changed else t('all_saved'))
+        dirty = any(state != self.saved.get(profile) or any(draft.unfinished for draft in self.fragments.get(profile, {}).values())
+                    for profile, state in self.drafts.items())
+        dirty = dirty or bool(self.selected and self.editor.name_edit.text().strip() != self.selected)
+        self.window.workspace.set_dirty("labels", dirty)
 
     def add(self) -> None:
         index = 1
-        name = "New label"
+        name = t('new_label')
         while any(value.casefold() == name.casefold() for value in self.state.definitions):
             index += 1
-            name = f"New label {index}"
+            name = t('new_label_value0', value0=f'{index}')
         self.state.definitions[name] = LabelDefinition()
         self._rebuild(name)
         self.editor.name_edit.setFocus()
@@ -173,11 +180,11 @@ class LabelsController(QtCore.QObject):
             self.state.delete(self.selected)
             self.fragments[self.profile_id].pop(self.selected, None)
             self._rebuild()
-            self.editor.status.setText("Unsaved changes")
+            self.editor.status.setText(t('unsaved_changes'))
 
     def save(self) -> None:
         if self.selected and self.editor.name_edit.text().strip() != self.selected:
-            self.editor.status.setText("Enter a unique, nonempty label name before saving.")
+            self.editor.status.setText(t('enter_a_unique_nonempty_label_name_before_saving'))
             return
         candidate = deepcopy(self.state)
         for name, draft in self.fragments[self.profile_id].items():
@@ -191,10 +198,10 @@ class LabelsController(QtCore.QObject):
         try:
             candidate.validate()
             if load_label_state() != self.saved[self.profile_id]:
-                raise ValueError("Saved labels changed while this draft was open. Reset changes to load the current labels.")
+                raise ValueError(t('saved_labels_changed_while_this_draft_was_open_reset_changes_to_load_the'))
             save_label_state(candidate)
         except (OSError, ValueError) as error:
-            prompts.show_error(self.window, "Labels", str(error))
+            prompts.show_error(self.window, t('labels'), str(error))
             return
         self.drafts[self.profile_id] = candidate
         self.saved[self.profile_id] = deepcopy(candidate)
@@ -205,16 +212,16 @@ class LabelsController(QtCore.QObject):
         self.renames[self.profile_id] = {name: name for name in self.state.definitions}
         self.window.refresh_mods()
         self._rebuild(self.selected)
-        self.editor.status.setText("All changes saved")
+        self.editor.status.setText(t('all_saved'))
 
     def reset(self) -> None:
         try:
             self.saved[self.profile_id] = load_label_state()
         except (OSError, ValueError) as error:
-            prompts.show_error(self.window, "Labels", str(error))
+            prompts.show_error(self.window, t('labels'), str(error))
             return
         self.drafts[self.profile_id] = deepcopy(self.saved[self.profile_id])
         self.fragments[self.profile_id] = {}
         self.renames[self.profile_id] = {name: name for name in self.state.definitions}
         self._rebuild(self.selected)
-        self.editor.status.setText("All changes saved")
+        self.editor.status.setText(t('all_saved'))

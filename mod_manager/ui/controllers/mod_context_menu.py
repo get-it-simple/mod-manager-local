@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from typing import Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -103,19 +105,17 @@ class ModContextMenu(QtCore.QObject):
         window = self.window
         mods = [mod for mod in window.current_mods_shown if mod.name in names]
         if any(not mod.installed for mod in mods):
-            self._action(menu, names, "install", "Install", "install", window._install_selected_mods)
+            self._action(menu, names, "install", t('install_action'), "install", window._install_selected_mods)
         if any(mod.installed for mod in mods):
-            self._action(menu, names, "uninstall", "Uninstall", "uninstall", window._uninstall_selected_mods)
-        if len(names) > 1:
-            self._action(menu, names, "toggle", "Toggle selected", "toggle", window._toggle_selected_mods)
+            self._action(menu, names, "uninstall", t('uninstall_action'), "uninstall", window._uninstall_selected_mods)
         menu.addSeparator()
         favorite = all(name in window.current_mod_favorites for name in names)
         self._action(
-            menu, names, "favorite", "Remove from favorites" if favorite else "Add to favorites",
+            menu, names, "favorite", t('remove_from_favorites') if favorite else t('add_to_favorites'),
             "favorite_filled" if favorite else "favorite", window._toggle_favorite_selected,
         )
-        self._action(menu, names, "add_label", "Assign label…", "label_add", self._assign_label)
-        remove_menu = menu.addMenu(window._icon("label_remove"), "Remove label")
+        self._action(menu, names, "add_label", t('assign_label'), "label_add", self._assign_label)
+        remove_menu = menu.addMenu(window._icon("label_remove"), t('remove_label'))
         remove_menu.menuAction().setData("remove_label")
         remove_menu.menuAction().setIconVisibleInMenu(True)
         labels = sorted({label for name in names for label in label_names(window.current_mod_labels, name)})
@@ -127,17 +127,17 @@ class ModContextMenu(QtCore.QObject):
                 remove_menu, names, "remove_label", label, "label_remove",
                 lambda label=label: window._change_label_selected(label, remove=True),
             )
-        self._action(menu, names, "manage_labels", "Manage labels…", "label_add", lambda: window._navigate("labels"))
-        self._action(menu, names, "set_image", "Set preview image…", "image", window._set_mod_image)
+        self._action(menu, names, "manage_labels", t('manage_labels'), "label_add", lambda: window._navigate("labels"))
+        self._action(menu, names, "set_image", t('set_preview_image'), "image", window._set_mod_image)
         if len(mods) == 1:
             menu.addSeparator()
             mod = mods[0]
-            self._action(menu, names, "source", "Show source in Explorer", "folder", lambda: select_in_explorer(mod.src))
-            self._action(menu, names, "destination", "Show game location in Explorer", "folder_forward", lambda: select_in_explorer(mod.dest))
+            self._action(menu, names, "source", t('show_source_in_explorer'), "folder", lambda: select_in_explorer(mod.src))
+            self._action(menu, names, "destination", t('show_game_location_in_explorer'), "folder_forward", lambda: select_in_explorer(mod.dest))
         menu.addSeparator()
-        self._action(menu, names, "show_details", "Show details", "details_show", lambda: window._set_details_visible(True))
+        self._action(menu, names, "show_details", t('show_details'), "details_show", lambda: window._set_details_visible(True))
 
     def _assign_label(self) -> None:
-        label, accepted = prompts.choose_text(self.window, "Assign label", "Label", self.window.label_edit.text())
+        label, accepted = prompts.choose_text(self.window, t('text_bb1f28b586be'), t('label'), self.window.label_edit.text())
         if accepted and label.strip():
             self.window._change_label_selected(label.strip())

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -47,7 +49,7 @@ class LabelState:
     def rename(self, old: str, new: str) -> None:
         new = new.strip()
         if not new or any(name != old and name.casefold() == new.casefold() for name in self.definitions):
-            raise ValueError("Enter a unique, nonempty label name.")
+            raise ValueError(t('enter_a_unique_nonempty_label_name'))
         self.definitions = {new if name == old else name: value for name, value in self.definitions.items()}
         for mod, names in self.assignments.items():
             self.assignments[mod] = [new if name == old else name for name in names]
@@ -59,10 +61,10 @@ class LabelState:
     def assign(self, name: str, mods: Iterable[str], assigned: bool = True) -> list[str]:
         name = self.canonical_name(name)
         if not name:
-            raise ValueError("Enter a label name.")
+            raise ValueError(t('enter_a_label_name'))
         definition = self.definitions.setdefault(name, LabelDefinition())
         if definition.mode == AUTOMATIC:
-            raise ValueError("Automatic labels are managed by their name fragments. Open Labels to edit this label.")
+            raise ValueError(t('automatic_labels_are_managed_by_their_name_fragments_open_labels_to_edit'))
         changed = []
         for mod in mods:
             names = self.assignments.setdefault(mod, [])
@@ -79,13 +81,13 @@ class LabelState:
     def validate(self) -> None:
         folded = [name.strip().casefold() for name in self.definitions]
         if any(not name for name in folded) or len(set(folded)) != len(folded):
-            raise ValueError("Enter unique, nonempty label names.")
+            raise ValueError(t('enter_unique_nonempty_label_names'))
         for name, definition in self.definitions.items():
             if definition.mode not in (MANUAL, AUTOMATIC):
-                raise ValueError(f"Unknown mode for label: {name}")
+                raise ValueError(t('unknown_mode_for_label_value0', value0=f'{name}'))
             definition.terms = unique_names(definition.terms)
             if definition.mode == AUTOMATIC and not definition.terms:
-                raise ValueError(f"Enter at least one name fragment for automatic label: {name}")
+                raise ValueError(t('enter_at_least_one_name_fragment_for_automatic_label_value0', value0=f'{name}'))
 
 
 class ResolvedLabels(dict[str, str]):

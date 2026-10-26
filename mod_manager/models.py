@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,4 +59,4 @@ class OperationResult:
             if selected:
                 success = sum(item.success for item in selected)
                 parts.append(f"{action.capitalize()} {success}/{len(selected)}. Errors: {len(selected) - success}.")
-        return " ".join(parts) or "Nothing to change."
+        return " ".join(parts) or t('nothing_to_change')

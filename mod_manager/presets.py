@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 from typing import Dict, List, Tuple
 
 from .models import ModItem, OperationItem, OperationResult
@@ -11,11 +13,11 @@ def save_preset_from_installed(cfg: Dict, name: str) -> Tuple[bool, str]:
     presets = load_presets()
     installed = list_installed_mods(cfg)
     if not installed:
-        return False, "No installed mods to save"
+        return False, t('no_installed_mods_to_save')
     presets[name] = [m.name for m in installed]
     save_presets(presets)
     mark_preset_managed(name, "saved")
-    return True, f"Preset '{name}' saved ({len(installed)} mods)"
+    return True, t('preset_value0_saved_value1_mods', value0=f'{name}', value1=f'{len(installed)}')
 
 def delete_presets_by_names(names: List[str]) -> Tuple[int, List[str]]:
     presets = load_presets()
@@ -74,16 +76,16 @@ def _toggle_presets_result(
     for name in names:
         mods = presets.get(name, [])
         if name not in presets:
-            items.append(OperationItem(name, "missing", False, "preset not found"))
+            items.append(OperationItem(name, "missing", False, t('preset_not_found')))
             messages.extend(_preset_messages(OperationResult((items[-1],))))
             continue
         all_on = bool(mods) and all(nm in installed_set for nm in mods)
         if all_on:
             result = deactivate_preset_result(cfg, name)
-            label = "Deactivated"
+            label = t('deactivated')
         else:
             result = apply_preset_result(cfg, name, overwrite)
-            label = "Installed"
+            label = t('installed_mods')
         successes = sum(item.success for item in result.items)
         last_operation = f"{label}: {successes}, Errors: {result.errors}"
         items.extend(result.items)
@@ -140,18 +142,18 @@ def apply_preset(cfg: Dict, name: str, overwrite: bool = False) -> Tuple[int, in
 
 def _preset_messages(result: OperationResult, *, install: bool = False) -> List[str]:
     messages = [
-        f"Skipped: {item.name} ({item.message})" if item.action == "missing"
+        t('skipped_value0_value1', value0=f'{item.name}', value1=f'{item.message}') if item.action == "missing"
         else f"{item.name}: {'OK' if item.success else 'ERR'} ({item.message})"
         for item in result.items
     ]
     if install and not any(item.action == "installed" for item in result.items):
-        messages.append("Nothing to install (all present or missing).")
+        messages.append(t('nothing_to_install_all_present_or_missing'))
     return messages
 
 
 def apply_preset_result(cfg: Dict, name: str, overwrite: bool = False) -> OperationResult:
     work, skipped_missing = preset_mods_to_install(cfg, [name])
-    missing = tuple(OperationItem(nm, "missing", False, "not in source") for nm in skipped_missing)
+    missing = tuple(OperationItem(nm, "missing", False, t('text_09edde0d290d')) for nm in skipped_missing)
     installed = apply_mods_batch_result(work, overwrite)
     result = OperationResult(missing + installed.items)
     if not result.errors:

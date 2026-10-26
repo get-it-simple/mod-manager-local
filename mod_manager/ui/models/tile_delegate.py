@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...models import ModItem
@@ -7,7 +9,7 @@ from ...mods import mod_image_path
 from .. import icons
 from ..theme import colors, tokens
 
-NO_IMAGE_TEXT = "No image"
+NO_IMAGE_TEXT = t('no_image')
 EMPTY_LABEL = "-"
 
 
@@ -218,7 +220,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         name_badge = self._name_badge_rect(rect, image_rect)
         favorite_rect = self._favorite_rect(image_rect)
         if favorite_rect.contains(pos):
-            return "Remove from favorites" if mod.name in self.favorites else "Add to favorites"
+            return t('remove_from_favorites') if mod.name in self.favorites else t('add_to_favorites')
         if name_badge.contains(pos):
             elided = self._elided_mod_name(metrics, mod.name, name_badge.width() - tokens.TILE_NAME_TEXT_INSET * 2)
             if elided != mod.name:

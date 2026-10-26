@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
@@ -172,7 +174,7 @@ class DetailPanel(QtWidgets.QScrollArea):
         if on_close is None:
             self.add_widget(label)
         else:
-            self.add_row(label, icon_button("remove", "Hide details", on_close))
+            self.add_row(label, icon_button("remove", t('hide_details'), on_close))
 
     def add_actions(self, buttons: list[QtWidgets.QPushButton]) -> None:
         self.add_flow_row(buttons)
@@ -189,11 +191,11 @@ class DetailPanel(QtWidgets.QScrollArea):
 
     def add_label_buttons(self, buttons: list[QtWidgets.QPushButton]) -> None:
         if not buttons:
-            self.add_text_row("Labels", "-")
+            self.add_text_row(t('labels'), "-")
             return
         for button in buttons:
             button.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
-        self.add_flow_row([detail_name_label("Labels"), *buttons])
+        self.add_flow_row([detail_name_label(t('labels')), *buttons])
 
     def add_fields(self, fields: list[tuple[str, str]]) -> None:
         widgets = []

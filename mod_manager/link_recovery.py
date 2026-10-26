@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,13 +11,11 @@ from .mods import change_mods, list_installed_mods
 from .storage import active_game_profile, load_presets, mark_preset_managed, update_game_profile
 
 
-COPY_RECOVERY_TITLE = "Links are not supported"
+COPY_RECOVERY_TITLE = t('links_are_not_supported')
 COPY_RECOVERY_QUESTION = (
-    "The destination file system does not support links. "
-    "Change this game's Install method to Copy, save the profile, "
-    "and retry the failed installations? Existing successful installations will be kept."
+    t('the_destination_file_system_does_not_support_links_change_this_game_s_in')
 )
-PROFILE_CHANGED = "The game profile or installation settings changed. Start the installation again."
+PROFILE_CHANGED = t('the_game_profile_or_installation_settings_changed_start_the_installation')
 PROFILE_KEYS = (
     "active_game_profile_id", "mods_source_dir", "game_mods_dir", "install_mode",
     "link_prefix", "mod_group_extensions", "mod_extensions", "mod_recursive_scan",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -19,10 +21,10 @@ class ErrorEntry:
     failure: OperationFailure | None = None
 
     def details(self) -> str:
-        lines = [f"Time: {self.time}", f"Profile: {self.profile}",
-                 f"Action: {self.action}", f"Mod: {self.mod}"]
+        lines = [t('time_value0', value0=f'{self.time}'), t('profile_value0', value0=f'{self.profile}'),
+                 t('action_value0', value0=f'{self.action}'), t('mod_value0', value0=f'{self.mod}')]
         if self.failure:
-            lines.extend((f"Source: {self.failure.src}", f"Destination: {self.failure.dest}"))
+            lines.extend((t('source_value0', value0=f'{self.failure.src}'), t('destination_value0', value0=f'{self.failure.dest}')))
         return "\n".join(lines) + f"\n\n{self.message}"
 
 

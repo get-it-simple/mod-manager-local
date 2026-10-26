@@ -94,6 +94,18 @@ python build-gui-exe.py --pyz
 - Labels — assign several manual labels to a mod, or automatically match labels by name fragments
 - Profile-scoped favorites — star mods independently from labels and combine the favorite, label, and search filters
 - Pagination, search, and ordering; filter suggestions use the complete library and show full names on hover
+- Combine search, labels, favorites and **All / Installed / Not installed**. Active filter chips can be removed individually; the result count includes the complete library before filtering.
+- Separate **Install selected / Uninstall selected** and **Install page / Uninstall page** actions show how many mods will change. Page actions affect only the current filtered page.
+- Preset actions open a review of installations, removals, unchanged entries and missing mods before applying changes. Shared mods follow the displayed preset order; unrelated mods keep their current state.
+- Archive import shows the future folder tree and the combined selection from all archives. Review the final destinations after resolving name conflicts and before importing.
+- Background operations display their stage and available item progress, followed by success, skipped and failure counts. Import failures join the session error history.
+- Empty library results explain whether to import mods, clear filters or correct a game profile's folder paths. Narrow library layouts can scroll while keeping the active game and installation method visible.
+- Combine search, labels, favorites and **All / Installed / Not installed**. Active filter chips can be removed individually; the result count includes the complete library before filtering.
+- Separate **Install selected / Uninstall selected** and **Install page / Uninstall page** actions show how many mods will change. Page actions affect only the current filtered page.
+- Preset actions open a review of installations, removals, unchanged entries and missing mods before applying changes. Shared mods follow the displayed preset order; unrelated mods keep their current state.
+- Archive import shows the future folder tree and the combined selection from all archives. Review the final destinations after resolving name conflicts and before importing.
+- Background operations display their stage and available item progress, followed by success, skipped and failure counts. Import failures join the session error history.
+- Empty library results explain whether to import mods, clear filters or correct a game profile's folder paths. Narrow library layouts can scroll while keeping the active game and installation method visible.
 - Broken link detection and cleanup
 - GUI (PySide6/Qt) and CLI interfaces
 - The GUI sidebar opens Library, Labels, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
@@ -103,6 +115,14 @@ python build-gui-exe.py --pyz
 - The **Details** button shows or hides the selected mod's information beside both list and tile views. Visibility and panel width are remembered between launches.
 - Right-click a mod in the list or tile view for an icon menu with install/uninstall, favorites, labels, preview image, Explorer locations, and details actions. Right-clicking a selected mod targets the whole selection; right-clicking another mod targets only that mod. Opening or dismissing the menu preserves selection. **Show details** is always available, including when the details panel is hidden. Close the panel with its close button or the **Details** header button.
 - Settings keep unsaved edits while you move between pages. **Save** applies them; **Reset changes** restores the saved values. Closing the application discards unsaved edits.
+- Settings and Labels indicate unsaved drafts in navigation. Label drafts remain separate for each game profile.
+- **Settings → Keyboard shortcuts** records a pressed combination or lets you choose its modifiers and key. Enable, disable or clear individual bindings; **Restore defaults** edits the draft. **Save** validates conflicts and applies the bindings, while **Reset changes** restores the saved bindings. Shortcuts work in the active application window and respect text editing and modal dialogs.
+- Default shortcuts include **Ctrl+F** for library search, **F5** for refreshing the current page, **Ctrl+S** for saving Settings or Labels, and **F1** for keyboard help. The help button and tooltips show the saved assignments. Existing paste, navigation and tile zoom shortcuts remain available.
+- The interface currently ships in English. Language catalogs use one `strings.json` per language under `mod_manager/i18n/<language>/`; additional catalogs are discovered automatically and missing entries fall back to English. The Language setting applies after saving and restarting.
+- Settings and Labels indicate unsaved drafts in navigation. Label drafts remain separate for each game profile.
+- **Settings → Keyboard shortcuts** records a pressed combination or lets you choose its modifiers and key. Enable, disable or clear individual bindings; **Restore defaults** edits the draft. **Save** validates conflicts and applies the bindings, while **Reset changes** restores the saved bindings. Shortcuts work in the active application window and respect text editing and modal dialogs.
+- Default shortcuts include **Ctrl+F** for library search, **F5** for refreshing the current page, **Ctrl+S** for saving Settings or Labels, and **F1** for keyboard help. The help button and tooltips show the saved assignments. Existing paste, navigation and tile zoom shortcuts remain available.
+- The interface currently ships in English. Language catalogs use one `strings.json` per language under `mod_manager/i18n/<language>/`; additional catalogs are discovered automatically and missing entries fall back to English. The Language setting applies after saving and restarting.
 - The GUI status bar shows a clickable error count for mod operations. Open it to review failed files, full source/destination paths, and error descriptions from the current session, including batch and preset actions. History remains available across game profile changes and resets when the application closes.
 - Source and destination paths in the mod details show the two nearest directories and the file or folder name, up to 100 characters. Longer text is shortened in the middle to fit; hover to see the full path or click to locate it in Explorer.
 - Drag, drop, paste, or pick mod files/folders in the GUI

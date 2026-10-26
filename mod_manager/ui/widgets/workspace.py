@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from app_paths import APP_NAME, APP_VERSION
@@ -11,12 +13,12 @@ from .select import select_box
 from .style_utils import apply_margins, set_variant, repolish
 
 NAVIGATION = (
-    ("library", "Library", "list"),
-    ("labels", "Labels", "label_add"),
-    ("presets", "Presets", "presets"),
-    ("games", "Game profiles", "game"),
-    ("cleanup", "Cleanup", "broken"),
-    ("settings", "Settings", "settings"),
+    ("library", t('library'), "list"),
+    ("labels", t('labels'), "label_add"),
+    ("presets", t('presets'), "presets"),
+    ("games", t('game_profiles'), "game"),
+    ("cleanup", t('cleanup'), "broken"),
+    ("settings", t('settings'), "settings"),
 )
 PROFILE_PAGES = ("library", "labels", "presets", "cleanup")
 
@@ -30,6 +32,9 @@ class WorkspacePage(QtWidgets.QWidget):
         self.title = page_title_label(title)
         self.subtitle = muted_label(subtitle)
         self.subtitle.setWordWrap(True)
+        self._subtitle_text = subtitle
+        self._elide_subtitle = False
+        self.subtitle.installEventFilter(self)
         self.subtitle.setVisible(bool(subtitle))
         headings.addWidget(self.title)
         headings.addWidget(self.subtitle)
@@ -38,9 +43,24 @@ class WorkspacePage(QtWidgets.QWidget):
         self.body = apply_margins(QtWidgets.QVBoxLayout(), spacing=tokens.SPACE_2XL)
         self.outer.addLayout(self.body, 1)
 
-    def set_subtitle(self, text: str) -> None:
-        self.subtitle.setText(text)
+    def set_subtitle(self, text: str, elide: bool = False) -> None:
+        self._subtitle_text = text
+        self._elide_subtitle = elide
+        self.subtitle.setWordWrap(not elide)
+        self.subtitle.setToolTip(text)
         self.subtitle.setVisible(bool(text))
+        self._update_subtitle()
+
+    def _update_subtitle(self) -> None:
+        text = self._subtitle_text
+        if self._elide_subtitle:
+            text = self.subtitle.fontMetrics().elidedText(text, QtCore.Qt.ElideMiddle, self.subtitle.width())
+        self.subtitle.setText(text)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.subtitle and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.FontChange):
+            self._update_subtitle()
+        return super().eventFilter(obj, event)
 
 
 class EmptyState(QtWidgets.QWidget):
@@ -56,6 +76,20 @@ class EmptyState(QtWidgets.QWidget):
             layout.addWidget(label)
         layout.addStretch()
         self.setMinimumHeight(tokens.EMPTY_STATE_MIN_HEIGHT)
+        self.labels = self.findChildren(QtWidgets.QLabel)
+        self.actions = QtWidgets.QWidget(self)
+        self.action_layout = apply_margins(QtWidgets.QHBoxLayout(self.actions))
+        layout.insertWidget(layout.count() - 1, self.actions)
+
+    def configure(self, title: str, description: str, actions=()) -> None:
+        from .style_utils import clear_layout
+        self.labels[0].setText(title)
+        self.labels[1].setText(description)
+        clear_layout(self.action_layout)
+        self.action_layout.addStretch()
+        for text, icon, callback in actions:
+            self.action_layout.addWidget(text_button(text, text, callback, icon_name=icon))
+        self.action_layout.addStretch()
 
 
 class Workspace(QtWidgets.QWidget):
@@ -71,16 +105,16 @@ class Workspace(QtWidgets.QWidget):
         self.brand = QtWidgets.QLabel(APP_NAME)
         set_variant(self.brand, "heading")
         self.sidebar_layout.addWidget(self.brand)
-        self.game_label = muted_label("Game")
+        self.game_label = muted_label(t('game'))
         self.sidebar_layout.addWidget(self.game_label)
         self.profile_box = select_box()
-        self.profile_box.setAccessibleName("Active game profile")
-        self.profile_box.setToolTip("Switch the active game profile")
+        self.profile_box.setAccessibleName(t('active_game_profile'))
+        self.profile_box.setToolTip(t('switch_the_active_game_profile'))
         self.profile_box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.profile_box.setMinimumContentsLength(0)
         self.profile_box.activated.connect(self._select_profile)
         self.sidebar_layout.addWidget(self.profile_box)
-        self.game_button = text_button("Game", "Manage and switch game profiles", lambda: self.pageRequested.emit("games"), icon_name="game")
+        self.game_button = text_button(t('game'), t('manage_and_switch_game_profiles'), lambda: self.pageRequested.emit("games"), icon_name="game")
         self.sidebar_layout.addWidget(self.game_button)
         self.navigation: dict[str, QtWidgets.QPushButton] = {}
         for key, title, icon in NAVIGATION:
@@ -101,7 +135,17 @@ class Workspace(QtWidgets.QWidget):
         layout.addWidget(self.sidebar)
         layout.addWidget(self.stack, 1)
         self.compact = None
+        self.dirty_pages = set()
         self._update_compact()
+
+    def set_dirty(self, key: str, dirty: bool) -> None:
+        if dirty:
+            self.dirty_pages.add(key)
+        else:
+            self.dirty_pages.discard(key)
+        if key in self.navigation:
+            title = next(title for name, title, _icon in NAVIGATION if name == key)
+            self.navigation[key].setText(("" if self.compact else title) + (" •" if dirty else ""))
 
     def add_page(self, key: str, page: WorkspacePage) -> None:
         self.pages[key] = page
@@ -120,9 +164,9 @@ class Workspace(QtWidgets.QWidget):
         with QtCore.QSignalBlocker(self.profile_box):
             self.profile_box.clear()
             for profile in profiles:
-                self.profile_box.addItem(profile.get("name", "Game"), profile.get("id", ""))
+                self.profile_box.addItem(profile.get("name", t('game')), profile.get("id", ""))
             self.profile_box.setCurrentIndex(self.profile_box.findData(active_id))
-        self.profile_box.setToolTip(self.profile_box.currentText() or "Choose a game profile")
+        self.profile_box.setToolTip(self.profile_box.currentText() or t('choose_a_game_profile'))
         self.profile_box.setEnabled(bool(profiles) and not busy)
         self.game_button.setEnabled(not busy)
         for key, button in self.navigation.items():
@@ -159,6 +203,6 @@ class Workspace(QtWidgets.QWidget):
         self.game_button.setVisible(compact)
         self.game_button.setText("")
         for key, title, _icon in NAVIGATION:
-            self.navigation[key].setText("" if compact else title)
+            self.navigation[key].setText(("" if compact else title) + (" •" if key in self.dirty_pages else ""))
             self.navigation[key].setProperty("compact", compact)
             repolish(self.navigation[key])

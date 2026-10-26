@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from typing import Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ...settings_schema import CHOICE, COLOR, FLAG, FONT, INT, PATH, TEXT, FieldSpec
+from ...settings_schema import CHOICE, COLOR, FLAG, FONT, INT, PATH, TEXT, SHORTCUTS, FieldSpec
+from .shortcut_editor import ShortcutSettings
 from ..theme import tokens
 from .buttons import icon_button
 from .section import section_title_label
@@ -27,31 +30,46 @@ def system_font_families() -> list[str]:
 
 
 def read_field(widget: QtWidgets.QWidget):
+    if isinstance(widget, ShortcutSettings):
+        return widget.values()
     if isinstance(widget, QtWidgets.QCheckBox):
         return widget.isChecked()
     if isinstance(widget, QtWidgets.QComboBox):
-        return widget.currentText()
+        return widget.currentData() if widget.property("usesChoiceData") else widget.currentText()
     return widget.text()
 
 
 def write_field(widget: QtWidgets.QWidget, value) -> None:
-    if isinstance(widget, QtWidgets.QCheckBox):
+    if isinstance(widget, ShortcutSettings):
+        widget.set_values(value)
+    elif isinstance(widget, QtWidgets.QCheckBox):
         widget.setChecked(bool(value))
     elif isinstance(widget, QtWidgets.QComboBox):
-        widget.setCurrentText(str(value or ""))
+        if widget.property("usesChoiceData"):
+            widget.setCurrentIndex(widget.findData(value))
+        else:
+            widget.setCurrentText(str(value or ""))
     else:
         widget.setText(str(value or ""))
 
 
 def build_field(spec: FieldSpec, value, parent=None) -> QtWidgets.QWidget:
+    if spec.kind == SHORTCUTS:
+        return ShortcutSettings(value, parent)
     if spec.kind == FLAG:
         widget = QtWidgets.QCheckBox(parent)
         widget.setChecked(bool(value))
         return widget
     if spec.kind == CHOICE:
         widget = select_box(parent)
-        widget.addItems(list(spec.choices))
-        widget.setCurrentText(str(value or spec.choices[0]))
+        if spec.key == "gui_language":
+            widget.setProperty("usesChoiceData", True)
+            for language in spec.choices:
+                widget.addItem(t("english_language") if language == "en" else language, language)
+            widget.setCurrentIndex(widget.findData(value or spec.choices[0]))
+        else:
+            widget.addItems(list(spec.choices))
+            widget.setCurrentText(str(value or spec.choices[0]))
     elif spec.kind == FONT:
         widget = select_box(parent)
         widget.addItem("")
@@ -121,12 +139,12 @@ class FormBuilder:
 
         container = QtWidgets.QWidget(self.host)
         row = apply_margins(QtWidgets.QHBoxLayout(container), margins=None, spacing=tokens.SPACE_SM)
-        if spec.kind in {PATH, TEXT}:
+        if spec.kind in {PATH, TEXT, SHORTCUTS}:
             row.addWidget(field, 1)
         else:
             row.addWidget(field, 0, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         if spec.kind == PATH and on_browse is not None:
-            button = icon_button("folder", f"Browse for the {spec.label.lower()}", lambda key=spec.key: on_browse(key), container)
+            button = icon_button("folder", t('browse_for_the_value0', value0=f'{spec.label.lower()}'), lambda key=spec.key: on_browse(key), container)
             self.buttons[f"browse_{spec.key}"] = button
             row.addWidget(button)
         if action is not None:
@@ -134,7 +152,7 @@ class FormBuilder:
             button = icon_button(icon_name, tooltip, handler, container)
             self.buttons[key] = button
             row.addWidget(button)
-        if spec.kind not in {PATH, TEXT}:
+        if spec.kind not in {PATH, TEXT, SHORTCUTS}:
             row.addStretch(1)
 
         label = QtWidgets.QLabel(spec.label, self.host)

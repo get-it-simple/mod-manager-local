@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..theme import tokens
@@ -16,17 +18,17 @@ class ArchiveImportDialog(QtWidgets.QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Import mods from archives")
+        self.setWindowTitle(t('import_mods_from_archives'))
         self.resize(*tokens.ARCHIVE_DIALOG_SIZE)
         self.setAcceptDrops(True)
         self.working = False
         self.browser = ArchiveBrowser(self)
-        self.status = QtWidgets.QLabel("Select files to import. Paste or drop an image to assign a preview.", self)
+        self.status = QtWidgets.QLabel(t('select_files_to_import_paste_or_drop_an_image_to_assign_a_preview'), self)
         self.status.setWordWrap(True)
         self.actions = IconToolbar(self)
-        section = self.actions.add_section("import", "Import")
-        section.add_text_action("import", "Add", "import", "Import the selected mods from all archives", self.importRequested.emit)
-        section.add_text_action("cancel", "Cancel", "remove", "Cancel without importing", self.reject)
+        section = self.actions.add_section("import", t('import'))
+        section.add_text_action("import", t('add'), "import", t('import_the_selected_mods_from_all_archives'), self.importRequested.emit)
+        section.add_text_action("cancel", t('cancel_action'), "remove", t('cancel_without_importing'), self.reject)
         self.actions.add_stretch()
         for button in self.findChildren(QtWidgets.QPushButton):
             button.setAutoDefault(False)

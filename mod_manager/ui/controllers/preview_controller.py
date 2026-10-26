@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from dataclasses import dataclass
 from pathlib import Path
 import tempfile
@@ -24,7 +26,7 @@ class PreviewSource:
             try:
                 release()
             except OSError as exc:
-                logger.warning("Cannot release temporary preview: %s", exc)
+                logger.warning(t('cannot_release_temporary_preview_s'), exc)
 
 
 def read_preview_image(path: Path) -> QtGui.QImage:
@@ -41,7 +43,7 @@ class PreviewController:
         source = PreviewSource(Path(paths[0]), getattr(paths, "close", None))
         if len(paths) != 1:
             try:
-                prompts.show_warning(self.window, "Set preview image", "Paste one image at a time.")
+                prompts.show_warning(self.window, t('text_1e63fa10de76'), t('paste_one_image_at_a_time'))
             finally:
                 source.close()
             return
@@ -83,7 +85,7 @@ class PreviewController:
             if choice != "file":
                 return
         extensions = " ".join(f"*{suffix}" for suffix in IMAGE_EXTENSIONS)
-        file_name = prompts.choose_open_file(self.window, "Set mod image", f"Images ({extensions})")
+        file_name = prompts.choose_open_file(self.window, t('set_mod_image'), t('images_value0', value0=f'{extensions}'))
         if file_name:
             self.apply(PreviewSource(Path(file_name)), names)
 
@@ -95,7 +97,7 @@ class PreviewController:
             names = list(names if names is not None else self.window._selected_mod_names())
             image = read_preview_image(source.path)
             if image.isNull():
-                prompts.show_error(self.window, "Set preview image", "This image could not be read. Choose another image.")
+                prompts.show_error(self.window, t('text_1e63fa10de76'), t('this_image_could_not_be_read_choose_another_image'))
                 return
             if not names:
                 name = self.window._choose_mod_for_image()
@@ -112,7 +114,7 @@ class PreviewController:
                     with tempfile.TemporaryDirectory(prefix="mods-preview-") as staging:
                         path = Path(staging) / "preview.png"
                         if not image.save(str(path), "PNG"):
-                            raise OSError("Cannot prepare the preview image.")
+                            raise OSError(t('cannot_prepare_the_preview_image'))
                         return import_mod_images(cfg, names, path)
                 finally:
                     source.close()
@@ -122,11 +124,11 @@ class PreviewController:
                 for name in applied:
                     self.window._invalidate_mod_image(name)
                 self.window.refresh_mods(names)
-                self.window._set_status(f"Preview images updated: {len(applied)}. Failed: {len(errors)}.")
+                self.window._set_status(t('preview_images_updated_value0_failed_value1', value0=f'{len(applied)}', value1=f'{len(errors)}'))
                 if errors:
-                    prompts.show_warning(self.window, "Set preview image", "\n".join(errors))
+                    prompts.show_warning(self.window, t('text_1e63fa10de76'), "\n".join(errors))
 
-            self.window._run_action("Setting preview images...", worker, done)
+            self.window._run_action(t('setting_preview_images'), worker, done)
             submitted = True
         finally:
             if not submitted:

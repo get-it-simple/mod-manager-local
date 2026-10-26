@@ -46,6 +46,10 @@ class GuiTests(unittest.TestCase):
             # storage.save_config is imported lazily inside workers, so it must be patched at
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),
+            patch("mod_manager.ui.dialogs.prompts.review_plan", return_value=True),
+            patch("mod_manager.preset_plan.load_presets", side_effect=lambda: self.presets),
+            patch("mod_manager.preset_plan.discover_mods", side_effect=lambda _cfg: self.mods),
+            patch("mod_manager.preset_plan.mark_preset_managed"),
             patch("mod_manager.ui.app.load_config", return_value=self.cfg),
             patch("mod_manager.ui.app.save_config"),
             patch("mod_manager.ui.app.ensure_paths", return_value=True),
@@ -113,7 +117,7 @@ class GuiTests(unittest.TestCase):
         return values
 
     def test_initial_refresh_populates_models(self):
-        self.assertIs(self.window.centralWidget(), self.window.workspace)
+        self.assertTrue(self.window.centralWidget().isAncestorOf(self.window.workspace))
         self.assertIs(self.window.workspace.stack.currentWidget(), self.window.mods_tab)
         self.assertFalse(hasattr(self.window, "tabs"))
         self.assertEqual(self.window.mods_model.rowCount(), 2)
@@ -509,7 +513,7 @@ class GuiTests(unittest.TestCase):
         self.assertIn("1", texts)
         self.assertIn("Install 1", texts)
         self.assertIn("Uninstall 1", texts)
-        self.assertIn("Toggle selected", texts)
+        self.assertNotIn("Toggle selected", texts)
 
     def test_label_filter_refresh_updates_detail_once_without_intermediate_multi_panel(self):
         self.window._set_view_mode("tiles")
@@ -548,7 +552,7 @@ class GuiTests(unittest.TestCase):
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
 
-        apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default", False, True)
+        apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default", False, True, state_filter="all")
         self.assertEqual(self.window.context.status_text, "Installed 2/3 on page 2. Errors: 1.")
         refresh_mods.assert_called_once_with()
         refresh_presets.assert_called_once_with()
@@ -570,7 +574,9 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(all(not button.isEnabled() for button in self.window.mod_selection_widgets))
 
         self.select_mod_rows(0)
-        self.assertTrue(all(button.isEnabled() for button in self.window.mod_selection_widgets))
+        self.assertFalse(self.window.mods_actions.button("install_selected").isEnabled())
+        self.assertTrue(self.window.mods_actions.button("uninstall_selected").isEnabled())
+        self.assertTrue(all(button.isEnabled() for button in self.window.mod_selection_widgets if button is not self.window.mods_actions.button("install_selected")))
 
     def test_source_and_destination_rows_select_paths_in_explorer(self):
         self.window._refresh_mod_detail(self.mods[0])
@@ -897,13 +903,15 @@ class GuiTests(unittest.TestCase):
         preset_selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         preset_selection.select(self.window.presets_model.index(1, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
 
-        with patch("mod_manager.ui.app.toggle_presets_result", return_value=("Preset toggled", OperationResult())) as toggle, patch.object(
+        with patch("mod_manager.ui.app.execute_preset_plan", return_value=OperationResult()) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_presets()
 
-        toggle.assert_called_once_with(self.window.cfg, ["core", "ui"], {"combat.pak"}, True)
-        self.assertEqual(self.window.context.status_text, "Preset toggled")
+        toggle.assert_called_once()
+        self.assertEqual([name for name, _members in toggle.call_args.args[0].definitions], ["core", "ui"])
+        self.assertTrue(toggle.call_args.args[1])
+        self.assertEqual(self.window.context.status_text, "Nothing to change.")
         self.assertEqual(self.window.workspace.current_page, "presets")
 
         self.window._open_broken_page()
@@ -920,13 +928,15 @@ class GuiTests(unittest.TestCase):
     def test_preset_double_click_toggles_clicked_preset(self):
         self.window._run_action = self.run_action_inline
         self.window._open_presets_page()
-        with patch("mod_manager.ui.app.toggle_presets_result", return_value=("Preset toggled", OperationResult())) as toggle, patch.object(
+        with patch("mod_manager.ui.app.execute_preset_plan", return_value=OperationResult()) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window.presets_table.doubleClicked.emit(self.window.presets_model.index(1, 0))
 
-        toggle.assert_called_once_with(self.window.cfg, ["ui"], {"combat.pak"}, True)
-        self.assertEqual(self.window.context.status_text, "Preset toggled")
+        toggle.assert_called_once()
+        self.assertEqual([name for name, _members in toggle.call_args.args[0].definitions], ["ui"])
+        self.assertTrue(toggle.call_args.args[1])
+        self.assertEqual(self.window.context.status_text, "Nothing to change.")
         self.assertEqual(self.window.workspace.current_page, "presets")
 
     def test_preset_save_and_delete_keep_dialog_open(self):

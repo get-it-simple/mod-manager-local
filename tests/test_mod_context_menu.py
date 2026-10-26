@@ -136,7 +136,7 @@ class ModContextMenuViewTests(ModContextMenuCase):
             self.window._set_view_mode(mode)
             self.select_mod_rows(0, 1)
             actions = self.actions(self.open_menu(0))
-            self.assertTrue({"install", "uninstall", "toggle"}.issubset(actions))
+            self.assertTrue({"install", "uninstall"}.issubset(actions))
             self.assertNotIn("source", actions)
             self.window.mod_menu.close()
             self.select_mod_rows(0)
@@ -218,7 +218,8 @@ class ModContextMenuViewTests(ModContextMenuCase):
         event = QtGui.QContextMenuEvent(QtGui.QContextMenuEvent.Keyboard, QtCore.QPoint())
         self.qt_app.sendEvent(view, event)
         self.assertIsNotNone(self.window.mod_menu.menu)
-        self.assertIn("toggle", self.actions(self.window.mod_menu.menu))
+        self.assertTrue({"install", "uninstall"}.issubset(self.actions(self.window.mod_menu.menu)))
+        self.assertNotIn("toggle", self.actions(self.window.mod_menu.menu))
         self.assertEqual(self.window._selected_mod_names(), ["combat.pak", "ui.pak"])
 
     def test_path_actions_use_full_target_paths(self):
@@ -296,7 +297,7 @@ class ModContextMenuOperationTests(ModContextMenuCase):
         self.trigger(1, "uninstall")
         self.assertTrue(all(not mod.dest.exists() for mod in self.mods))
         self.select_mod_rows(0, 1)
-        self.trigger(0, "toggle")
+        self.trigger(0, "install")
         self.assertTrue(all(mod.dest.exists() for mod in self.mods))
         self.assertTrue(all(mod.src.exists() for mod in self.mods))
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...settings_schema import LABEL_NAME_FIELD, LABEL_MODE_FIELD, LABEL_TERMS_FIELD, LABEL_MEMBERS_FIELD
@@ -68,7 +70,7 @@ class LabelEditor(QtWidgets.QWidget):
         self.mode_box = select_box()
         self.mode_box.addItems(LABEL_MODE_FIELD.choices)
         self.terms_edit = FragmentEditor()
-        self.details.add_heading("Label settings")
+        self.details.add_heading(t('label_settings'))
         form_host = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(form_host)
         form.setContentsMargins(0, 0, 0, 0)
@@ -84,8 +86,8 @@ class LabelEditor(QtWidgets.QWidget):
         self.form = form
         self.details.add_widget(form_host)
         self.search_edit = QtWidgets.QLineEdit()
-        self.search_edit.setPlaceholderText("Find mods in the lists below")
-        self.search_edit.setToolTip("Search the complete mod catalog and matching mods by name")
+        self.search_edit.setPlaceholderText(t('find_mods_in_the_lists_below'))
+        self.search_edit.setToolTip(t('search_the_complete_mod_catalog_and_matching_mods_by_name'))
         self.details.add_widget(self.search_edit)
         self.manual_heading = QtWidgets.QLabel(LABEL_MEMBERS_FIELD.label)
         self.manual_heading.setToolTip(LABEL_MEMBERS_FIELD.tooltip)
@@ -104,12 +106,12 @@ class LabelEditor(QtWidgets.QWidget):
         self.search_edit.textChanged.connect(self.manual_proxy.setFilterFixedString)
         self.search_edit.textChanged.connect(self.matches_proxy.setFilterFixedString)
         self.toolbar = IconToolbar()
-        actions = self.toolbar.add_section("labels", "Labels")
-        actions.add_text_action("add", "New label", "add", "Create a label in this draft")
-        actions.add_action("delete", "delete", "Delete this label from the draft")
-        save = self.toolbar.add_section("save", "Changes")
-        save.add_text_action("save", "Save", "save", "Save all label changes for this game profile")
-        save.add_text_action("reset", "Reset changes", "reset", "Restore the saved labels for this game profile")
+        actions = self.toolbar.add_section("labels", t('labels'))
+        actions.add_text_action("add", t('new_label'), "add", t('create_a_label_in_this_draft'))
+        actions.add_action("delete", "delete", t('delete_this_label_from_the_draft'))
+        save = self.toolbar.add_section("save", t('changes'))
+        save.add_text_action("save", t('save'), "save", t('save_all_label_changes_for_this_game_profile'))
+        save.add_text_action("reset", t('reset_changes'), "reset", t('restore_the_saved_labels_for_this_game_profile'))
         self.status = QtWidgets.QLabel()
         self.status.setWordWrap(True)
         self.splitter = QtWidgets.QSplitter()

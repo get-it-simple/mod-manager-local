@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -13,13 +15,13 @@ class PreviewConfirmationContent(QtWidgets.QWidget):
         super().__init__(parent)
         layout = apply_margins(QtWidgets.QVBoxLayout(self), spacing=tokens.SPACE_2XL)
         if clipboard:
-            text = "Use the image from the clipboard as the preview?"
+            text = t('use_the_image_from_the_clipboard_as_the_preview')
         else:
-            text = "Apply this preview image?"
+            text = t('apply_this_preview_image')
         if count > 1:
-            text += f"\nThe same image will be applied to all {count} selected mods, replacing their existing previews."
+            text += t('the_same_image_will_be_applied_to_all_value0_selected_mods_replacing_the', value0=f'{count}')
         else:
-            text += "\nThe selected mod's existing preview will be replaced."
+            text += t('the_selected_mod_s_existing_preview_will_be_replaced')
         self.message = QtWidgets.QLabel(text, self)
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
@@ -33,5 +35,5 @@ class PreviewConfirmationContent(QtWidgets.QWidget):
             size.scale(tokens.PREVIEW_CONFIRM_IMAGE_SIZE, tokens.PREVIEW_CONFIRM_IMAGE_SIZE, QtCore.Qt.KeepAspectRatio)
             reader.setScaledSize(size)
         self.preview.setPixmap(QtGui.QPixmap.fromImage(reader.read()))
-        self.preview.setAccessibleName("Preview image to apply")
+        self.preview.setAccessibleName(t('preview_image_to_apply'))
         layout.addWidget(self.preview)

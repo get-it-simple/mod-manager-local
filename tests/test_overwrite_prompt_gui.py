@@ -119,9 +119,10 @@ class OverwritePromptTest(WindowTestCase):
     def test_a_preset_toggle_asks_for_the_mods_it_would_install(self):
         pending = [self._mod("weapon.pak", copy_install=True)]
 
-        with patch("mod_manager.ui.app.preset_mods_to_install", return_value=(pending, [])), patch(
+        self.window.presets_table.selectRow(1)
+        with patch("mod_manager.preset_plan.load_presets", return_value={"ui": [pending[0].name]}), patch("mod_manager.preset_plan.discover_mods", return_value=pending), patch(
             "mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False
-        ) as question, patch("mod_manager.ui.app.toggle_presets_result") as toggle:
+        ) as question, patch("mod_manager.ui.app.execute_preset_plan") as toggle:
             self.window._toggle_selected_presets()
 
         question.assert_called_once()

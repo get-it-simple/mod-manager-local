@@ -12,8 +12,14 @@ from ..folder_actions import ensure_paths, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
+from ..i18n import t
+from ..library_state import folder_issues
+from .controllers.keyboard_controller import KeyboardController
+from .widgets.buttons import text_button
+from .widgets.operation_progress import OperationProgress
 from ..labels import AUTOMATIC, ResolvedLabels, label_names
 from ..link_recovery import preset_install_names
+from ..preset_plan import plan_presets, execute_preset_plan
 from ..mods import (
     add_favorites_to_mods,
     add_label_to_mods,
@@ -97,8 +103,8 @@ from .view_modes import (
 )
 from ..workers import _run_import_batch
 
-OVERWRITE_TITLE = "Overwrite files"
-OVERWRITE_QUESTION = "{message}\n\nReplace them?"
+OVERWRITE_TITLE = t('overwrite_files')
+OVERWRITE_QUESTION = t('message_replace_them')
 
 
 class _Var:
@@ -127,7 +133,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._applying_theme = False
         self.runner = TaskRunner(self)
         self.runner.statusChanged.connect(self.statusBar().showMessage)
-        self.runner.failed.connect(lambda message: show_error(self, "Error", message))
+        self.runner.failed.connect(lambda message: show_error(self, t('error'), message))
         self.runner.busyChanged.connect(self._on_busy_changed)
         self.archive_import = ArchiveImportController(self)
         self.previews = PreviewController(self)
@@ -147,6 +153,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.search_var = _Var("")
         self.label_filter_var = _Var("")
         self.favorite_filter_var = _Var(False)
+        self.state_filter = "all"
         self.label_edit_var = _Var("")
         self.order_var = _Var(self._mod_order_label_from_config())
         self.mod_view_mode = _Var(normalize_view_mode(self.cfg.get("mod_view_mode")))
@@ -164,8 +171,18 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.preset_sort_reverse = bool(self.cfg.get("preset_sort_reverse", False))
 
         self._build()
+        self.operation_progress = OperationProgress(self)
+        self.takeCentralWidget()
+        central = QtWidgets.QWidget(self)
+        layout = apply_margins(QtWidgets.QVBoxLayout(central), margins=None, spacing=tokens.SPACE_SM)
+        layout.addWidget(self.workspace, 1)
+        layout.addWidget(self.operation_progress)
+        self.setCentralWidget(central)
+        self.runner.progressChanged.connect(self.operation_progress.update_progress)
+        self.runner.busyChanged.connect(self.operation_progress.set_busy)
         self._setup_com_drop_targets()
         self._bind_navigation_events()
+        self.keyboard = KeyboardController(self)
         self.refresh_all()
 
     def _setup_com_drop_targets(self) -> None:
@@ -188,6 +205,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self.keyboard.shutdown()
         self.filter_expansion.shutdown()
         self._close_label_choices()
         self.mod_menu.shutdown()
@@ -314,7 +332,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if event.type() in (QtCore.QEvent.ShortcutOverride, QtCore.QEvent.KeyPress) and event.matches(QtGui.QKeySequence.Paste):
             archive_active = self.archive_import.dialog is not None and isinstance(obj, QtWidgets.QWidget) and obj.window() is self.archive_import.dialog
             library_active = isinstance(obj, QtWidgets.QWidget) and obj.window() is self and self._is_mods_tab_active()
-            if (archive_active or library_active) and not self.busy and clipboard_has_files():
+            default_paste = not hasattr(self, "keyboard") or self.keyboard.bindings["paste"] == {"combo": "ctrl+v", "enabled": True}
+            capturing = isinstance(QtWidgets.QApplication.focusWidget(), QtWidgets.QLineEdit) and QtWidgets.QApplication.focusWidget().isReadOnly()
+            if (archive_active or (library_active and default_paste and not capturing)) and not self.busy and clipboard_has_files():
                 event.accept()
                 if event.type() == QtCore.QEvent.KeyPress:
                     self._handle_paste()
@@ -355,13 +375,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if hasattr(style_hints, "colorSchemeChanged"):
             style_hints.colorSchemeChanged.connect(self._on_system_appearance_changed)
         self._bound = True
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Backspace), self, activated=self._nav_back)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Back), self, activated=self._nav_back)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Forward), self, activated=self._nav_forward)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl++"), self, activated=lambda: self._zoom_tiles(1))
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=lambda: self._zoom_tiles(1))
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+-"), self, activated=lambda: self._zoom_tiles(-1))
-        QtGui.QShortcut(QtGui.QKeySequence.Paste, self, activated=self._handle_paste)
 
     def _is_mods_tab_active(self) -> bool:
         return self.workspace.current_page == "library" and not self.busy
@@ -390,11 +403,13 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.workspace.pageRequested.connect(self._navigate)
         self.workspace.profileRequested.connect(self._select_game_profile)
         self.game_button = self.workspace.game_button
-        self.games_page = WorkspacePage("Game profiles", "Choose a game or add a profile to get started.")
-        self.mods_tab = WorkspacePage("Library")
-        self.statusBar().showMessage("Ready")
+        self.games_page = WorkspacePage(t('game_profiles'), t('choose_a_game_or_add_a_profile_to_get_started'))
+        self.mods_tab = WorkspacePage(t('library'))
+        self.statusBar().showMessage(t('ready'))
         self.selection_status = QtWidgets.QLabel("0 selected")
         self.statusBar().addPermanentWidget(self.selection_status)
+        self.keyboard_help_button = text_button("?", t("keyboard_shortcuts"), lambda: self.keyboard.show_help(), icon_name="details")
+        self.statusBar().addPermanentWidget(self.keyboard_help_button)
         self._apply_button_style()
         self._build_games_page()
         self._build_mods()
@@ -448,7 +463,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _sync_workspace(self) -> None:
         profile = active_game_profile(self.cfg)
         self.workspace.set_profiles(self.cfg.get("game_profiles", []), profile.get("id", "") if profile else "", self.busy)
-        self.mods_tab.set_subtitle(f"{profile.get('name', 'Game')} · {len(self.current_mod_items)} mods" if profile else "")
+        count = t("showing_mods", count=len(self.current_mod_items), total=len(self.current_mod_names))
+        self.mods_tab.set_subtitle(t("profile_summary", game=profile.get("name", t('game')),
+                                   mode=t("copies_mode" if is_copy_install(self.cfg) else "links_mode"), count=count) if profile else "", elide=True)
 
     def _show_start_page(self) -> None:
         self._refresh_games_lists()
@@ -641,7 +658,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _set_mod_order(self, text: str) -> None:
         options = self._mod_order_options()
-        text = text if text in options else "Default"
+        text = text if text in options else t('default')
         self.order_var.set(text)
         key = options[text]
         if self.mod_sort_key == key:
@@ -710,8 +727,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if button is None:
             return
         button.setIcon(_sort_direction_icon(self.mod_sort_reverse, self._theme_button_text))
-        button.setAccessibleName("Descending" if self.mod_sort_reverse else "Ascending")
-        button.setToolTip("Sort descending" if self.mod_sort_reverse else "Sort ascending")
+        button.setAccessibleName(t('descending') if self.mod_sort_reverse else t('ascending'))
+        button.setToolTip(t('sort_descending') if self.mod_sort_reverse else t('sort_ascending'))
 
     def _zoom_tiles(self, direction: int):
         if not self._is_mods_tab_active() or self._editing_text():
@@ -746,10 +763,20 @@ class ModManagerGui(QtWidgets.QMainWindow):
         enabled = (not self.busy) and self._has_mod_selection()
         for widget in self.mod_selection_widgets:
             widget.setEnabled(enabled)
+        if not hasattr(self, "mods_actions"):
+            return
+        selected = [self.current_mods_shown[row] for row in self._selected_rows(self._current_mod_view())
+                    if row < len(self.current_mods_shown)]
+        for key, mods, installed in (("install_selected", selected, False), ("uninstall_selected", selected, True),
+                                     ("install_page", self.current_mods_shown, False), ("uninstall_page", self.current_mods_shown, True)):
+            count = sum(mod.installed == installed for mod in mods)
+            button = self.mods_actions.button(key)
+            button.setText(t(key, count=count))
+            button.setEnabled(not self.busy and count > 0)
 
     def _on_mod_selection_changed(self) -> None:
         self._update_mod_selection_actions()
-        self.selection_status.setText(f"{len(self._selected_rows(self._current_mod_view()))} selected")
+        self.selection_status.setText(t("selection_count", count=len(self._selected_rows(self._current_mod_view()))))
         self._refresh_selected_detail()
 
     def _select_mod_names(self, selected_names: list[str] | None = None) -> None:
@@ -857,7 +884,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _detail_dates_row(self, mod: ModItem) -> None:
         last_managed = self.current_mod_records.get(mod.name, {}).get("last_managed") or "-"
         created = self._format_mod_created_date(mod)
-        self.detail_scroll.add_fields([("Last managed", last_managed), ("Created", created)])
+        self.detail_scroll.add_fields([(t('last_managed'), last_managed), (t('created'), created)])
 
     def _detail_path_row(self, label: str, path: Path) -> None:
         self.detail_scroll.add_row(detail_name_label(label), path_button(path, lambda target: select_in_explorer(target)), stretch_last=True)
@@ -865,14 +892,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _detail_label_row(self, values: tuple[str, ...]) -> None:
         buttons = []
         for value in values:
-            buttons.append(text_button(value, f"Filter mods by {value}", lambda name=value: self._toggle_label_filter(name), icon_name="toggle"))
+            buttons.append(text_button(value, t('filter_mods_by_value0', value0=f'{value}'), lambda name=value: self._toggle_label_filter(name), icon_name="toggle"))
         self.detail_scroll.add_label_buttons(buttons)
 
     def _detail_favorite_button(self, mod: ModItem) -> QtWidgets.QPushButton:
         favorite = mod.name in self.current_mod_favorites
-        text = "Remove from favorites" if favorite else "Add to favorites"
+        text = t('remove_from_favorites') if favorite else t('add_to_favorites')
         button = text_button(
-            "Favorite",
+            t('favorite'),
             text,
             lambda name=mod.name: self._toggle_favorite_name(name),
             icon_name="favorite_filled" if favorite else "favorite",
@@ -887,7 +914,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         index = self.current_mods_shown.index(mod) + 1 if mod in self.current_mods_shown else 1
         button = text_button(
             _sys_str(action),
-            f"{action.capitalize()} this mod",
+            t('value0_this_mod', value0=f'{action.capitalize()}'),
             lambda i=index: self._toggle_selected_indexes([i]),
             icon_name=action,
         )
@@ -928,7 +955,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_presets()
 
         self.errors.run(
-            "Updating selected mods...",
+            t('updating_selected_mods'),
             lambda: change_mods(selected, overwrite=True),
             done,
         )
@@ -943,27 +970,22 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._clear_detail()
         installed = sum(1 for mod in mods if mod.installed)
         not_installed = len(mods) - installed
-        self.detail_scroll.add_heading(f"{len(mods)} mods selected", self.details_button.click)
-        self._detail_row("Installed", str(installed))
-        self._detail_row("Not installed", str(not_installed))
-        install_button = QtWidgets.QPushButton(f"Install {not_installed}")
+        self.detail_scroll.add_heading(t('value0_mods_selected', value0=f'{len(mods)}'), self.details_button.click)
+        self._detail_row(t('installed_mods'), str(installed))
+        self._detail_row(t('not_installed_mods'), str(not_installed))
+        install_button = QtWidgets.QPushButton(t('install_value0', value0=f'{not_installed}'))
         install_button.setIcon(self._icon("install"))
-        install_button.setToolTip("Install selected mods that are not installed")
+        install_button.setToolTip(t('install_selected_mods_that_are_not_installed'))
         install_button.setEnabled(not_installed > 0)
         install_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         install_button.clicked.connect(self._install_selected_mods)
-        uninstall_button = QtWidgets.QPushButton(f"Uninstall {installed}")
+        uninstall_button = QtWidgets.QPushButton(t('uninstall_value0', value0=f'{installed}'))
         uninstall_button.setIcon(self._icon("uninstall"))
-        uninstall_button.setToolTip("Uninstall selected mods that are installed")
+        uninstall_button.setToolTip(t('uninstall_selected_mods_that_are_installed'))
         uninstall_button.setEnabled(installed > 0)
         uninstall_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         uninstall_button.clicked.connect(self._uninstall_selected_mods)
-        toggle_button = QtWidgets.QPushButton("Toggle selected")
-        toggle_button.setIcon(self._icon("toggle"))
-        toggle_button.setToolTip("Toggle all selected mods")
-        toggle_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        toggle_button.clicked.connect(self._toggle_selected_mods)
-        self.detail_scroll.add_actions([install_button, uninstall_button, toggle_button])
+        self.detail_scroll.add_actions([install_button, uninstall_button])
 
     def _detail_image(self, mod_name: str) -> None:
         img_path = mod_image_path(self.cfg, mod_name)
@@ -987,20 +1009,20 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _refresh_mod_detail(self, mod: ModItem | None) -> None:
         self._clear_detail()
         if mod is None:
-            self.detail_scroll.add_heading("No mod selected", self.details_button.click)
-            self.detail_scroll.add_text_row("Details", "Select a mod to see its information and available actions.")
+            self.detail_scroll.add_heading(t('no_mod_selected'), self.details_button.click)
+            self.detail_scroll.add_text_row(t('details'), t('select_a_mod_to_see_its_information_and_available_actions'))
             return
         self.detail_scroll.add_heading(mod.name, self.details_button.click)
         self.detail_scroll.add_flow_row([
-            QtWidgets.QLabel("Installed" if mod.installed else "Not installed"),
+            QtWidgets.QLabel(t('installed_mods') if mod.installed else t('not_installed_mods')),
             self._detail_favorite_button(mod), self._detail_state_button(mod),
         ])
         self._detail_label_row(label_names(self.current_mod_labels, mod.name))
         self._detail_dates_row(mod)
         if mod.files:
-            self._detail_row("Grouped files", ", ".join(f.src.name for f in mod.files))
-        self._detail_path_row("Source", mod.src)
-        self._detail_path_row("Destination", mod.dest)
+            self._detail_row(t('grouped_files'), ", ".join(f.src.name for f in mod.files))
+        self._detail_path_row(t('source'), mod.src)
+        self._detail_path_row(t('destination'), mod.dest)
         self._detail_image(mod.name)
         self.detail_layout.addStretch(1)
 
@@ -1023,9 +1045,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         page, label_filter, search, order = self._view_args()
         favorite_only = bool(self.favorite_filter_var.get())
         view_args = (self.cfg, page, label_filter, search, order)
-        items, shown, page, pages, labels = (
-            mods_view(*view_args, True) if favorite_only else mods_view(*view_args)
-        )
+        kwargs = {"state_filter": self.state_filter} if self.state_filter != "all" else {}
+        items, shown, page, pages, labels = mods_view(*view_args, favorite_only, **kwargs)
         self.current_mod_items = items
         self.current_mod_names = sorted(labels.memberships if isinstance(labels, ResolvedLabels) else [mod.name for mod in items], key=str.casefold)
         self.current_mods_shown = shown
@@ -1055,7 +1076,41 @@ class ModManagerGui(QtWidgets.QMainWindow):
             del list_blocker
         self._show_mod_view()
         self._sync_workspace()
-        self.selection_status.setText(f"{len(self._selected_rows(self._current_mod_view()))} selected")
+        self.selection_status.setText(t("selection_count", count=len(self._selected_rows(self._current_mod_view()))))
+        self._refresh_library_state()
+
+    def _change_state_filter(self, *_args) -> None:
+        self.state_filter = self.state_filter_box.currentData()
+        self.mod_page.set(1)
+        self.refresh_mods()
+
+    def _clear_one_filter(self, name: str) -> None:
+        if name == "state":
+            self.state_filter_box.setCurrentIndex(0)
+            return
+        {"search": self.search_var, "label": self.label_filter_var, "favorite": self.favorite_filter_var}[name].set(False if name == "favorite" else "")
+        self.mod_page.set(1)
+        self.refresh_mods()
+
+    def _refresh_library_state(self) -> None:
+        filters = []
+        for name, value, key in (("search", self.search_var.get(), "search_chip"), ("label", self.label_filter_var.get(), "label_chip"),
+                                 ("favorite", self.favorite_filter_var.get(), "favorites_chip")):
+            if value:
+                filters.append((t(key, value=value), lambda name=name: self._clear_one_filter(name)))
+        if self.state_filter != "all":
+            filters.append((self.state_filter_box.currentText(), lambda: self._clear_one_filter("state")))
+        self.filter_summary.update_filters(len(self.current_mod_items), len(self.current_mod_names), filters)
+        if not self.current_mods_shown:
+            issues = folder_issues(self.cfg)
+            if issues:
+                self.library_empty.configure(t("invalid_folders"), "\n".join(issues),
+                                             ((t("edit_profile"), "edit", lambda: self.games.edit(self.cfg.get("active_game_profile_id", ""))),))
+            elif filters:
+                self.library_empty.configure(t("no_matches"), t("no_matches_help"), ((t("clear_filters"), "clear", self._mods_clear),))
+            else:
+                self.library_empty.configure(t("empty_library"), t("empty_library_help"),
+                                             ((t("import_files"), "import", self._import_mod_files), (t("import_folder"), "folder", self._import_mod_folder)))
 
     def refresh_presets(self) -> None:
         selected_names = [
@@ -1122,6 +1177,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._set_favorite_names(names, favorite)
 
     def _mods_clear(self) -> None:
+        self.state_filter = "all"
+        with QtCore.QSignalBlocker(self.state_filter_box):
+            self.state_filter_box.setCurrentIndex(0)
         self.search_var.set("")
         self.label_filter_var.set("")
         self.search_box.setCurrentText("")
@@ -1155,13 +1213,13 @@ class ModManagerGui(QtWidgets.QMainWindow):
         def done(result):
             target_page, operation = result
             total = len(operation.items)
-            self._set_status(f"Installed {total - operation.errors}/{total} on page {target_page}. Errors: {operation.errors}.")
+            self._set_status(t('installed_value0_value1_on_page_value2_errors_value3', value0=f'{total - operation.errors}', value1=f'{total}', value2=f'{target_page}', value3=f'{operation.errors}'))
             self.refresh_mods()
             self.refresh_presets()
 
         favorite_only = bool(self.favorite_filter_var.get())
         view_args = (self.cfg, page, label_filter, search, order, favorite_only, True)
-        self.errors.run("Installing mods...", lambda: change_mods_page(*view_args), done)
+        self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=self.state_filter), done)
 
     def _uninstall_page(self) -> None:
         page, label_filter, search, order = self._view_args()
@@ -1169,15 +1227,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
         def done(result):
             target_page, operation = result
             count = sum(item.success for item in operation.items)
-            self._set_status(f"Uninstalled {count} on page {target_page}. Errors: {operation.errors}.")
+            self._set_status(t('uninstalled_value0_on_page_value1_errors_value2', value0=f'{count}', value1=f'{target_page}', value2=f'{operation.errors}'))
             self.refresh_mods()
             self.refresh_presets()
 
         view_args = (self.cfg, page, label_filter, search, order)
         favorite_only = bool(self.favorite_filter_var.get())
         self.errors.run(
-            "Uninstalling mods...",
-            lambda: change_mods_page(*view_args, favorite_only, action="uninstall"),
+            t('uninstalling_mods'),
+            lambda: change_mods_page(*view_args, favorite_only, action="uninstall", state_filter=self.state_filter),
             done,
         )
 
@@ -1191,7 +1249,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         label = self.label_edit.text().strip()
         self.label_edit_var.set(label)
         if not label:
-            prompts.show_error(self, "Label", "Enter label.")
+            prompts.show_error(self, t('label'), t('enter_label'))
             return
         self._change_label_selected(label)
 
@@ -1215,12 +1273,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods(targets)
 
         action = remove_label_from_mods if remove else add_label_to_mods
-        self._run_action("Removing label..." if remove else "Adding label...", lambda: action(label, targets), done)
+        self._run_action(t('removing_label') if remove else t('adding_label'), lambda: action(label, targets), done)
 
     def _save_preset(self) -> None:
         name = self.preset_name.text().strip()
         if not name:
-            prompts.show_error(self, "Preset", "Enter preset name.")
+            prompts.show_error(self, t('preset'), t('enter_preset_name'))
             return
 
         def done(result):
@@ -1229,45 +1287,60 @@ class ModManagerGui(QtWidgets.QMainWindow):
             if ok:
                 self.refresh_presets()
 
-        self._run_action("Saving preset...", lambda: save_preset_from_installed(self.cfg, name), done)
+        self._run_action(t('saving_preset'), lambda: save_preset_from_installed(self.cfg, name), done)
 
-    def _toggle_selected_presets(self) -> None:
-        names = self._selected_preset_names()
-        installed = {m.name for m in list_installed_mods(self.cfg)}
-        if is_copy_install(self.cfg) and not self._confirm_overwrite(preset_mods_to_install(self.cfg, names)[0]):
+    def _toggle_selected_presets(self, names: list[str] | None = None) -> None:
+        names = self._selected_preset_names() if names is None else names
+        if not names:
+            return
+        plan = plan_presets(self.cfg, names)
+        while True:
+            rows = [(change.preset, t(change.action + "_action"), change.name) for change in plan.changes]
+            if not prompts.review_plan(self, t("preset_preview"), rows):
+                return
+            current = plan_presets(self.cfg, names)
+            if current == plan:
+                break
+            plan = current
+            self._set_status(t("preset_changed"))
+        if not self._confirm_overwrite([change.mod for change in plan.changes if change.action == "install"]):
             return
 
         def done(result):
             message, _operation = result
-            self._set_status(message)
+            self._set_status(message or _operation.summary())
             self.refresh_mods()
             self.refresh_presets()
 
         self.errors.run(
-            "Toggling presets...",
-            lambda: toggle_presets_result(self.cfg, names, installed, True),
+            t('toggling_presets'),
+            lambda: ("", execute_preset_plan(plan, True)),
             done,
-            preset_names=preset_install_names(names, installed),
+            preset_names=tuple(dict.fromkeys(change.preset for change in plan.changes if change.action == "install")),
         )
 
+    @QtCore.Slot(QtCore.QModelIndex)
     def _toggle_preset_at_index(self, index) -> None:
-        if index.isValid() and self.presets_table.selectionModel():
+        if not index.isValid() or index.row() >= len(self.presets_model.keys):
+            return
+        name = self.presets_model.keys[index.row()]
+        if self.presets_table.selectionModel():
             selection = self.presets_table.selectionModel()
             selection.clearSelection()
             selection.select(index, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
             self.presets_table.setCurrentIndex(index)
-        self._toggle_selected_presets()
+        self._toggle_selected_presets([name])
 
     def _delete_selected_presets(self) -> None:
         names = self._selected_preset_names()
 
         def done(result):
             removed, missing = result
-            message = f"Deleted: {removed}. Missing: {', '.join(missing) if missing else 'none'}"
+            message = t('deleted_value0_missing_value1', value0=f'{removed}', value1=f"{(', '.join(missing) if missing else 'none')}")
             self._set_status(message)
             self.refresh_presets()
 
-        self._run_action("Deleting presets...", lambda: delete_presets_by_names(names), done)
+        self._run_action(t('deleting_presets'), lambda: delete_presets_by_names(names), done)
 
     def _selected_preset_names(self) -> list[str]:
         return [
@@ -1302,6 +1375,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._set_status(SETTINGS_SAVED)
         self.refresh_all()
         self.settings.reset()
+        self.keyboard.reload()
 
     def _remove_selected_broken(self) -> None:
         rows = self._selected_rows(self.broken_table)
@@ -1315,11 +1389,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _remove_broken(self, mods: list[ModItem]) -> None:
         def done(result):
             count = sum(item.success for item in result.items)
-            self._set_status(f"Removed broken links: {count}. Errors: {result.errors}.")
+            self._set_status(t('removed_broken_links_value0_errors_value1', value0=f'{count}', value1=f'{result.errors}'))
             self.refresh_broken()
 
         self.errors.run(
-            "Removing broken links...",
+            t('removing_broken_links'),
             lambda: OperationResult(tuple(deactivate_mod_result(mod) for mod in mods)),
             done,
         )
@@ -1408,7 +1482,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         def done(result):
             imported, skipped = result
-            message = f"Imported: {len(imported)}. Skipped: {len(skipped)}."
+            self.errors.record_import(imported, skipped, self.cfg)
+            message = t('imported_value0_skipped_value1', value0=f'{len(imported)}', value1=f'{len(skipped)}')
             self._set_status(message)
             for mod_name in image_mods:
                 self._invalidate_mod_image(mod_name)
@@ -1427,14 +1502,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
                 if release:
                     release()
 
-        self._run_action("Importing...", worker, done)
+        self._run_action(t('importing'), worker, done)
 
     def _import_mod_files(self) -> None:
-        files = prompts.choose_files(self, "Import mod files")
+        files = prompts.choose_files(self, t('import_mod_files'))
         self._import_paths([Path(p) for p in files])
 
     def _import_mod_folder(self) -> None:
-        folder = prompts.choose_directory(self, "Import mod folder")
+        folder = prompts.choose_directory(self, t('import_mod_folder'))
         if folder:
             self._import_paths([Path(folder)])
 
@@ -1443,7 +1518,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not names:
             return ""
         current = names.index(default_name) if default_name in names else 0
-        name, ok = prompts.choose_item(self, "Mod image", "Mod", names, current)
+        name, ok = prompts.choose_item(self, t('mod_image'), t('mod'), names, current)
         return name if ok else ""
 
     def _set_mod_image(self) -> None:

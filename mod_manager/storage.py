@@ -78,6 +78,10 @@ def _validate_config(cfg: Dict) -> None:
             elif spec.kind == settings_schema.FLAG:
                 if not isinstance(value, bool) and not (spec.key in GAME_PROFILE_KEYS and value == ""):
                     raise StorageError(f"{spec.label} must be true or false. Repair config.json.")
+            elif spec.kind == settings_schema.SHORTCUTS:
+                settings_schema.coerce_value(spec, value)
+            elif spec.kind == settings_schema.SHORTCUTS:
+                settings_schema.coerce_value(spec, value)
             elif not isinstance(value, str):
                 raise StorageError(f"{spec.label} must be text. Repair config.json.")
             elif spec.kind == settings_schema.CHOICE and value and value not in spec.choices:

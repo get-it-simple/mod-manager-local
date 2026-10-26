@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from copy import deepcopy
 from typing import Callable
 
@@ -13,6 +15,8 @@ from ...link_recovery import (
 from ...models import OperationItem, OperationResult
 from ...mods import existing_targets
 from ...storage import active_game_profile
+from pathlib import Path
+from ...models import OperationFailure
 from ..dialogs.base import show_dialog
 from ..dialogs import prompts
 from ..dialogs.error_history import ErrorHistoryDialog
@@ -28,14 +32,14 @@ class ErrorHistoryController(QtCore.QObject):
         self.model = ErrorHistoryModel(self)
         self.dialog = None
         self.recovering = False
-        self.button = text_button("Errors: 0", "Show errors from this session", self.open, window)
+        self.button = text_button(t('errors_0'), t('show_errors_from_this_session'), self.open, window)
         set_variant(self.button, LINK)
         self.button.setEnabled(False)
         window.statusBar().addPermanentWidget(self.button)
         self.model.rowsInserted.connect(self._update_count)
 
     def _update_count(self, *args) -> None:
-        self.button.setText(f"Errors: {self.model.rowCount()}")
+        self.button.setText(t('errors_value0', value0=f'{self.model.rowCount()}'))
         self.button.setEnabled(bool(self.model.rowCount()))
 
     def open(self) -> None:
@@ -43,6 +47,25 @@ class ErrorHistoryController(QtCore.QObject):
             self.dialog = ErrorHistoryDialog(self.model, self.window)
         self.dialog.setPalette(self.window.palette())
         show_dialog(self.dialog)
+
+    def summarize(self, result: OperationResult) -> None:
+        skipped = sum(item.action in ("missing", "skipped") for item in result.items)
+        failed = sum(not item.success and item.action not in ("missing", "skipped") for item in result.items)
+        success = sum(item.success for item in result.items)
+        self.window.operation_progress.summarize(success, skipped, failed)
+
+    def record_import(self, imported, errors, cfg, plans=()) -> None:
+        profile = active_game_profile(cfg)
+        failures = []
+        for message in errors:
+            plan = next((plan for plan in plans if str(message).startswith(plan.name)), None)
+            source = plan.files[0][0] if plan and plan.files else Path(cfg.get("mods_source_dir") or ".")
+            destination = Path(cfg.get("mods_source_dir") or ".") / (plan.name if plan else "")
+            failure = OperationFailure(source, destination, str(message))
+            failures.append(OperationItem(plan.name if plan else str(message), "imported", False, str(message), (failure,)))
+        result = OperationResult(tuple(OperationItem(str(name), "imported", True, str(name)) for name in imported) + tuple(failures))
+        self.model.append_result(result, profile.get("name", t('default')) if profile else t('default'))
+        self.summarize(result)
 
     def run(
         self, label: str, worker: Callable, done: Callable, *,
@@ -53,13 +76,13 @@ class ErrorHistoryController(QtCore.QObject):
             return
         original = deepcopy(self.window.cfg)
         profile = active_game_profile(self.window.cfg)
-        profile_name = profile.get("name", "Default") if profile else "Default"
+        profile_name = profile.get("name", t('default')) if profile else t('default')
 
         def work():
             try:
                 return worker(), None
             except Exception as error:
-                logger.exception("Mod operation failed: %s", label)
+                logger.exception(t('mod_operation_failed_s'), label)
                 return None, str(error)
 
         def completed(outcome):
@@ -69,13 +92,15 @@ class ErrorHistoryController(QtCore.QObject):
                     self.recovering = False
                 result = OperationResult((OperationItem(label, "failed", False, error),))
                 self.model.append_result(result, profile_name)
-                self.window._set_status(f"{label} Failed: {error}")
+                self.window._set_status(t("operation_failed", label=label, error=error))
                 self.window.refresh_all()
+                self.summarize(result)
                 return
             result = value[1] if isinstance(value, tuple) else value
             recorded = retry_outcomes(previous_result, result) if previous_result is not None else result
             self.model.append_result(recorded, profile_name)
             done(value)
+            self.summarize(result)
             if recover_links and needs_copy_recovery(result):
                 self._recover(result, original, value, done, preset_names)
 
@@ -101,7 +126,7 @@ class ErrorHistoryController(QtCore.QObject):
             retry_ready = True
         except (OSError, ValueError) as error:
             prompts.show_error(self.window, COPY_RECOVERY_TITLE, str(error))
-            self.window._set_status(f"Copy retry cancelled: {error}")
+            self.window._set_status(t('copy_retry_cancelled_value0', value0=f'{error}'))
             return
         finally:
             if not retry_ready:
@@ -122,4 +147,4 @@ class ErrorHistoryController(QtCore.QObject):
             finally:
                 self.recovering = False
 
-        self.run("Copying failed installations...", work, completed, recover_links=False, previous_result=result)
+        self.run(t('copying_failed_installations'), work, completed, recover_links=False, previous_result=result)

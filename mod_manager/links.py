@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 import os
 import shutil
 import subprocess
@@ -9,12 +11,11 @@ from typing import List, Tuple
 
 from .platform_utils import is_junction, is_windows, supports_links
 
-TARGET_EXISTS = "Target already exists: {}"
-SOURCE_MISSING = "Source not found: {}"
+TARGET_EXISTS = t('target_already_exists')
+SOURCE_MISSING = t('source_not_found')
 UNSUPPORTED_LINKS = "unsupported_links"
 UNSUPPORTED_LINK_MESSAGE = (
-    "The destination file system does not support links. "
-    "Select Copy as the game's Install method, or use a destination that supports links, such as NTFS."
+    t('the_destination_file_system_does_not_support_links_select_copy_as_the_ga')
 )
 
 def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
@@ -33,7 +34,7 @@ def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
                 cmd = ["cmd", "/c", "mklink", str(dest), str(src)]
             res = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000)
             if res.returncode != 0:
-                return False, res.stderr.strip() or res.stdout.strip() or "mklink error"
+                return False, res.stderr.strip() or res.stdout.strip() or t('mklink_error')
             return True, "OK"
         else:
             if src.is_dir():
@@ -45,7 +46,7 @@ def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
         return False, str(e)
 
 def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]:
-    results: List[Tuple[bool, str]] = [(False, "mklink error") for _ in items]
+    results: List[Tuple[bool, str]] = [(False, t('mklink_error')) for _ in items]
     if not items:
         return results
 
@@ -140,14 +141,14 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
         for i in work_idxs:
             st = state.get(i)
             if not st:
-                results[i] = (False, (res.stderr or "").strip() or "mklink error")
+                results[i] = (False, (res.stderr or "").strip() or t('mklink_error'))
                 continue
             rc = st.get("rc")
             msg = "\n".join((st.get("lines") or [])).strip()
             if rc == 0:
                 results[i] = (True, "OK")
             else:
-                results[i] = (False, msg or "mklink error")
+                results[i] = (False, msg or t('mklink_error'))
 
         return results
     except Exception as e:
@@ -164,14 +165,14 @@ def unlink_path(path: Path) -> Tuple[bool, str]:
     try:
         junction = is_junction(path)
         if not path.exists() and not path.is_symlink() and not junction:
-            return False, "Already removed"
+            return False, t('already_removed')
         if junction:
             os.rmdir(path)
         elif path.is_dir() and not path.is_symlink():
             try:
                 os.rmdir(path)
             except OSError:
-                return False, "Not a link or not empty"
+                return False, t('not_a_link_or_not_empty')
         else:
             path.unlink()
         return True, "OK"
@@ -181,7 +182,7 @@ def unlink_path(path: Path) -> Tuple[bool, str]:
 def unlink_broken_link(path: Path) -> Tuple[bool, str]:
     try:
         if not (path.is_symlink() or is_junction(path)) or path.exists():
-            return False, "Not a broken link; left unchanged"
+            return False, t('not_a_broken_link_left_unchanged')
         return unlink_path(path)
     except OSError as error:
         return False, str(error)
@@ -215,7 +216,7 @@ def remove_path(path: Path) -> Tuple[bool, str]:
         if path.is_symlink() or is_junction(path):
             return unlink_path(path)
         if not path.exists():
-            return False, "Already removed"
+            return False, t('already_removed')
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
         else:

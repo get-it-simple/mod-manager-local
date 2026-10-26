@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtWidgets
 
 from ..models.error_model import ErrorHistoryModel
@@ -11,7 +13,7 @@ from ..widgets.style_utils import apply_margins
 class ErrorHistoryDialog(QtWidgets.QDialog):
     def __init__(self, model: ErrorHistoryModel, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Session errors")
+        self.setWindowTitle(t('session_errors'))
         self.resize(*tokens.LARGE_DIALOG_SIZE)
         self.content = ErrorHistoryWidget(model, self)
         self.content.closeRequested.connect(self.close)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
+from ...i18n import t
+from ..widgets.filter_summary import FilterSummary
+from ..widgets.style_utils import apply_margins
 from ... import settings_schema
 
 from ..controllers import ACTIONS, SELECTION
@@ -29,12 +32,12 @@ def build_mods_toolbar(window) -> IconToolbar:
     toolbar.build(MODS_TOOLBAR_SECTIONS)
 
     import_section = toolbar.sections["import"]
-    import_button = import_section.add_text_action("import_files", "Import files", "import", "Import mod files", window._import_mod_files)
+    import_button = import_section.add_text_action("import_files", t('import_files'), "import", t('import_mod_files'), window._import_mod_files)
     set_variant(import_button, "primary")
-    import_section.add_action("import_folder", "folder", "Import a mod folder", window._import_mod_folder)
+    import_section.add_action("import_folder", "folder", t('import_a_mod_folder'), window._import_mod_folder)
 
-    window.search_box = window._filter_box("Search")
-    window.label_filter_box = window._filter_box("Label")
+    window.search_box = window._filter_box(t('search'))
+    window.label_filter_box = window._filter_box(t('label'))
     for box, width in ((window.search_box, tokens.SEARCH_MIN_WIDTH), (window.label_filter_box, tokens.LABEL_FILTER_MIN_WIDTH)):
         box.setMinimumWidth(width)
         box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -43,6 +46,11 @@ def build_mods_toolbar(window) -> IconToolbar:
     filter_section = toolbar.sections["filter"]
     filter_section.add_widget(window.search_box, 2)
     filter_section.add_widget(window.label_filter_box, 1)
+    window.state_filter_box = select_box()
+    for label, value in (("all_mods", "all"), ("installed_mods", "installed"), ("not_installed_mods", "not_installed")):
+        window.state_filter_box.addItem(t(label), value)
+    window.state_filter_box.currentIndexChanged.connect(window._change_state_filter)
+    filter_section.add_widget(window.state_filter_box)
     window.filter_expansion = FilterExpansion(toolbar, filter_section, window.filter_boxes)
     window.favorite_filter_button = toolbar.button("favorite_filter")
     window.favorite_filter_button.setCheckable(True)
@@ -57,7 +65,7 @@ def build_mods_toolbar(window) -> IconToolbar:
     order_section = toolbar.sections["order"]
     order_section.add_widget(window.order_box)
     window.order_direction_button = order_section.add_action(
-        "order_direction", "toggle", "Sort ascending", window._toggle_mod_order_direction
+        "order_direction", "toggle", t('sort_ascending'), window._toggle_mod_order_direction
     )
 
     window.view_list_button = toolbar.button("view_list")
@@ -83,17 +91,19 @@ def build_mods_toolbar(window) -> IconToolbar:
 def build_mods_actions(window) -> IconToolbar:
     toolbar = IconToolbar(window.mods_tab)
     toolbar.build(MODS_ACTION_SECTIONS)
-    toolbar.sections["state"].add_text_action("toggle_selected", "Toggle selected", "toggle", "Toggle selected mods")
+    section = toolbar.sections["state"]
+    section.add_text_action("install_selected", t("install_selected", count=0), "install", t("install_command"))
+    section.add_text_action("uninstall_selected", t("uninstall_selected", count=0), "uninstall", t("uninstall_command"))
 
     page_section = toolbar.sections["page"]
-    page_section.add_action("prev_page", "back", "Previous mods page", lambda: window._change_mod_page(-1))
+    page_section.add_action("prev_page", "back", t('previous_mods_page'), lambda: window._change_mod_page(-1))
     window.page_control = page_section.add_widget(PageControl())
     window.page_control.pageRequested.connect(window._set_mod_page)
     window.page_label = window.page_control
-    page_section.add_action("next_page", "forward", "Next mods page", lambda: window._change_mod_page(1))
+    page_section.add_action("next_page", "forward", t('next_mods_page'), lambda: window._change_mod_page(1))
 
     window.label_edit = QtWidgets.QLineEdit()
-    window.label_edit.setPlaceholderText("Label")
+    window.label_edit.setPlaceholderText(t('label'))
     window.label_edit.setMaximumWidth(tokens.LABEL_EDIT_MAX_WIDTH)
     fixed_size_policy(window.label_edit)
     window.label_edit_model = QtCore.QStringListModel(window.label_edit)
@@ -108,7 +118,8 @@ def build_mods_actions(window) -> IconToolbar:
     toolbar.connect({
         "install_page": window._install_page,
         "uninstall_page": window._uninstall_page,
-        "toggle_selected": window._toggle_selected_mods,
+        "install_selected": window._install_selected_mods,
+        "uninstall_selected": window._uninstall_selected_mods,
         "add_label": window._add_label_selected,
         "remove_label": window._remove_label_selected,
         "favorite_selected": window._toggle_favorite_selected,
@@ -124,7 +135,14 @@ def build_mods_actions(window) -> IconToolbar:
 
 
 def build_mods(window) -> None:
-    layout = window.mods_tab.body
+    window.library_scroll = QtWidgets.QScrollArea(window.mods_tab)
+    window.library_scroll.setWidgetResizable(True)
+    window.library_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+    window.library_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+    content = QtWidgets.QWidget()
+    layout = apply_margins(QtWidgets.QVBoxLayout(content), margins=None, spacing=tokens.SPACE_2XL)
+    window.library_scroll.setWidget(content)
+    window.mods_tab.body.addWidget(window.library_scroll, 1)
     spec = next(spec for spec in settings_schema.all_specs() if spec.key == "mod_details_visible")
     window.details_button = text_button(spec.label, spec.tooltip, window._toggle_details, icon_name="details")
     window.details_button.setCheckable(True)
@@ -133,6 +151,8 @@ def build_mods(window) -> None:
     window.registry.add(ACTIONS, window.details_button)
     window.mods_toolbar = window._build_mods_toolbar()
     layout.addWidget(window.mods_toolbar)
+    window.filter_summary = FilterSummary(window.mods_tab)
+    layout.addWidget(window.filter_summary)
 
     window.mods_model = ModTableModel(window.theme.palette.accent, window)
     window.mods_stack = QtWidgets.QStackedWidget()
@@ -179,11 +199,12 @@ def build_mods(window) -> None:
     window.detail_layout = window.detail_scroll.layout
     window.detail_scroll.setMinimumWidth(tokens.DETAIL_PANEL_MIN_WIDTH)
     window.tile_splitter = QtWidgets.QSplitter()
+    window.tile_splitter.setMinimumHeight(tokens.EMPTY_STATE_MIN_HEIGHT)
     window.tile_splitter.setHandleWidth(tokens.SPLITTER_WIDTH)
     window.tile_splitter.setChildrenCollapsible(False)
     window.mods_stack.addWidget(window.mods_table)
     window.mods_stack.addWidget(window.tiles_view)
-    window.library_empty = EmptyState("No mods to show", "Import files or a folder, or clear the current filters.")
+    window.library_empty = EmptyState(t('no_mods_to_show'), t('import_files_or_a_folder_or_clear_the_current_filters'))
     window.mods_stack.addWidget(window.library_empty)
     window.tile_splitter.addWidget(window.mods_stack)
     window.tile_splitter.addWidget(window.detail_scroll)

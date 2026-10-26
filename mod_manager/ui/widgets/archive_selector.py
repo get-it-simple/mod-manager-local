@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from ..theme import tokens
@@ -40,7 +42,7 @@ class ArchiveSelector(QtWidgets.QListView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("variant", "archiveSelector")
-        self.setAccessibleName("Archives")
+        self.setAccessibleName(t('archives'))
         self.setFlow(QtWidgets.QListView.LeftToRight)
         self.setWrapping(False)
         self.setResizeMode(QtWidgets.QListView.Adjust)

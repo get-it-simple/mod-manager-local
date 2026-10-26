@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from ..i18n import t
+
 LIST = "list"
 TILES = "tiles"
 VIEW_MODES = (LIST, TILES)
 
 MOD_ORDER_OPTIONS = {
-    "Default": "default",
-    "Created date": "created_date",
-    "Last managed": "last_managed",
-    "Label": "label",
-    "Name": "name",
-    "Installed": "installed",
+    t('default'): "default",
+    t('created_date'): "created_date",
+    t('last_managed'): "last_managed",
+    t('label'): "label",
+    t('name'): "name",
+    t('installed_mods'): "installed",
 }
 
 MOD_ORDER_ALIASES = {
@@ -24,7 +26,7 @@ MOD_ORDER_ALIASES = {
 
 MOD_COLUMN_SORT_KEYS = ("installed", "name", "label", "last_managed")
 
-DEFAULT_ORDER_LABEL = "Default"
+DEFAULT_ORDER_LABEL = t('default')
 DEFAULT_ORDER_KEY = "default"
 
 
@@ -34,7 +36,7 @@ def normalize_view_mode(value) -> str:
 
 
 def normalize_sort_key(key) -> str:
-    key = MOD_ORDER_ALIASES.get(key, key)
+    key = MOD_ORDER_ALIASES.get(key, MOD_ORDER_OPTIONS.get(key, key))
     return key if key in set(MOD_ORDER_OPTIONS.values()) else DEFAULT_ORDER_KEY
 
 

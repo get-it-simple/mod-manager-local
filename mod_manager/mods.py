@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 import shutil
 import os
 import tempfile
@@ -25,6 +27,7 @@ from .storage import (
     update_favorites,
 )
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
+from .progress import report
 
 IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
@@ -194,20 +197,20 @@ def import_mod_file(cfg: Dict, src: Path, replace: bool = False, target_name: st
         ensure_mod_records([dst.name])
         return True, dst.name
     if src.is_symlink() or (hasattr(src, "is_junction") and src.is_junction()):
-        return False, "Linked import paths are unsupported."
+        return False, t('linked_import_paths_are_unsupported')
     directories = []
     if src.is_dir():
         members = []
         for path in src.rglob("*"):
             if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
-                return False, f"Linked import paths are unsupported: {path.name}"
+                return False, t('linked_import_paths_are_unsupported_value0', value0=f'{path.name}')
             if path.is_file() and not ignored_file(path, cfg):
                 members.append((path, path.relative_to(src)))
             elif path.is_dir():
                 directories.append(path.relative_to(src))
         files = tuple(members)
     elif ignored_file(src, cfg):
-        return False, f"Ignored extension: {src.name}"
+        return False, t('ignored_extension_value0', value0=f'{src.name}')
     else:
         files = ((src, Path(dst.name)),)
     return publish_plan(cfg, PlannedMod(dst.name, files, src.is_dir(), replace_existing=replace, directories=tuple(directories)))
@@ -305,7 +308,7 @@ def apply_mods_batch_result(
     ))
 
 OVERWRITE_PREVIEW_COUNT = 10
-OVERWRITE_MESSAGE = "{count} file(s) already exist in the game mods folder:\n\n{names}"
+OVERWRITE_MESSAGE = t('count_file_s_already_exist_in_the_game_mods_folder_names')
 
 def existing_targets(mods: List[ModItem]) -> List[str]:
     """Names in the game mods folder that a copy install would overwrite."""
@@ -340,7 +343,7 @@ def deactivate_mod_result(mod: ModItem) -> OperationItem:
             if not ok:
                 failures.append(OperationFailure(member.src, member.dest, message))
     if not results:
-        return OperationItem(mod.name, "uninstalled", False, "Already removed")
+        return OperationItem(mod.name, "uninstalled", False, t('already_removed'))
     return OperationItem(mod.name, "uninstalled", *_fold_results(results), tuple(failures))
 
 def mods_view(
@@ -350,6 +353,7 @@ def mods_view(
     search_query: str,
     order_mode: str,
     favorite_only: bool = False,
+    *, state_filter: str = "all",
 ) -> Tuple[List[ModItem], List[ModItem], int, int, Dict]:
     items_all = discover_mods(cfg)
     ensure_mod_records([m.name for m in items_all])
@@ -358,6 +362,11 @@ def mods_view(
     records = load_mod_records()
     state = state_from_records(records, load_label_definitions(), manual_labels)
     labels = ResolvedLabels(state, [item.name for item in items_all])
+    labels.catalog_count = len(items_all)
+    if state_filter not in ("all", "installed", "not_installed"):
+        raise ValueError(state_filter)
+    if state_filter != "all":
+        items = [mod for mod in items if mod.installed == (state_filter == "installed")]
     if label_filter:
         lf = label_filter.casefold()
         items = [m for m in items if any(name.casefold() == lf for name in label_names(labels, m.name))]
@@ -377,7 +386,7 @@ def mods_view(
         items = sorted(items, key=lambda m: ((labels.get(m.name) or "").lower(), m.name.lower()), reverse=reverse)
     elif mode == "last_managed":
         items = sorted(items, key=lambda m: (records.get(m.name, {}).get("last_managed") or "", m.name.lower()), reverse=reverse)
-    elif mode in {"cd", "created_date", "created date"}:
+    elif mode in {"cd", "created_date", t('text_79158168a621')}:
         ctimes = {m.name: (m.src.stat().st_ctime if m.src.exists() else 0) for m in items}
         items = sorted(items, key=lambda m: (ctimes[m.name], m.name.lower()), reverse=reverse)
     else:
@@ -392,7 +401,7 @@ def add_label_to_mods(label_name: str, targets: List[str]) -> str:
     state.assign(label_name, targets)
     save_label_state(state)
     mark_mods_managed(targets, "label")
-    return f"Label added: {label_name} -> {', '.join(targets)}"
+    return t('label_added_value0_value1', value0=f'{label_name}', value1=f"{', '.join(targets)}")
 
 def remove_label_from_mods(label_name: str, targets: List[str]) -> str:
     state = load_label_state()
@@ -401,28 +410,32 @@ def remove_label_from_mods(label_name: str, targets: List[str]) -> str:
     if removed:
         save_label_state(state)
         mark_mods_managed(removed, "label")
-        return f"Label removed: {label_name} -> {', '.join(removed)}"
-    return "Label not found."
+        return t('label_removed_value0_value1', value0=f'{label_name}', value1=f"{', '.join(removed)}")
+    return t('label_not_found')
 
 def add_favorites_to_mods(cfg: Dict, targets: List[str]) -> str:
     update_favorites(cfg, targets, True)
-    return f"Favorites added: {', '.join(targets)}"
+    return t('favorites_added_value0', value0=f"{', '.join(targets)}")
 
 def remove_favorites_from_mods(cfg: Dict, targets: List[str]) -> str:
     update_favorites(cfg, targets, False)
-    return f"Favorites removed: {', '.join(targets)}"
+    return t('favorites_removed_value0', value0=f"{', '.join(targets)}")
 
 def change_mods(
     mods: List[ModItem], action: str = "toggle", overwrite: bool = False, *, pending_only: bool = True,
 ) -> OperationResult:
     pending = []
     results = []
+    report("progress_updating", total=len(mods))
     for mod in mods:
         if mod.installed and action != "install":
+            report("progress_uninstalling", mod.name, len(results), len(mods))
             results.append(deactivate_mod_result(mod))
         elif not mod.installed and action != "uninstall":
             pending.append(mod)
     if pending_only:
+        if pending:
+            report("progress_installing")
         results.extend(apply_mods_batch_result(pending, overwrite).items)
     else:
         results.extend(apply_mods_batch_result(pending, overwrite, pending_only=False).items)
@@ -430,15 +443,16 @@ def change_mods(
         names = [item.name for item in results if item.action == state and item.success]
         if names:
             mark_mods_managed(names, state)
+    report("progress_updating", completed=len(mods), total=len(mods))
     return OperationResult(tuple(results))
 
 
 def change_mods_page(
     cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
-    favorite_only: bool = False, overwrite: bool = False, *, action: str = "install",
+    favorite_only: bool = False, overwrite: bool = False, *, action: str = "install", state_filter: str = "all",
 ) -> Tuple[int, OperationResult]:
     _items, shown, target_page, _pages, _labels = mods_view(
-        cfg, page, label_filter, search_query, order_mode, favorite_only
+        cfg, page, label_filter, search_query, order_mode, favorite_only, state_filter=state_filter
     )
     return target_page, change_mods(shown, action, overwrite)
 

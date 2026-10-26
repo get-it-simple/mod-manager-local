@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from typing import Callable
 
 from PySide6 import QtCore, QtWidgets
@@ -22,10 +24,19 @@ class ToolbarSection(QtWidgets.QFrame):
             margins=tokens.TOOLBAR_SECTION_MARGIN,
             spacing=tokens.SPACE_XS,
         )
+        layout.setAlignment(QtCore.Qt.AlignTop)
         self.title_label = section_title_label(title, self)
-        self._actions_layout = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
+        self._actions_layout = FlowLayout(constrain_items=True)
+        self._actions_layout.setSpacing(tokens.SPACE_SM)
         layout.addWidget(self.title_label)
         layout.addLayout(self._actions_layout)
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        widest = max((widget.sizeHint().width() for widget in self.widgets()), default=0)
+        limit = max(tokens.TOOLBAR_SECTION_MAX_WIDTH, widest + tokens.TOOLBAR_SECTION_MARGIN * 2)
+        width = min(size.width(), limit + (self.property("expandedWidth") or 0))
+        return QtCore.QSize(width, self.heightForWidth(width))
 
     @property
     def title(self) -> str:
@@ -40,6 +51,8 @@ class ToolbarSection(QtWidgets.QFrame):
         checkable: bool = False,
         accessible_name: str = "",
     ) -> QtWidgets.QPushButton:
+        if key in ("install_page", "uninstall_page"):
+            return self.add_text_action(key, "", icon_name, tooltip, handler)
         button = icon_button(icon_name, tooltip, handler, self, checkable=checkable, accessible_name=accessible_name)
         return self.add_button(key, button)
 
@@ -66,7 +79,7 @@ class ToolbarSection(QtWidgets.QFrame):
 
     def add_widget(self, widget: QtWidgets.QWidget, stretch: int = 0) -> QtWidgets.QWidget:
         widget.setParent(self)
-        self._actions_layout.addWidget(widget, stretch)
+        self._actions_layout.addWidget(widget)
         return widget
 
     def widgets(self) -> list[QtWidgets.QWidget]:

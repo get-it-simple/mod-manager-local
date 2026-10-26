@@ -23,6 +23,7 @@ class FilterExpansion(QtCore.QObject):
             animation.setDuration(tokens.FILTER_ANIMATION_MS)
             animation.setEasingCurve(QtCore.QEasingCurve.InOutCubic)
             self.animations[box] = animation
+            animation.valueChanged.connect(self._resize_section)
             box.lineEdit().textEdited.connect(lambda _text, target=box: self.expand(target))
             box.lineEdit().installEventFilter(self)
             box.view().installEventFilter(self)
@@ -53,6 +54,11 @@ class FilterExpansion(QtCore.QObject):
         allocated = sum(max(0, item.minimumWidth() - self.baselines[item]) for item in self.boxes)
         target = baseline + min(baseline * (tokens.FILTER_EXPAND_FACTOR - 1), spare + allocated)
         self._animate(box, target)
+
+    def _resize_section(self, *_args) -> None:
+        extra = sum(max(0, box.minimumWidth() - baseline) for box, baseline in self.baselines.items())
+        self.section.setProperty("expandedWidth", extra)
+        self.section.updateGeometry()
 
     def _animate(self, box, target) -> None:
         animation = self.animations[box]

@@ -13,6 +13,8 @@ from ...dragdrop import read_clipboard_image, read_clipboard_paths
 from ...imports import create_plans, execute_plans, ignored_file, prepare_archive, resolve_plans
 from ...mods import is_image_file
 from ...log import logger
+from ...i18n import t
+from ...import_preview import destination_rows
 from ..dialogs import prompts
 from ..dialogs.archive_import import ArchiveImportDialog
 from ..dialogs.base import show_dialog
@@ -48,7 +50,7 @@ class ArchiveImportController(QtCore.QObject):
             return True
         if self.publishing and not self.closed:
             self.deferred_inputs.append((paths, image_target_name))
-            self.window._set_status("Finishing the current import. Additional files have been queued.")
+            self.window._set_status(t('finishing_the_current_import_additional_files_have_been_queued'))
             return True
         if self.closed:
             release = getattr(paths, "close", None)
@@ -60,7 +62,7 @@ class ArchiveImportController(QtCore.QObject):
                 if len(paths) == 1:
                     self.assign_image(paths[0], self.dialog.browser.selected_row)
                 else:
-                    self.dialog.status.setText("Choose one image for the selected mod.")
+                    self.dialog.status.setText(t('choose_one_image_for_the_selected_mod'))
             finally:
                 release = getattr(paths, "close", None)
                 if release:
@@ -88,8 +90,8 @@ class ArchiveImportController(QtCore.QObject):
                     try:
                         archive = prepare_archive(path, cfg, self.cancelled)
                         if virtual and path == Path(virtual_root):
-                            archive.name = "Archive contents"
-                            archive.source_name = "Archive contents"
+                            archive.name = t('archive_contents')
+                            archive.source_name = t('archive_contents')
                         prepared.append(archive)
                     except Exception as exc:
                         errors.append(f"{path.name}: {exc}")
@@ -110,7 +112,7 @@ class ArchiveImportController(QtCore.QObject):
                 return
             self.archives.extend(prepared)
             if errors:
-                prompts.show_warning(self.window, "Archive import", "\n".join(errors))
+                prompts.show_warning(self.window, t('archive_import'), "\n".join(errors))
             if self.scans:
                 return
             if not self.archives:
@@ -121,7 +123,7 @@ class ArchiveImportController(QtCore.QObject):
             else:
                 self.commit()
 
-        self.window._run_action("Reading archives...", worker, done)
+        self.window._run_action(t('reading_archives'), worker, done)
         return True
 
     def _show_manager(self) -> None:
@@ -144,6 +146,7 @@ class ArchiveImportController(QtCore.QObject):
                 self.handle_paths(paths)
 
             self.drop_target = QtWindowsDropTarget(self.dialog.browser.table.viewport(), native_drop)
+        self.dialog.browser.destination_root = self.cfg.get("mods_source_dir", "")
         self.dialog.browser.set_archives(self.archives)
         self.dialog.set_working(False)
         show_dialog(self.dialog)
@@ -193,36 +196,41 @@ class ArchiveImportController(QtCore.QObject):
             return
         archive = self.dialog.browser.archive
         if archive is None or archive.mode != "separate" or not 0 <= row < len(archive.units):
-            self.dialog.status.setText("Switch to separate mode and select a mod before assigning an image.")
+            self.dialog.status.setText(t('switch_to_separate_mode_and_select_a_mod_before_assigning_an_image'))
             return
         if QtGui.QImageReader(str(source)).size().isEmpty():
-            self.dialog.status.setText("This image could not be read. The mod can still be imported.")
+            self.dialog.status.setText(t('this_image_could_not_be_read_the_mod_can_still_be_imported'))
             return
         try:
             with tempfile.NamedTemporaryFile(suffix=source.suffix, dir=self.assets.name, delete=False) as handle:
                 target = Path(handle.name)
             shutil.copy2(source, target)
         except OSError as exc:
-            self.dialog.status.setText(f"Cannot assign preview: {exc}")
+            self.dialog.status.setText(t('cannot_assign_preview_value0', value0=f'{exc}'))
             return
         archive.images[row] = target
         self.dialog.browser.table.setCurrentIndex(self.dialog.browser.model.index(row, 1))
         self.dialog.browser.model.dataChanged.emit(self.dialog.browser.model.index(row, 1), self.dialog.browser.model.index(row, 1))
         self.dialog.browser.update_preview()
-        self.dialog.status.setText(f"Preview assigned to {archive.units[row].name}.")
+        self.dialog.status.setText(t('preview_assigned_to_value0', value0=f'{archive.units[row].name}'))
 
     def commit(self) -> None:
         if self.publishing or self.scans or self.closed:
             return
         if any(self.cfg.get(key) != self.window.cfg.get(key) for key in ("active_game_profile_id", "mods_source_dir", "game_mods_dir")):
-            prompts.show_warning(self.window, "Archive import", "The game profile or mod directories changed. Close this import and add the archives again.")
+            prompts.show_warning(self.window, t('archive_import'), t('the_game_profile_or_mod_directories_changed_close_this_import_and_add_th'))
             return
         choose = lambda name: prompts.choose_import_conflict(self.dialog or self.window, name)
         plans = resolve_plans(self.cfg, create_plans(self.archives, choose), choose)
         if not plans:
             if self.dialog:
-                self.dialog.status.setText("No mods selected for import.")
+                self.dialog.status.setText(t('no_mods_selected_for_import'))
             else:
+                self._cleanup()
+            return
+        if not prompts.review_plan(self.dialog or self.window, t("review_import"),
+                                   destination_rows(self.cfg.get("mods_source_dir", ""), plans)):
+            if self.dialog is None:
                 self._cleanup()
             return
         self.publishing = True
@@ -233,7 +241,7 @@ class ArchiveImportController(QtCore.QObject):
             try:
                 return execute_plans(self.cfg, plans, self.cancelled)
             except Exception as exc:
-                logger.exception("Archive import failed")
+                logger.exception(t('archive_import_failed'))
                 return [], [str(exc)]
             finally:
                 if self.closed:
@@ -242,6 +250,7 @@ class ArchiveImportController(QtCore.QObject):
         def done(result):
             self.publishing = False
             imported, errors = result
+            self.window.errors.record_import(imported, errors, self.cfg, plans)
             pending = list(self.pending_paths)
             deferred = self.deferred_inputs
             self.deferred_inputs = []
@@ -249,9 +258,9 @@ class ArchiveImportController(QtCore.QObject):
                 if plan.image:
                     self.window._invalidate_mod_image(plan.name)
             self.window.refresh_mods()
-            self.window._set_status(f"Imported mods: {len(imported)}. Failed: {len(errors)}.")
+            self.window._set_status(t('imported_mods_value0_failed_value1', value0=f'{len(imported)}', value1=f'{len(errors)}'))
             if errors:
-                prompts.show_warning(self.dialog or self.window, "Archive import", "\n".join(errors))
+                prompts.show_warning(self.dialog or self.window, t('archive_import'), "\n".join(errors))
             if self.dialog:
                 self.dialog.set_working(False)
                 self.dialog.accept()
@@ -263,7 +272,7 @@ class ArchiveImportController(QtCore.QObject):
                 if not self.closed:
                     self.window._import_paths(paths, target)
 
-        self.window._run_action("Importing archives...", worker, done)
+        self.window._run_action(t('importing_archives'), worker, done)
 
     def _finished(self, _result) -> None:
         dialog = self.dialog

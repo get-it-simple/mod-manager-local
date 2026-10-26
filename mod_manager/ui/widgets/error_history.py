@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from ..models import configure_header
@@ -21,7 +23,7 @@ class ErrorHistoryWidget(QtWidgets.QWidget):
         configure_header(self.table, tokens.ERROR_COLUMNS)
         self.details = QtWidgets.QPlainTextEdit(self)
         self.details.setReadOnly(True)
-        self.details.setAccessibleName("Full error details")
+        self.details.setAccessibleName(t('full_error_details'))
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close, parent=self)
         buttons.rejected.connect(self.closeRequested)
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=tokens.DETAIL_MARGIN)

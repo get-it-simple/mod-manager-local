@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from ...labels import AUTOMATIC, matching_fragment_ids
@@ -13,7 +15,7 @@ LABEL_COUNT_ROLE = QtCore.Qt.UserRole + 2
 
 def update_label_item(item, name: str, mode: str, count: int) -> None:
     item.setText(f"{name} · {mode.capitalize()} · {count}")
-    item.setToolTip(f"{name}\n{mode.capitalize()}\nMatching mods: {count}")
+    item.setToolTip(t('value0_value1_matching_mods_value2', value0=f'{name}', value1=f'{mode.capitalize()}', value2=f'{count}'))
     item.setData(name, QtCore.Qt.UserRole)
     item.setData(mode, LABEL_MODE_ROLE)
     item.setData(count, LABEL_COUNT_ROLE)
@@ -86,7 +88,7 @@ class LabelMatchesModel(QtCore.QAbstractTableModel):
 
     def headerData(self, section, orientation, role=QtCore.Qt.DisplayRole):
         if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
-            return ("Mod name", "Fragments")[section]
+            return (t('mod_name'), t('fragments'))[section]
         return super().headerData(section, orientation, role)
 
     def data(self, index, role=QtCore.Qt.DisplayRole):

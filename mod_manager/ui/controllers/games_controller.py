@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtCore, QtWidgets
 
 from ...storage import (
@@ -20,12 +22,12 @@ from ..widgets.workspace import EmptyState
 from ..widgets.style_utils import set_variant
 from .widget_registry import ACTIONS
 
-PAGE_TITLE = "Choose game"
-DIALOG_TITLE = "Games"
+PAGE_TITLE = t('choose_game')
+DIALOG_TITLE = t('games')
 UNKNOWN_ABBREVIATION = "??"
-NO_GAME_TOOLTIP = "Choose game"
-DELETE_TITLE = "Delete game"
-DELETE_QUESTION = "Delete selected game profile?"
+NO_GAME_TOOLTIP = t('choose_game')
+DELETE_TITLE = t('delete_game')
+DELETE_QUESTION = t('delete_selected_game_profile')
 ACTIVE_MARK = " *"
 
 
@@ -44,7 +46,7 @@ class GamesController(QtCore.QObject):
         toolbar = IconToolbar(parent)
         toolbar.build(GAMES_TOOLBAR_SECTIONS)
         section = toolbar.sections["profiles"]
-        button = section.add_text_action("add", "Add profile", "add", "Add a game profile")
+        button = section.add_text_action("add", t('add_profile'), "add", t('add_a_game_profile'))
         section._actions_layout.insertWidget(0, button)
         set_variant(button, "primary")
         toolbar.connect({
@@ -67,7 +69,7 @@ class GamesController(QtCore.QObject):
         self.page_list = self._list_widget()
         self.stack = QtWidgets.QStackedWidget()
         self.stack.addWidget(self.page_list)
-        self.empty = EmptyState("Add your first game", "Create a profile with your mod library and the game's mods folder.")
+        self.empty = EmptyState(t('add_your_first_game'), t('create_a_profile_with_your_mod_library_and_the_game_s_mods_folder'))
         self.stack.addWidget(self.empty)
         layout.addWidget(self.stack, 1)
         self.page_toolbar = self._toolbar(self.page, self.page_list)
@@ -85,7 +87,7 @@ class GamesController(QtCore.QObject):
             button.setToolTip(NO_GAME_TOOLTIP)
             return
         button.setText("")
-        button.setToolTip(f"{profile.get('name', 'Game')} - manage game profiles")
+        button.setToolTip(t('value0_manage_game_profiles', value0=f"{profile.get('name', 'Game')}"))
 
     def refresh_lists(self) -> None:
         profiles = self.cfg.get("game_profiles", []) or []
@@ -94,7 +96,7 @@ class GamesController(QtCore.QObject):
             list_widget.clear()
             for profile in profiles:
                 mark = ACTIVE_MARK if profile.get("id") == active_id else ""
-                name = profile.get("name", "Game")
+                name = profile.get("name", t('game'))
                 item = QtWidgets.QListWidgetItem(f"{game_abbreviation(name)}  {name}{mark}")
                 item.setData(QtCore.Qt.UserRole, profile.get("id", ""))
                 list_widget.addItem(item)

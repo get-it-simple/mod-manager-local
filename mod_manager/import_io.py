@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import t
+
 import shutil
 from pathlib import Path
 from threading import Event
@@ -12,7 +14,7 @@ class ImportCancelled(RuntimeError):
 
 def check_cancelled(cancelled: Event | None) -> None:
     if cancelled is not None and cancelled.is_set():
-        raise ImportCancelled("Import cancelled.")
+        raise ImportCancelled(t('import_cancelled'))
 
 
 def copy_stream(incoming: BinaryIO, outgoing: BinaryIO, cancelled: Event | None = None) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from pathlib import Path
 
 from PySide6 import QtWidgets
@@ -12,7 +14,7 @@ from ..widgets.style_utils import apply_margins
 class PreviewConfirmationDialog(QtWidgets.QDialog):
     def __init__(self, parent, source: Path, count: int, clipboard: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Set preview image")
+        self.setWindowTitle(t('text_1e63fa10de76'))
         self.setModal(True)
         self.choice = "cancel"
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=tokens.DETAIL_MARGIN, spacing=tokens.SPACE_2XL)
@@ -20,12 +22,12 @@ class PreviewConfirmationDialog(QtWidgets.QDialog):
         layout.addWidget(self.content)
         self.buttons = QtWidgets.QDialogButtonBox(self)
         self.apply_button = self.buttons.addButton(
-            "Use image" if clipboard else "Apply", QtWidgets.QDialogButtonBox.AcceptRole
+            t('use_image') if clipboard else t('apply'), QtWidgets.QDialogButtonBox.AcceptRole
         )
         self.apply_button.clicked.connect(self._apply)
         self.file_button = None
         if clipboard:
-            self.file_button = self.buttons.addButton("Choose file...", QtWidgets.QDialogButtonBox.ActionRole)
+            self.file_button = self.buttons.addButton(t('choose_file'), QtWidgets.QDialogButtonBox.ActionRole)
             self.file_button.clicked.connect(self._choose_file)
         self.cancel_button = self.buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
         self.cancel_button.setDefault(True)

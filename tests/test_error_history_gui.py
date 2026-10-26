@@ -31,6 +31,7 @@ class ErrorHistoryGuiTests(WindowTestCase):
         source.write_text("source payload", encoding="utf-8")
         self.mod = ModItem(source.name, source, self.destination / source.name, False, False)
         self.mods[:] = [self.mod]
+        self.presets["core"] = [self.mod.name]
         self.window.current_mods_shown = self.mods
         self.window.cfg.update(mods_source_dir=str(self.source), game_mods_dir=str(self.destination))
         for patcher in (
@@ -139,7 +140,7 @@ class ErrorHistoryGuiTests(WindowTestCase):
         self.assertTrue(all(entry.message == "Cannot remove link" for entry in self.window.errors.model.entries))
 
     def test_missing_preset_mod_and_unexpected_operation_failure_have_context(self):
-        with patch("mod_manager.presets.load_presets", return_value={"core": ["missing.pak"]}):
+        with patch("mod_manager.preset_plan.load_presets", return_value={"core": ["missing.pak"]}):
             self.window.presets_table.selectRow(0)
             self.window._toggle_selected_presets()
         first = self.window.errors.model.entries[0]

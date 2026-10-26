@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from PySide6 import QtGui, QtWidgets
+
+
+def review_plan(parent, title: str, rows, summary: str = "") -> bool:
+    from ..widgets.plan_review import PlanReview
+    dialog = PlanReview(parent, title, rows, summary)
+    try:
+        return dialog.exec() == QtWidgets.QDialog.Accepted
+    finally:
+        dialog.deleteLater()
 
 
 def show_error(parent, title: str, message: str) -> None:
@@ -65,11 +76,11 @@ def choose_text(parent, title: str, label: str, text: str = "") -> tuple[str, bo
 
 def choose_import_conflict(parent, name: str) -> str:
     dialog = QtWidgets.QMessageBox(parent)
-    dialog.setWindowTitle("Import name conflict")
-    dialog.setText(f"The import target '{name}' already exists. Choose how to import the new mod.")
-    replace = dialog.addButton("Replace", QtWidgets.QMessageBox.DestructiveRole)
-    keep = dialog.addButton("Keep both", QtWidgets.QMessageBox.AcceptRole)
-    skip = dialog.addButton("Skip", QtWidgets.QMessageBox.RejectRole)
+    dialog.setWindowTitle(t('import_name_conflict'))
+    dialog.setText(t('the_import_target_value0_already_exists_choose_how_to_import_the_new_mod', value0=f'{name}'))
+    replace = dialog.addButton(t('replace'), QtWidgets.QMessageBox.DestructiveRole)
+    keep = dialog.addButton(t('keep_both'), QtWidgets.QMessageBox.AcceptRole)
+    skip = dialog.addButton(t('skip'), QtWidgets.QMessageBox.RejectRole)
     dialog.setDefaultButton(keep)
     dialog.setEscapeButton(skip)
     dialog.exec()

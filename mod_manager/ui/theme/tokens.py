@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 SPACE_XS = 2
 SPACE_SM = 4
 SPACE_MD = 6
@@ -11,6 +13,8 @@ SPACE_3XL = 18
 PAGE_MARGIN = 16
 DETAIL_MARGIN = 12
 TOOLBAR_SECTION_MARGIN = 6
+TOOLBAR_SECTION_MAX_WIDTH = 420
+TOOLBAR_SECTION_MAX_WIDTH = 420
 FORM_LABEL_MIN_WIDTH = 170
 FORM_SHORT_FIELD_WIDTH = 96
 FORM_MEDIUM_FIELD_WIDTH = 240
@@ -206,36 +210,36 @@ RESIZE_STRETCH = "stretch"
 RESIZE_CONTENTS = "contents"
 
 ERROR_COLUMNS = (
-    ("time", "Time", RESIZE_CONTENTS, ALIGN_LEFT),
-    ("profile", "Profile", RESIZE_CONTENTS, ALIGN_LEFT),
-    ("action", "Action", RESIZE_CONTENTS, ALIGN_LEFT),
-    ("mod", "Mod", RESIZE_STRETCH, ALIGN_LEFT),
-    ("file", "File", RESIZE_STRETCH, ALIGN_LEFT),
+    ("time", t('time'), RESIZE_CONTENTS, ALIGN_LEFT),
+    ("profile", t('profile'), RESIZE_CONTENTS, ALIGN_LEFT),
+    ("action", t('action'), RESIZE_CONTENTS, ALIGN_LEFT),
+    ("mod", t('mod'), RESIZE_STRETCH, ALIGN_LEFT),
+    ("file", t('file'), RESIZE_STRETCH, ALIGN_LEFT),
 )
 
 ARCHIVE_COLUMNS = (
-    ("selected", "Add", RESIZE_FIXED, ALIGN_CENTER),
-    ("name", "Mod", RESIZE_FIXED, ALIGN_LEFT),
-    ("files", "Files in archive", RESIZE_STRETCH, ALIGN_LEFT),
+    ("selected", t('add'), RESIZE_FIXED, ALIGN_CENTER),
+    ("name", t('mod'), RESIZE_FIXED, ALIGN_LEFT),
+    ("files", t('files_in_archive'), RESIZE_STRETCH, ALIGN_LEFT),
 )
 
 MOD_COLUMNS = (
     ("installed", "", RESIZE_FIXED, ALIGN_CENTER),
-    ("name", "Name", RESIZE_STRETCH, ALIGN_LEFT),
-    ("label", "Label", RESIZE_CONTENTS, ALIGN_LEFT),
-    ("last_managed", "Last managed", RESIZE_CONTENTS, ALIGN_LEFT),
+    ("name", t('name'), RESIZE_STRETCH, ALIGN_LEFT),
+    ("label", t('label'), RESIZE_CONTENTS, ALIGN_LEFT),
+    ("last_managed", t('last_managed'), RESIZE_CONTENTS, ALIGN_LEFT),
 )
 
 PRESET_COLUMNS = (
-    ("name", "Preset", RESIZE_STRETCH, ALIGN_LEFT),
-    ("state", "State", RESIZE_CONTENTS, ALIGN_CENTER),
-    ("mods", "Mods", RESIZE_CONTENTS, ALIGN_LEFT),
-    ("last_managed", "Last managed", RESIZE_CONTENTS, ALIGN_LEFT),
+    ("name", t('preset'), RESIZE_STRETCH, ALIGN_LEFT),
+    ("state", t('state'), RESIZE_CONTENTS, ALIGN_CENTER),
+    ("mods", t('mods'), RESIZE_CONTENTS, ALIGN_LEFT),
+    ("last_managed", t('last_managed'), RESIZE_CONTENTS, ALIGN_LEFT),
 )
 
 BROKEN_COLUMNS = (
-    ("name", "Broken link", RESIZE_STRETCH, ALIGN_LEFT),
-    ("dest", "Destination", RESIZE_STRETCH, ALIGN_LEFT),
+    ("name", t('broken_link'), RESIZE_STRETCH, ALIGN_LEFT),
+    ("dest", t('destination'), RESIZE_STRETCH, ALIGN_LEFT),
 )
 
 

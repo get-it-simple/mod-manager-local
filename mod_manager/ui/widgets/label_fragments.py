@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...i18n import t
+
 from dataclasses import dataclass, field
 
 from PySide6 import QtCore, QtWidgets
@@ -31,7 +33,7 @@ class FragmentDraft:
 
     def validate_edit(self) -> None:
         if self.editing is not None and not self.edited.strip():
-            raise ValueError("Enter a nonempty fragment, or delete its row.")
+            raise ValueError(t('enter_a_nonempty_fragment_or_delete_its_row'))
 
     @property
     def unfinished(self) -> bool:
@@ -59,8 +61,8 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             if column == 1:
                 return self.draft.edited if self.draft.editing == row else self.draft.terms[row]
             if column == 2:
-                return "Save" if self.draft.editing == row else "Edit fragment"
-            return "Delete fragment"
+                return t('save') if self.draft.editing == row else t('edit_fragment')
+            return t('delete_fragment')
         return None
 
     def flags(self, index):
@@ -85,14 +87,14 @@ class FragmentDelegate(QtWidgets.QStyledItemDelegate):
         if option.state & QtWidgets.QStyle.State_MouseOver:
             button.state |= QtWidgets.QStyle.State_MouseOver
         saving = index.column() == 2 and index.row() == self.fragments.draft.editing
-        button.text = "Save" if saving else ""
+        button.text = t('save') if saving else ""
         button.icon = icons.standard_icon("save" if saving else "edit" if index.column() == 2 else "delete")
         button.iconSize = QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE)
         self.fragments.view.style().drawControl(QtWidgets.QStyle.CE_PushButton, button, painter, self.fragments.view)
 
     def createEditor(self, parent, option, index):
         editor = QtWidgets.QLineEdit(parent)
-        editor.setAccessibleName(f"Fragment {index.row() + 1}")
+        editor.setAccessibleName(t('fragment_value0', value0=f'{index.row() + 1}'))
         editor.textChanged.connect(self.fragments._edited)
         return editor
 
@@ -143,13 +145,13 @@ class FragmentEditor(QtWidgets.QWidget):
         self.view.clicked.connect(self._activate)
         self.view.activated.connect(self._activate)
         self.new_edit = QtWidgets.QLineEdit()
-        self.new_edit.setPlaceholderText("New fragment — Enter to add another")
-        self.new_edit.setAccessibleName("New name fragment")
-        self.new_edit.setToolTip("Enter a name fragment. Press Enter to add another, or Save to include this text.")
+        self.new_edit.setPlaceholderText(t('new_fragment_enter_to_add_another'))
+        self.new_edit.setAccessibleName(t('new_name_fragment'))
+        self.new_edit.setToolTip(t('enter_a_name_fragment_press_enter_to_add_another_or_save_to_include_this'))
         self.new_edit.textChanged.connect(self._pending)
         self.new_edit.returnPressed.connect(self.add_pending)
         self.next_id = QtWidgets.QLabel()
-        self.next_id.setAccessibleName("New fragment number")
+        self.next_id.setAccessibleName(t('new_fragment_number'))
         self.next_id.setFixedWidth(tokens.LABEL_FRAGMENT_ID_WIDTH)
         new_row = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=0)
         new_row.addWidget(self.next_id)
@@ -165,7 +167,7 @@ class FragmentEditor(QtWidgets.QWidget):
         id_width = max(tokens.LABEL_FRAGMENT_ID_WIDTH, self.fontMetrics().horizontalAdvance(self.next_id.text()) + tokens.SPACE_LG)
         self.next_id.setFixedWidth(id_width)
         self.view.setColumnWidth(0, id_width)
-        save_width = self.fontMetrics().horizontalAdvance("Save") + tokens.ICON_SIZE + tokens.SPACE_LG * 2
+        save_width = self.fontMetrics().horizontalAdvance(t('save')) + tokens.ICON_SIZE + tokens.SPACE_LG * 2
         self.view.setColumnWidth(2, max(tokens.LABEL_FRAGMENT_SAVE_WIDTH, save_width))
         self.view.verticalHeader().setDefaultSectionSize(max(tokens.TABLE_ROW_HEIGHT, self.fontMetrics().height() + tokens.SPACE_LG))
 

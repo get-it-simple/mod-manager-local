@@ -44,6 +44,7 @@ def _build_pyz() -> int:
     out_path = out_dir / "mod-manager-gui.pyz"
     files = [Path("app_paths.py"), Path("mod-manager-gui.py")]
     files.extend(sorted(Path("mod_manager").rglob("*.py")))
+    files.extend(sorted(Path("mod_manager/i18n").glob("*/strings.json")))
     files.extend(path for path in sorted(Path("assets").rglob("*")) if path.is_file())
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("__main__.py", "from mod_manager.gui import run_gui\nraise SystemExit(run_gui())\n")
@@ -101,6 +102,7 @@ def _build_exe(onefile: bool) -> int:
     assets_dir = Path("assets")
     if assets_dir.is_dir():
         cmd += ["--add-data", f"{assets_dir}{os.pathsep}assets"]
+    cmd += ["--collect-data", "mod_manager.i18n"]
     cmd.append("mod-manager-gui.py")
     return subprocess.call(cmd)
 

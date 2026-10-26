@@ -22,7 +22,7 @@ EXPECTED_TOOLBAR = (
 
 EXPECTED_ACTIONS = (
     ("state", "Install", (
-        "Install all mods on the current page", "Uninstall all mods on the current page", "Toggle selected mods",
+        "Install all mods on the current page", "Uninstall all mods on the current page", "Install selected mods", "Uninstall selected mods",
     )),
     ("label", "Label", (
         "Add label to selected mods", "Remove label from selected mods", "Add or remove selected mods from favorites",
@@ -38,7 +38,7 @@ EXPECTED_ACTIONS = (
 class ModsToolbarSectionTest(WindowTestCase):
     def button_names(self, section) -> tuple[str, ...]:
         return tuple(
-            widget.toolTip()
+            widget.property("commandTooltip") or widget.toolTip()
             for widget in section.widgets()
             if isinstance(widget, QtWidgets.QAbstractButton)
         )
@@ -120,7 +120,7 @@ class ModsToolbarSectionTest(WindowTestCase):
         self.select_mod_rows(0)
 
         for key in toolbar_specs.SELECTION_ACTIONS:
-            self.assertTrue(self.window.mods_actions.button(key).isEnabled(), key)
+            self.assertEqual(self.window.mods_actions.button(key).isEnabled(), key != "install_selected", key)
 
     def test_view_mode_buttons_form_a_checkable_pair(self):
         list_button = self.window.mods_toolbar.button("view_list")
@@ -142,7 +142,7 @@ class ModsToolbarSectionTest(WindowTestCase):
         )
         self.assertEqual(
             set(self.window.mods_actions.buttons),
-            set(toolbar_specs.button_keys(toolbar_specs.MODS_ACTION_SECTIONS)) | {"prev_page", "next_page", "toggle_selected"},
+            set(toolbar_specs.button_keys(toolbar_specs.MODS_ACTION_SECTIONS)) | {"prev_page", "next_page", "install_selected", "uninstall_selected"},
         )
 
     def test_busy_state_disables_every_action_button(self):

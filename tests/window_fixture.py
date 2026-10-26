@@ -52,6 +52,10 @@ class WindowTestCase(unittest.TestCase):
             # storage.save_config is imported lazily inside workers, so it must be patched at
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),
+            patch("mod_manager.ui.dialogs.prompts.review_plan", return_value=True),
+            patch("mod_manager.preset_plan.load_presets", side_effect=lambda: self.presets),
+            patch("mod_manager.preset_plan.discover_mods", side_effect=lambda _cfg: self.mods),
+            patch("mod_manager.preset_plan.mark_preset_managed"),
             patch("mod_manager.ui.app.load_config", return_value=self.cfg),
             patch("mod_manager.ui.app.save_config"),
             patch("mod_manager.ui.app.ensure_paths", return_value=True),
