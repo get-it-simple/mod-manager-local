@@ -21,11 +21,6 @@ MODS_ACTION_SECTIONS = (
         ("install_page", "install", t('install_all_mods_on_the_current_page')),
         ("uninstall_page", "uninstall", t('uninstall_all_mods_on_the_current_page')),
     )),
-    ("label", t('label'), (
-        ("add_label", "add", t('add_label_to_selected_mods')),
-        ("remove_label", "remove", t('remove_label_from_selected_mods')),
-        ("favorite_selected", "favorite", t('add_or_remove_selected_mods_from_favorites')),
-    )),
     ("preview", t('preview'), (
         ("set_image", "image", t('set_preview_image_for_selected_mods_from_the_clipboard_or_a_file_confirm')),
     )),
@@ -64,7 +59,7 @@ SETTINGS_TOOLBAR_SECTIONS = (
     )),
 )
 
-SELECTION_ACTIONS = ("install_selected", "uninstall_selected", "add_label", "remove_label", "favorite_selected", "set_image")
+SELECTION_ACTIONS = ("install_selected", "uninstall_selected", "set_image")
 
 
 def section_keys(specs) -> tuple[str, ...]:

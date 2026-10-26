@@ -13,6 +13,7 @@ from .toolbar import IconToolbar
 from .completer import FullTextDelegate
 from .label_fragments import FragmentEditor
 from .label_lists import LabelListView, LabelMatchesModel, matching_mods_view
+from .buttons import icon_button
 
 
 class ModChoicesModel(QtCore.QAbstractListModel):
@@ -107,13 +108,18 @@ class LabelEditor(QtWidgets.QWidget):
         self.search_edit.textChanged.connect(self.matches_proxy.setFilterFixedString)
         self.toolbar = IconToolbar()
         actions = self.toolbar.add_section("labels", t('labels'))
-        actions.add_text_action("add", t('new_label'), "add", t('create_a_label_in_this_draft'))
-        actions.add_action("delete", "delete", t('delete_this_label_from_the_draft'))
-        save = self.toolbar.add_section("save", t('changes'))
-        save.add_text_action("save", t('save'), "save", t('save_all_label_changes_for_this_game_profile'))
-        save.add_text_action("reset", t('reset_changes'), "reset", t('restore_the_saved_labels_for_this_game_profile'))
+        actions.add_text_action("add", t('new_label'), "add", t('new_label'))
+        actions.add_action("delete", "delete", t('delete_label'))
         self.status = QtWidgets.QLabel()
         self.status.setWordWrap(True)
+        self.retry = icon_button("reset", t("retry_label_save"))
+        self.reload = icon_button("reset", t("reload_saved_labels"))
+        self.retry.hide()
+        self.reload.hide()
+        status_row = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
+        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.retry)
+        status_row.addWidget(self.reload)
         self.splitter = QtWidgets.QSplitter()
         self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(self.list_view)
@@ -123,7 +129,7 @@ class LabelEditor(QtWidgets.QWidget):
         self.splitter.setSizes([tokens.LABEL_LIST_DEFAULT_WIDTH, tokens.DEFAULT_WIDTH - tokens.LABEL_LIST_DEFAULT_WIDTH])
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_LG)
         layout.addWidget(self.splitter, 1)
-        layout.addWidget(self.status)
+        layout.addLayout(status_row)
         layout.addWidget(self.toolbar)
 
     def _proxy(self, model):

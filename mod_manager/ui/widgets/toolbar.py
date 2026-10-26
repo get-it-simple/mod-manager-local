@@ -35,6 +35,8 @@ class ToolbarSection(QtWidgets.QFrame):
         size = super().sizeHint()
         widest = max((widget.sizeHint().width() for widget in self.widgets()), default=0)
         limit = max(tokens.TOOLBAR_SECTION_MAX_WIDTH, widest + tokens.TOOLBAR_SECTION_MARGIN * 2)
+        if self.property("wideSection"):
+            limit = self._toolbar.width()
         width = min(size.width(), limit + (self.property("expandedWidth") or 0))
         return QtCore.QSize(width, self.heightForWidth(width))
 
@@ -79,8 +81,16 @@ class ToolbarSection(QtWidgets.QFrame):
 
     def add_widget(self, widget: QtWidgets.QWidget, stretch: int = 0) -> QtWidgets.QWidget:
         widget.setParent(self)
+        widget.setProperty("toolbarStretch", stretch)
         self._actions_layout.addWidget(widget)
         return widget
+
+    def add_separator(self) -> QtWidgets.QFrame:
+        separator = QtWidgets.QFrame(self)
+        separator.setFrameShape(QtWidgets.QFrame.VLine)
+        separator.setFrameShadow(QtWidgets.QFrame.Plain)
+        self._actions_layout.addWidget(separator)
+        return separator
 
     def widgets(self) -> list[QtWidgets.QWidget]:
         return [
@@ -93,7 +103,7 @@ class ToolbarSection(QtWidgets.QFrame):
 class IconToolbar(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._layout = FlowLayout(self)
+        self._layout = FlowLayout(self, constrain_items=True)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         self.buttons: dict[str, QtWidgets.QAbstractButton] = {}
         self.sections: dict[str, ToolbarSection] = {}

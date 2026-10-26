@@ -15,6 +15,8 @@ class PlanTree(QtWidgets.QTreeView):
         self.setHeaderHidden(True)
         self.setUniformRowHeights(True)
         self.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.setItemsExpandable(False)
+        self.setExpandsOnDoubleClick(False)
 
     def set_rows(self, rows) -> None:
         self.tree_model.clear()
@@ -30,7 +32,7 @@ class PlanTree(QtWidgets.QTreeView):
                     parent.appendRow(item)
                     branches[prefix] = item
                 parent = branches[prefix]
-        self.expandToDepth(0)
+        self.expandAll()
 
 
 class PlanReview(QtWidgets.QDialog):

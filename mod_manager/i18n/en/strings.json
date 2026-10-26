@@ -460,5 +460,20 @@
   "progress_importing_archives": "Importing archives",
   "english_language": "English",
   "selection_count": "{count} selected",
-  "operation_failed": "{label} Failed: {error}"
+  "operation_failed": "{label} Failed: {error}",
+  "status": "Status",
+  "extension": "Extension",
+  "installed": "Installed",
+  "not_installed": "Not installed",
+  "clear_shortcut": "Clear this keyboard shortcut",
+  "expand_shortcuts": "Expand keyboard shortcuts",
+  "collapse_shortcuts": "Collapse keyboard shortcuts",
+  "edit_label_rule": "Edit this label's name fragment rule",
+  "labels_autosave_help": "Manage manual labels and automatic name matches. Valid changes are saved automatically after a short pause.",
+  "fragment_autosave_help": "Enter a name fragment. Changes save automatically after a short pause. Press Enter to start another fragment.",
+  "delete_label": "Delete this label and its assignments",
+  "retry_label_save": "Retry saving label changes",
+  "reload_saved_labels": "Reload saved labels",
+  "discard_label_draft": "Discard pending label edits and load the saved labels?",
+  "label_save_conflict": "Saved labels changed while you were editing the same values. Your edits are retained. Reload saved labels to resolve the conflict."
 }

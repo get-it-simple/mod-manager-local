@@ -5,6 +5,15 @@ from ...i18n import t
 from PySide6 import QtGui, QtWidgets
 
 
+def review_preset_plan(parent, plan) -> bool:
+    from ..widgets.preset_review import PresetReview
+    dialog = PresetReview(parent, plan)
+    try:
+        return dialog.exec() == QtWidgets.QDialog.Accepted
+    finally:
+        dialog.deleteLater()
+
+
 def review_plan(parent, title: str, rows, summary: str = "") -> bool:
     from ..widgets.plan_review import PlanReview
     dialog = PlanReview(parent, title, rows, summary)

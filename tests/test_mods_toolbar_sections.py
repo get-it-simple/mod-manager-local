@@ -24,9 +24,6 @@ EXPECTED_ACTIONS = (
     ("state", "Install", (
         "Install all mods on the current page", "Uninstall all mods on the current page", "Install selected mods", "Uninstall selected mods",
     )),
-    ("label", "Label", (
-        "Add label to selected mods", "Remove label from selected mods", "Add or remove selected mods from favorites",
-    )),
     ("preview", "Preview", (
         "Set preview image for selected mods from the clipboard or a file; confirm when applying to multiple mods",
     )),
@@ -82,8 +79,12 @@ class ModsToolbarSectionTest(WindowTestCase):
     def test_order_combo_belongs_to_the_order_section(self):
         self.assertIn(self.window.order_box, self.window.mods_toolbar.sections["order"].widgets())
 
-    def test_label_edit_belongs_to_the_label_section(self):
-        self.assertIn(self.window.label_edit, self.window.mods_actions.sections["label"].widgets())
+    def test_label_section_is_removed_and_install_groups_have_separator(self):
+        self.assertNotIn("label", self.window.mods_actions.sections)
+        widgets = self.window.mods_actions.sections["state"].widgets()
+        self.assertIsInstance(widgets[2], QtWidgets.QFrame)
+        self.assertEqual(widgets[2].frameShape(), QtWidgets.QFrame.VLine)
+        self.assertEqual(widgets[3], self.window.mods_actions.button("install_selected"))
 
     def test_page_label_sits_between_the_page_arrows(self):
         widgets = self.window.mods_actions.sections["page"].widgets()

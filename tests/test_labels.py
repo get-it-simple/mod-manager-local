@@ -2,15 +2,49 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
+from copy import deepcopy
 
 from mod_manager import storage
-from mod_manager.labels import AUTOMATIC, MANUAL, LabelDefinition, LabelState, label_names, matching_fragment_ids
+from mod_manager.labels import AUTOMATIC, MANUAL, LabelDefinition, LabelState, label_names, matching_fragment_ids, merge_label_states
 from mod_manager.mods import add_label_to_mods, remove_label_from_mods, mods_view
 from mod_manager.storage_policy import StorageError, storage_policy
 from tests.cli_support import CliEnvironment
 
 
 class LabelRulesTests(unittest.TestCase):
+    def test_autosave_merge_keeps_external_assignments_when_renaming(self):
+        saved = LabelState({"A": LabelDefinition()}, {"one.pak": ["A"]})
+        edited, current = deepcopy(saved), deepcopy(saved)
+        edited.rename("A", "Renamed")
+        current.assign("A", ["two.pak"])
+        result = merge_label_states(saved, edited, current, {"A": "Renamed"})
+        self.assertEqual(result.members("one.pak"), ("Renamed",))
+        self.assertEqual(result.members("two.pak"), ("Renamed",))
+        self.assertEqual(saved.members("two.pak"), ())
+        self.assertEqual(current.members("two.pak"), ("A",))
+
+    def test_autosave_merge_combines_independent_definition_fields(self):
+        saved = LabelState({"A": LabelDefinition(MANUAL, ["one"])})
+        edited, current = deepcopy(saved), deepcopy(saved)
+        edited.definitions["A"].mode = AUTOMATIC
+        current.definitions["A"].terms = ["two"]
+        result = merge_label_states(saved, edited, current, {})
+        self.assertEqual(result.members("two.pak"), ("A",))
+        self.assertEqual(result.members("one.pak"), ())
+
+    def test_autosave_merge_rejects_conflicting_fragments_and_duplicate_names(self):
+        saved = LabelState({"A": LabelDefinition(MANUAL, ["one"])})
+        edited, current = deepcopy(saved), deepcopy(saved)
+        edited.definitions["A"].terms = ["two"]
+        current.definitions["A"].terms = ["three"]
+        with self.assertRaises(ValueError):
+            merge_label_states(saved, edited, current, {})
+        edited = deepcopy(saved)
+        edited.rename("A", "Renamed")
+        current.definitions["Renamed"] = LabelDefinition()
+        with self.assertRaises(ValueError):
+            merge_label_states(saved, edited, current, {"A": "Renamed"})
+
     def test_matching_fragment_ids_preserve_positions_and_report_every_match(self):
         terms = [" Skin ", "", "синій", "pak", "missing"]
         self.assertEqual(matching_fragment_ids("СИНІЙ_SKIN.pak", terms), (1, 3, 4))

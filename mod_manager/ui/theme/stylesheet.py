@@ -43,6 +43,8 @@ def build_stylesheet(palette: Palette) -> str:
             border-radius: {tokens.RADIUS_SM}px; padding: {field_v}px {field_h}px;
         }}
         QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus {{ border-color: {palette.accent}; }}
+        QFrame[variant="shortcutField"] {{ background: {palette.field}; border: {tokens.BORDER_WIDTH}px solid {palette.field_border}; border-radius: {tokens.RADIUS_SM}px; }}
+        QFrame[variant="shortcutField"] QLineEdit {{ background: transparent; border: none; }}
         QComboBox {{
             background: {palette.combo}; color: {palette.field_fg}; border: {tokens.BORDER_WIDTH}px solid {palette.field_border};
             border-radius: {tokens.RADIUS_SM}px;

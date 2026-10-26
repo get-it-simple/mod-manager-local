@@ -72,19 +72,20 @@ class FlowLayout(QtWidgets.QLayout):
             if not row:
                 continue
             widths = [min(item.sizeHint().width(), rect.width()) if self.constrain_items else item.sizeHint().width() for item in row]
+            remaining = max(0, rect.width() - sum(widths) - self.spacing() * (len(row) - 1))
+            weights = [item.widget().property("toolbarStretch") or 0 for item in row]
+            total_weight = sum(weights)
+            if total_weight:
+                widths = [width + remaining * weight // total_weight for width, weight in zip(widths, weights)]
             height = max(
                 max(item.minimumSize().height(), item.heightForWidth(width))
                 if self.constrain_items and item.hasHeightForWidth() else item.sizeHint().height()
                 for item, width in zip(row, widths)
             )
-            remaining = max(0, rect.width() - sum(widths) - self.spacing() * (len(row) - 1))
-            expanding = [i for i, item in enumerate(row) if item.widget().property("toolbarStretch")]
             x = rect.x()
             for index, item in enumerate(row):
                 width = widths[index]
-                if index in expanding:
-                    width += remaining // len(expanding)
-                elif not expanding and index == len(row) - 1 and item.widget().property("alignTrailing"):
+                if not total_weight and index == len(row) - 1 and item.widget().property("alignTrailing"):
                     x += remaining
                 if apply:
                     item.setGeometry(QtCore.QRect(x, y, width, height))

@@ -154,7 +154,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.label_filter_var = _Var("")
         self.favorite_filter_var = _Var(False)
         self.state_filter = "all"
-        self.label_edit_var = _Var("")
         self.order_var = _Var(self._mod_order_label_from_config())
         self.mod_view_mode = _Var(normalize_view_mode(self.cfg.get("mod_view_mode")))
 
@@ -205,8 +204,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        if not self.labels_controller.shutdown():
+            event.ignore()
+            return
         self.keyboard.shutdown()
-        self.filter_expansion.shutdown()
+        self.filter_apply_timer.stop()
         self._close_label_choices()
         self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
@@ -274,11 +276,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.workspace.refresh_icons()
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tiles_view.viewport().update()
-            for button in self.action_widgets:
-                if isinstance(button, QtWidgets.QAbstractButton):
-                    icon_name = button.property("iconName")
-                    if icon_name:
-                        button.setIcon(self._icon(icon_name))
+            for button in self.findChildren(QtWidgets.QAbstractButton):
+                icon_name = button.property("iconName")
+                if icon_name:
+                    button.setIcon(self._icon(icon_name))
             for label in self.findChildren(QtWidgets.QLabel):
                 if label.property("pageTitle"):
                     refresh_page_title(label)
@@ -313,11 +314,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         configure_completer(completer)
 
     def _completion_line_edits(self) -> list[QtWidgets.QLineEdit]:
-        edits = [box.lineEdit() for box in getattr(self, "filter_boxes", ())]
-        label_edit = getattr(self, "label_edit", None)
-        if label_edit is not None:
-            edits.append(label_edit)
-        return edits
+        return [box.lineEdit() for box in getattr(self, "filter_boxes", ())]
 
     def _completion_line_edit_for_object(self, obj) -> QtWidgets.QLineEdit | None:
         for edit in self._completion_line_edits():
@@ -342,6 +339,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if event.type() == QtCore.QEvent.KeyPress and event.key() == QtCore.Qt.Key_Tab:
             line_edit = self._completion_line_edit_for_object(obj)
             if line_edit is not None and self._complete_line_edit(line_edit):
+                self._mods_search()
                 return True
         if self._is_mod_drop_target(obj):
             if event.type() in (QtCore.QEvent.DragEnter, QtCore.QEvent.DragMove) and event.mimeData().hasUrls():
@@ -447,6 +445,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _navigate(self, key: str) -> None:
         if self.busy or (key in PROFILE_PAGES and not active_game_profile(self.cfg)):
             return
+        if self.workspace.current_page == "labels" and key != "labels":
+            self.labels_controller.flush()
         self.mod_menu.close()
         self._close_label_choices()
         if key == "presets":
@@ -535,10 +535,23 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return order_label_from_config(self.cfg)
 
     def _filter_box(self, placeholder: str) -> QtWidgets.QComboBox:
+        if not hasattr(self, "filter_apply_timer"):
+            self.filter_apply_timer = QtCore.QTimer(self)
+            self.filter_apply_timer.setSingleShot(True)
+            self.filter_apply_timer.setInterval(tokens.FILTER_APPLY_DELAY_MS)
+            self.filter_apply_timer.timeout.connect(self._mods_search)
         box = select_box(editable=True)
         box.lineEdit().setPlaceholderText(placeholder)
         box.lineEdit().returnPressed.connect(self._mods_search)
-        return configure_filter_box(box)
+        box.activated.connect(lambda _index: self._mods_search())
+        box.lineEdit().textEdited.connect(lambda _text: self.filter_apply_timer.start())
+        configure_filter_box(box)
+        box.completer().activated[str].connect(lambda text: self._complete_filter(box, text))
+        return box
+
+    def _complete_filter(self, box, text: str) -> None:
+        box.setCurrentText(text)
+        self._mods_search()
 
     def _build_mods_toolbar(self):
         return build_mods_toolbar(self)
@@ -889,11 +902,31 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _detail_path_row(self, label: str, path: Path) -> None:
         self.detail_scroll.add_row(detail_name_label(label), path_button(path, lambda target: select_in_explorer(target)), stretch_last=True)
 
-    def _detail_label_row(self, values: tuple[str, ...]) -> None:
-        buttons = []
-        for value in values:
-            buttons.append(text_button(value, t('filter_mods_by_value0', value0=f'{value}'), lambda name=value: self._toggle_label_filter(name), icon_name="toggle"))
-        self.detail_scroll.add_label_buttons(buttons)
+    def _detail_label_row(self) -> None:
+        from .widgets.detail_labels import DetailLabels
+
+        targets = tuple(self._selected_mod_names())
+        memberships = [label_names(self.current_mod_labels, name) for name in targets]
+        names = sorted({name for labels in memberships for name in labels}, key=str.casefold)
+        state = self.current_mod_labels.state if isinstance(self.current_mod_labels, ResolvedLabels) else None
+        labels = [(name, sum(name in members for members in memberships),
+                   state is not None and state.definitions[name].mode == AUTOMATIC) for name in names]
+
+        def guarded(callback):
+            def run(*args):
+                if not self.busy and tuple(self._selected_mod_names()) == targets:
+                    callback(*args)
+            return run
+
+        controls = DetailLabels(labels, len(targets), guarded(self._add_label_selected), guarded(self._assign_existing_label),
+                                guarded(lambda name: self._change_label_selected(name, remove=True)),
+                                guarded(self._edit_label_rule), guarded(self._toggle_label_filter))
+        self.detail_scroll.add_widget(controls)
+
+    def _edit_label_rule(self, name: str) -> None:
+        self._navigate("labels")
+        if self.workspace.current_page == "labels":
+            self.labels_controller._rebuild(name)
 
     def _detail_favorite_button(self, mod: ModItem) -> QtWidgets.QPushButton:
         favorite = mod.name in self.current_mod_favorites
@@ -986,6 +1019,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         uninstall_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         uninstall_button.clicked.connect(self._uninstall_selected_mods)
         self.detail_scroll.add_actions([install_button, uninstall_button])
+        self.detail_scroll.add_actions([text_button(t('favorite'), t('add_or_remove_selected_mods_from_favorites'), self._toggle_favorite_selected, icon_name="favorite")])
+        self._detail_label_row()
 
     def _detail_image(self, mod_name: str) -> None:
         img_path = mod_image_path(self.cfg, mod_name)
@@ -1017,7 +1052,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             QtWidgets.QLabel(t('installed_mods') if mod.installed else t('not_installed_mods')),
             self._detail_favorite_button(mod), self._detail_state_button(mod),
         ])
-        self._detail_label_row(label_names(self.current_mod_labels, mod.name))
+        self._detail_label_row()
         self._detail_dates_row(mod)
         if mod.files:
             self._detail_row(t('grouped_files'), ", ".join(f.src.name for f in mod.files))
@@ -1062,14 +1097,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.page_control.set_page(page, pages)
             label_values = sorted(labels.state.definitions if isinstance(labels, ResolvedLabels) else {v for v in labels.values() if v}, key=str.casefold)
             for box, values, text in ((self.search_box, self.current_mod_names, search), (self.label_filter_box, label_values, label_filter)):
+                existing = [box.itemText(index) for index in range(box.count())]
+                if existing == values and box.currentText() == text:
+                    continue
                 with QtCore.QSignalBlocker(box), QtCore.QSignalBlocker(box.lineEdit()):
                     box.clear()
                     box.addItems(values)
                     for index, value in enumerate(values):
                         box.setItemData(index, value, QtCore.Qt.ToolTipRole)
                     box.setCurrentText(text)
-            manual_values = [name for name in label_values if not isinstance(labels, ResolvedLabels) or labels.state.definitions[name].mode != AUTOMATIC]
-            self.label_edit_model.setStringList(manual_values)
             self.favorite_filter_button.setChecked(favorite_only)
             self._select_mod_names(selected_names)
         finally:
@@ -1147,6 +1183,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.broken_stack.setCurrentWidget(self.broken_table if self.current_broken else self.broken_empty)
 
     def _mods_search(self) -> None:
+        self.filter_apply_timer.stop()
         self.search_var.set(self.search_box.currentText().strip())
         self.label_filter_var.set(self.label_filter_box.currentText().strip())
         self.mod_page.set(1)
@@ -1246,19 +1283,28 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return [self.current_mods_shown[i - 1].name for i in self._selected_indexes() if 1 <= i <= len(self.current_mods_shown)]
 
     def _add_label_selected(self) -> None:
-        label = self.label_edit.text().strip()
-        self.label_edit_var.set(label)
-        if not label:
-            prompts.show_error(self, t('label'), t('enter_label'))
+        label, accepted = prompts.choose_text(self, t('new_label'), t('label'))
+        if not accepted or not label.strip():
             return
-        self._change_label_selected(label)
+        labels = self.current_mod_labels
+        existing = labels.state.definitions if isinstance(labels, ResolvedLabels) else labels.values()
+        if any(name.casefold() == label.strip().casefold() for name in existing):
+            prompts.show_error(self, t('label'), t('enter_a_unique_nonempty_label_name'))
+            return
+        self._change_label_selected(label.strip())
 
-    def _remove_label_selected(self) -> None:
-        label = self.label_edit.text().strip()
-        self.label_edit_var.set(label)
-        self._change_label_selected(label, remove=True)
+    def _assign_existing_label(self) -> None:
+        labels = self.current_mod_labels
+        values = sorted((name for name, definition in labels.state.definitions.items() if definition.mode != AUTOMATIC), key=str.casefold) if isinstance(labels, ResolvedLabels) else sorted({name for name in labels.values() if name}, key=str.casefold)
+        if not values:
+            self._add_label_selected()
+            return
+        label, accepted = prompts.choose_item(self, t('assign_label'), t('label'), values)
+        if accepted:
+            self._change_label_selected(label)
 
     def _change_label_selected(self, label: str, *, remove: bool = False) -> None:
+        self.labels_controller.flush()
         if isinstance(self.current_mod_labels, ResolvedLabels):
             state = self.current_mod_labels.state
             canonical = state.canonical_name(label)
@@ -1295,8 +1341,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         plan = plan_presets(self.cfg, names)
         while True:
-            rows = [(change.preset, t(change.action + "_action"), change.name) for change in plan.changes]
-            if not prompts.review_plan(self, t("preset_preview"), rows):
+            if not prompts.review_preset_plan(self, plan):
                 return
             current = plan_presets(self.cfg, names)
             if current == plan:

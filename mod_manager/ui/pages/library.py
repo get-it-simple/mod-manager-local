@@ -16,10 +16,9 @@ from ..models import (
     configure_header,
 )
 from ..theme import tokens
-from ..widgets import IconToolbar, PageControl, attach_completer, fixed_size_policy, select_box
+from ..widgets import IconToolbar, PageControl, select_box
 from ..widgets.workspace import EmptyState
 from ..widgets.detail_view import DetailPanel
-from ..widgets.filter_expansion import FilterExpansion
 from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
 from ..view_modes import MOD_ORDER_OPTIONS, order_label_for_key
@@ -44,6 +43,7 @@ def build_mods_toolbar(window) -> IconToolbar:
         box.setMinimumContentsLength(0)
     window.filter_boxes = (window.search_box, window.label_filter_box)
     filter_section = toolbar.sections["filter"]
+    filter_section.setProperty("toolbarStretch", 1)
     filter_section.add_widget(window.search_box, 2)
     filter_section.add_widget(window.label_filter_box, 1)
     window.state_filter_box = select_box()
@@ -51,7 +51,6 @@ def build_mods_toolbar(window) -> IconToolbar:
         window.state_filter_box.addItem(t(label), value)
     window.state_filter_box.currentIndexChanged.connect(window._change_state_filter)
     filter_section.add_widget(window.state_filter_box)
-    window.filter_expansion = FilterExpansion(toolbar, filter_section, window.filter_boxes)
     window.favorite_filter_button = toolbar.button("favorite_filter")
     window.favorite_filter_button.setCheckable(True)
 
@@ -92,6 +91,8 @@ def build_mods_actions(window) -> IconToolbar:
     toolbar = IconToolbar(window.mods_tab)
     toolbar.build(MODS_ACTION_SECTIONS)
     section = toolbar.sections["state"]
+    section.setProperty("wideSection", True)
+    section.add_separator()
     section.add_text_action("install_selected", t("install_selected", count=0), "install", t("install_command"))
     section.add_text_action("uninstall_selected", t("uninstall_selected", count=0), "uninstall", t("uninstall_command"))
 
@@ -102,16 +103,6 @@ def build_mods_actions(window) -> IconToolbar:
     window.page_label = window.page_control
     page_section.add_action("next_page", "forward", t('next_mods_page'), lambda: window._change_mod_page(1))
 
-    window.label_edit = QtWidgets.QLineEdit()
-    window.label_edit.setPlaceholderText(t('label'))
-    window.label_edit.setMaximumWidth(tokens.LABEL_EDIT_MAX_WIDTH)
-    fixed_size_policy(window.label_edit)
-    window.label_edit_model = QtCore.QStringListModel(window.label_edit)
-    attach_completer(window.label_edit, window.label_edit_model)
-    label_section = toolbar.sections["label"]
-    label_section._actions_layout.insertWidget(0, window.label_edit)
-    window.label_edit.setParent(label_section)
-
     toolbar.button("install_page").setAccessibleName(_sys_str("install"))
     toolbar.button("uninstall_page").setAccessibleName(_sys_str("uninstall"))
 
@@ -120,9 +111,6 @@ def build_mods_actions(window) -> IconToolbar:
         "uninstall_page": window._uninstall_page,
         "install_selected": window._install_selected_mods,
         "uninstall_selected": window._uninstall_selected_mods,
-        "add_label": window._add_label_selected,
-        "remove_label": window._remove_label_selected,
-        "favorite_selected": window._toggle_favorite_selected,
         "set_image": window._set_mod_image,
     })
     window.registry.extend(ACTIONS, toolbar.buttons.values())
@@ -216,7 +204,7 @@ def build_mods(window) -> None:
     layout.addWidget(window.tile_splitter, 1)
 
     window.mods_actions = window._build_mods_actions()
-    layout.addWidget(window.mods_actions)
+    window.mods_tab.body.addWidget(window.mods_actions)
     window.mod_menu = ModContextMenu(window)
     window._show_mod_view()
 

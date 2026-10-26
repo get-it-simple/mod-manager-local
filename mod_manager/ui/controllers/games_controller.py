@@ -114,6 +114,8 @@ class GamesController(QtCore.QObject):
         return self.window.cfg
 
     def select(self, profile_id: str) -> None:
+        if not self.window.labels_controller.flush():
+            return
         if profile_id and set_active_game_profile(self.cfg, profile_id):
             self._reload()
             self.window._set_main_page(self.window.mods_tab)
@@ -121,6 +123,8 @@ class GamesController(QtCore.QObject):
 
     def delete(self, profile_id: str) -> None:
         if not profile_id or not prompts.ask_yes_no(self.window, DELETE_TITLE, DELETE_QUESTION):
+            return
+        if not self.window.labels_controller.flush():
             return
         if delete_game_profile(self.cfg, profile_id):
             self._reload()
@@ -130,6 +134,8 @@ class GamesController(QtCore.QObject):
     def add(self) -> None:
         values = GameProfileDialog(self.window).values()
         if not values:
+            return
+        if not self.window.labels_controller.flush():
             return
         create_game_profile(values.pop("name"), values, self.cfg)
         self._reload()
@@ -142,6 +148,8 @@ class GamesController(QtCore.QObject):
             return
         values = GameProfileDialog(self.window, profile).values()
         if not values:
+            return
+        if not self.window.labels_controller.flush():
             return
         update_game_profile(self.cfg, profile_id, values)
         self._reload()

@@ -200,11 +200,11 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.qt_app.processEvents()
         for name in ("install_page", "uninstall_page", "install_selected", "uninstall_selected"):
             button = self.window.mods_actions.button(name)
-            self.window.library_scroll.ensureWidgetVisible(button)
             self.qt_app.processEvents()
             self.assertGreaterEqual(button.width(), button.fontMetrics().horizontalAdvance(button.text()))
-            position = button.mapTo(self.window.library_scroll.viewport(), button.rect().center())
-            self.assertTrue(self.window.library_scroll.viewport().rect().contains(position))
+            position = button.mapTo(self.window.mods_tab, button.rect().center())
+            self.assertTrue(self.window.mods_tab.rect().contains(position))
+            self.assertFalse(self.window.library_scroll.isAncestorOf(button))
 
     def test_native_default_aliases_participate_in_conflict_detection(self):
         bindings = default_bindings()
@@ -220,11 +220,11 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.qt_app.processEvents()
         for name in ("install_page", "uninstall_page", "install_selected", "uninstall_selected"):
             button = self.window.mods_actions.button(name)
-            self.window.library_scroll.ensureWidgetVisible(button)
             self.qt_app.processEvents()
             self.assertGreaterEqual(button.width(), button.fontMetrics().horizontalAdvance(button.text()))
-            position = button.mapTo(self.window.library_scroll.viewport(), button.rect().center())
-            self.assertTrue(self.window.library_scroll.viewport().rect().contains(position))
+            position = button.mapTo(self.window.mods_tab, button.rect().center())
+            self.assertTrue(self.window.mods_tab.rect().contains(position))
+            self.assertFalse(self.window.library_scroll.isAncestorOf(button))
 
     def test_native_default_aliases_participate_in_conflict_detection(self):
         bindings = default_bindings()
@@ -263,6 +263,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.window._open_settings_page()
         self.window.show()
         editor = self.window.settings.fields["keyboard_shortcuts"].rows["refresh"][0]
+        self.window.settings.fields["keyboard_shortcuts"].toggle.setChecked(True)
         editor.capture.setFocus()
         self.qt_app.processEvents()
         with patch.object(self.window.settings, "save") as save:
@@ -286,6 +287,42 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.assertEqual(self.window.keyboard.bindings["refresh"]["combo"], "f5")
         self.assertEqual(editor.combo(), "ctrl+s")
 
+    def test_shortcuts_start_collapsed_and_clear_inside_the_capture_field(self):
+        self.window._open_settings_page()
+        shortcuts = self.window.settings.fields["keyboard_shortcuts"]
+        self.assertTrue(shortcuts.content.isHidden())
+        self.assertEqual(shortcuts.arrow.arrowType(), QtCore.Qt.DownArrow)
+        shortcuts.arrow.click()
+        self.assertFalse(shortcuts.content.isHidden())
+        editor = shortcuts.rows["refresh"][0]
+        self.assertEqual(editor.command.text(), "Refresh current page")
+        self.assertEqual(editor.findChildren(QtWidgets.QComboBox), [])
+        for key in (QtCore.Qt.Key_Backspace, QtCore.Qt.Key_Delete):
+            editor.set_combo("ctrl+g")
+            QtTest.QTest.keyClick(editor.capture, key)
+            self.assertEqual(editor.combo(), "")
+            self.assertEqual(editor.capture.text(), "")
+        editor.set_combo("ctrl+g")
+        editor.clear_button.click()
+        self.assertEqual(editor.combo(), "")
+        self.window.settings.save()
+        self.assertEqual(self.window.keyboard.text("refresh"), "")
+        self.assertEqual(self.window.cfg["keyboard_shortcuts"]["refresh"]["combo"], "")
+
+    def test_typed_filters_apply_after_pause_and_completions_apply_immediately(self):
+        box = self.window.search_box
+        box.lineEdit().setText("comb")
+        with patch.object(self.window, "refresh_mods") as refresh:
+            box.lineEdit().textEdited.emit("comb")
+            self.assertEqual(self.window.search_var.get(), "")
+            QtTest.QTest.qWait(300)
+            self.assertEqual(self.window.search_var.get(), "comb")
+            refresh.assert_called_once()
+            refresh.reset_mock()
+            box.completer().activated[str].emit("combat.pak")
+            self.assertEqual(self.window.search_var.get(), "combat.pak")
+            refresh.assert_called_once()
+
     def test_save_applies_shortcut_and_updates_tooltips(self):
         self.window._open_settings_page()
         editor = self.window.settings.fields["keyboard_shortcuts"].rows["search"][0]
@@ -297,11 +334,11 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
 
     def test_cancelled_preset_preview_has_no_side_effects(self):
         self.window.presets_table.selectRow(1)
-        with patch("mod_manager.ui.dialogs.prompts.review_plan", return_value=False) as review, patch(
+        with patch("mod_manager.ui.dialogs.prompts.review_preset_plan", return_value=False) as review, patch(
             "mod_manager.ui.app.execute_preset_plan"
         ) as execute:
             self.window._toggle_selected_presets()
-        self.assertIn(("ui", "Install", "ui.pak"), review.call_args.args[2])
+        self.assertEqual([(change.action, change.name) for change in review.call_args.args[1].changes], [("install", "ui.pak")])
         execute.assert_not_called()
 
     def test_preset_state_change_requires_an_updated_confirmation(self):
@@ -310,7 +347,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             if self.mods[0].installed:
                 self.mods[0].installed = False
             return True
-        with patch("mod_manager.ui.dialogs.prompts.review_plan", side_effect=confirm) as review, patch(
+        with patch("mod_manager.ui.dialogs.prompts.review_preset_plan", side_effect=confirm) as review, patch(
             "mod_manager.ui.app.execute_preset_plan", return_value=mods.OperationResult()
         ) as execute:
             self.window._toggle_selected_presets()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from .i18n import t
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from typing import Iterable
 
 
@@ -88,6 +89,46 @@ class LabelState:
             definition.terms = unique_names(definition.terms)
             if definition.mode == AUTOMATIC and not definition.terms:
                 raise ValueError(t('enter_at_least_one_name_fragment_for_automatic_label_value0', value0=f'{name}'))
+
+
+def _merge_label_value(before, desired, actual):
+    if desired == before:
+        return deepcopy(actual)
+    if actual != before and actual != desired:
+        raise ValueError(t("label_save_conflict"))
+    return deepcopy(desired)
+
+
+def merge_label_states(saved: LabelState, edited: LabelState, current: LabelState,
+                       renames: dict[str, str]) -> LabelState:
+    baseline, latest = deepcopy(saved), deepcopy(current)
+    moving = {old: new for old, new in renames.items() if new and new != old}
+    for old, new in moving.items():
+        if old not in latest.definitions or (new in latest.definitions and new not in moving):
+            raise ValueError(t("label_save_conflict"))
+    for state in (baseline, latest):
+        state.definitions = {moving.get(name, name): value for name, value in state.definitions.items()}
+        state.assignments = {mod: [moving.get(name, name) for name in names] for mod, names in state.assignments.items()}
+
+    result = LabelState()
+    for name in sorted(baseline.definitions.keys() | edited.definitions.keys() | latest.definitions.keys(), key=str.casefold):
+        before, desired, actual = (state.definitions.get(name) for state in (baseline, edited, latest))
+        if before is not None and desired is not None and actual is not None:
+            result.definitions[name] = LabelDefinition(_merge_label_value(before.mode, desired.mode, actual.mode),
+                                                       _merge_label_value(before.terms, desired.terms, actual.terms))
+        else:
+            definition = _merge_label_value(before, desired, actual)
+            if definition is not None:
+                result.definitions[name] = definition
+    result.validate()
+    for mod in baseline.assignments.keys() | edited.assignments.keys() | latest.assignments.keys():
+        before, desired, actual = (set(state.assignments.get(mod, ())) for state in (baseline, edited, latest))
+        names = (actual - (before - desired)) | (desired - before)
+        ordered = unique_names([*latest.assignments.get(mod, ()), *edited.assignments.get(mod, ())])
+        values = [name for name in ordered if name in names and name in result.definitions]
+        if values:
+            result.assignments[mod] = values
+    return result
 
 
 class ResolvedLabels(dict[str, str]):

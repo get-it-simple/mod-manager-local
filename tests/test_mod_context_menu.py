@@ -169,11 +169,12 @@ class ModContextMenuViewTests(ModContextMenuCase):
                                 self.assertTrue(any(image.pixelColor(x, y).alpha() for x in range(image.width()) for y in range(image.height())))
                 self.window.mod_menu.close()
 
-    def test_label_submenu_is_disabled_without_labels(self):
+    def test_label_removal_and_management_are_absent_from_context_menu(self):
         self.select_mod_rows(1)
-        action = self.actions(self.open_menu(1))["remove_label"]
-        self.assertFalse(action.isEnabled())
-        self.assertFalse(action.icon().isNull())
+        actions = self.actions(self.open_menu(1))
+        self.assertNotIn("remove_label", actions)
+        self.assertNotIn("manage_labels", actions)
+        self.assertIn("add_label", actions)
 
     def test_blank_space_and_busy_state_never_open_menu(self):
         for mode in ("list", "tiles"):
@@ -333,12 +334,11 @@ class ModContextMenuOperationTests(ModContextMenuCase):
         action.trigger()
         self.assertEqual(storage.load_favorites(self.window.cfg), set())
 
-    def test_assign_label_dialog_uses_draft_text_and_writes_only_target(self):
+    def test_assign_label_dialog_writes_only_target(self):
         self.select_mod_rows(0)
-        self.window.label_edit.setText("draft")
         with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=("  Custom label  ", True)) as choose:
             self.trigger(1, "add_label")
-        self.assertEqual(choose.call_args.args[3], "draft")
+        self.assertEqual(choose.call_args.args[2], "Label")
         self.assertEqual(storage.load_labels(), {"ui.pak": "Custom label"})
         self.assertEqual(self.window._selected_mod_names(), ["ui.pak"])
 
@@ -348,13 +348,15 @@ class ModContextMenuOperationTests(ModContextMenuCase):
                 self.trigger(1, "add_label")
             self.assertEqual(storage.load_labels(), {})
 
-    def test_label_removal_submenu_removes_only_chosen_label_from_selection(self):
+    def test_detail_label_removal_removes_only_chosen_label_from_selection(self):
         storage.save_labels({"combat.pak": "Combat", "ui.pak": "UI"})
         self.window.refresh_mods()
         self.select_mod_rows(0, 1)
-        submenu = self.actions(self.open_menu(0))["remove_label"].menu()
-        self.assertEqual([action.text() for action in submenu.actions()], ["Combat", "UI"])
-        submenu.actions()[0].trigger()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        controls = [button for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)
+                    if not button.isHidden() and button.property("iconName") == "label_remove"]
+        self.assertEqual(len(controls), 2)
+        controls[0].click()
         self.assertEqual(storage.load_labels(), {"ui.pak": "UI"})
         self.assertEqual(self.window._selected_mod_names(), ["combat.pak", "ui.pak"])
 

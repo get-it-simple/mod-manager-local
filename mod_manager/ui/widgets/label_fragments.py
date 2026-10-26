@@ -4,7 +4,7 @@ from ...i18n import t
 
 from dataclasses import dataclass, field
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...labels import unique_names
 from .. import icons
@@ -61,7 +61,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             if column == 1:
                 return self.draft.edited if self.draft.editing == row else self.draft.terms[row]
             if column == 2:
-                return t('save') if self.draft.editing == row else t('edit_fragment')
+                return t('edit_fragment')
             return t('delete_fragment')
         return None
 
@@ -78,19 +78,47 @@ class FragmentDelegate(QtWidgets.QStyledItemDelegate):
         self.fragments = editor
 
     def paint(self, painter, option, index):
-        if index.column() < 2:
-            super().paint(painter, option, index)
-            return
-        button = QtWidgets.QStyleOptionButton()
-        button.rect = option.rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.SPACE_XS, -tokens.SPACE_XS)
-        button.state = QtWidgets.QStyle.State_Enabled if option.state & QtWidgets.QStyle.State_Enabled else QtWidgets.QStyle.State_None
-        if option.state & QtWidgets.QStyle.State_MouseOver:
-            button.state |= QtWidgets.QStyle.State_MouseOver
-        saving = index.column() == 2 and index.row() == self.fragments.draft.editing
-        button.text = t('save') if saving else ""
-        button.icon = icons.standard_icon("save" if saving else "edit" if index.column() == 2 else "delete")
-        button.iconSize = QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE)
-        self.fragments.view.style().drawControl(QtWidgets.QStyle.CE_PushButton, button, painter, self.fragments.view)
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = option.rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.SPACE_XS, -tokens.SPACE_XS)
+        selected = bool(option.state & QtWidgets.QStyle.State_Selected)
+        painter.setBrush(option.palette.highlight() if selected else option.palette.alternateBase())
+        painter.setPen(option.palette.mid().color())
+        painter.drawRoundedRect(rect, tokens.RADIUS_MD, tokens.RADIUS_MD)
+        painter.setPen(option.palette.text().color())
+        text_rect = rect.adjusted(tokens.SPACE_SM, 0, -tokens.ICON_BUTTON_SIZE * 2, 0)
+        text = f"{index.row() + 1}  {index.data()}"
+        painter.drawText(text_rect, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(text, QtCore.Qt.ElideRight, text_rect.width()))
+        for offset, icon_name in ((2, "edit"), (1, "delete")):
+            icon_rect = QtCore.QRect(rect.right() - tokens.ICON_BUTTON_SIZE * offset, rect.top(), tokens.ICON_BUTTON_SIZE, rect.height())
+            icon_rect = QtCore.QRect(icon_rect.center() - QtCore.QPoint(tokens.ICON_SIZE // 2, tokens.ICON_SIZE // 2), QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
+            icons.standard_icon(icon_name).paint(painter, icon_rect)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        text = f"{index.row() + 1}  {index.data()}"
+        width = option.fontMetrics.horizontalAdvance(text) + tokens.ICON_BUTTON_SIZE * 2 + tokens.SPACE_LG
+        width = max(tokens.FRAGMENT_CHIP_MIN_WIDTH, min(tokens.FRAGMENT_CHIP_MAX_WIDTH, width))
+        return QtCore.QSize(width, max(tokens.FRAGMENT_CHIP_HEIGHT, option.fontMetrics.height() + tokens.SPACE_LG))
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.ICON_BUTTON_SIZE * 2, -tokens.SPACE_XS))
+
+    def editorEvent(self, event, model, option, index):
+        if event.type() == QtCore.QEvent.MouseButtonRelease and event.button() == QtCore.Qt.LeftButton:
+            if event.position().x() >= option.rect.right() - tokens.ICON_BUTTON_SIZE:
+                self.fragments.delete_fragment(index.row())
+            else:
+                self.fragments.start_edit(index.row())
+            return True
+        if event.type() == QtCore.QEvent.KeyPress:
+            if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter, QtCore.Qt.Key_F2):
+                self.fragments.start_edit(index.row())
+                return True
+            if event.key() == QtCore.Qt.Key_Delete:
+                self.fragments.delete_fragment(index.row())
+                return True
+        return super().editorEvent(event, model, option, index)
 
     def createEditor(self, parent, option, index):
         editor = QtWidgets.QLineEdit(parent)
@@ -125,29 +153,25 @@ class FragmentEditor(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.model = FragmentsModel(self)
-        self.view = QtWidgets.QTableView()
+        self.view = QtWidgets.QListView()
         self.view.setModel(self.model)
+        self.view.setModelColumn(1)
         self.view.setItemDelegate(FragmentDelegate(self))
-        self.view.horizontalHeader().hide()
-        self.view.verticalHeader().hide()
-        self.view.verticalHeader().setDefaultSectionSize(tokens.TABLE_ROW_HEIGHT)
-        self.view.setShowGrid(False)
+        self.view.setViewMode(QtWidgets.QListView.IconMode)
+        self.view.setFlow(QtWidgets.QListView.LeftToRight)
+        self.view.setWrapping(True)
+        self.view.setResizeMode(QtWidgets.QListView.Adjust)
+        self.view.setMovement(QtWidgets.QListView.Static)
+        self.view.activated.connect(lambda index: self.start_edit(index.row()))
+        self.view.setSpacing(tokens.SPACE_XS)
         self.view.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.view.setMinimumWidth(0)
-        self.view.setFixedHeight(tokens.LABEL_FRAGMENT_LIST_HEIGHT)
-        header = self.view.horizontalHeader()
-        header.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        self.view.setColumnWidth(0, tokens.LABEL_FRAGMENT_ID_WIDTH)
-        self.view.setColumnWidth(2, tokens.LABEL_FRAGMENT_SAVE_WIDTH)
-        self.view.setColumnWidth(3, tokens.ICON_BUTTON_SIZE)
-        self.view.clicked.connect(self._activate)
-        self.view.activated.connect(self._activate)
         self.new_edit = QtWidgets.QLineEdit()
         self.new_edit.setPlaceholderText(t('new_fragment_enter_to_add_another'))
         self.new_edit.setAccessibleName(t('new_name_fragment'))
-        self.new_edit.setToolTip(t('enter_a_name_fragment_press_enter_to_add_another_or_save_to_include_this'))
+        self.new_edit.setToolTip(t('fragment_autosave_help'))
         self.new_edit.textChanged.connect(self._pending)
         self.new_edit.returnPressed.connect(self.add_pending)
         self.next_id = QtWidgets.QLabel()
@@ -166,10 +190,29 @@ class FragmentEditor(QtWidgets.QWidget):
         self.next_id.setText(str(self.model.rowCount() + 1))
         id_width = max(tokens.LABEL_FRAGMENT_ID_WIDTH, self.fontMetrics().horizontalAdvance(self.next_id.text()) + tokens.SPACE_LG)
         self.next_id.setFixedWidth(id_width)
-        self.view.setColumnWidth(0, id_width)
-        save_width = self.fontMetrics().horizontalAdvance(t('save')) + tokens.ICON_SIZE + tokens.SPACE_LG * 2
-        self.view.setColumnWidth(2, max(tokens.LABEL_FRAGMENT_SAVE_WIDTH, save_width))
-        self.view.verticalHeader().setDefaultSectionSize(max(tokens.TABLE_ROW_HEIGHT, self.fontMetrics().height() + tokens.SPACE_LG))
+        self.view.setVisible(bool(self.model.rowCount()))
+        self._fit_chips()
+
+    def _fit_chips(self) -> None:
+        option = QtWidgets.QStyleOptionViewItem()
+        option.initFrom(self.view)
+        width = max(tokens.FRAGMENT_CHIP_MIN_WIDTH, self.view.viewport().width())
+        used = height = row_height = 0
+        for row in range(self.model.rowCount()):
+            size = self.view.itemDelegate().sizeHint(option, self.model.index(row, 1))
+            item_width = min(width, size.width()) + self.view.spacing() * 2
+            if used and used + item_width > width:
+                height += row_height
+                used = row_height = 0
+            used += item_width
+            row_height = max(row_height, size.height() + self.view.spacing() * 2)
+        self.view.setFixedHeight(height + row_height + tokens.SPACE_SM)
+        self.view.doItemsLayout()
+        self.updateGeometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_chips()
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
@@ -214,15 +257,6 @@ class FragmentEditor(QtWidgets.QWidget):
     def _edited(self, text: str) -> None:
         self.draft.edited = text
         self.changed.emit()
-
-    def _activate(self, index) -> None:
-        if index.column() == 2:
-            if index.row() == self.draft.editing:
-                self.confirm_edit()
-            else:
-                self.start_edit(index.row())
-        elif index.column() == 3:
-            self.delete_fragment(index.row())
 
     def start_edit(self, row: int) -> None:
         target = self.draft.terms[row]

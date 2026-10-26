@@ -22,8 +22,10 @@ class LabelsGuiTests(WindowTestCase):
             {"Combat": LabelDefinition(MANUAL, ["combat"]), "Looks": LabelDefinition(AUTOMATIC, ["ui"])},
             {"combat.pak": ["Combat"]},
         )
+        self.initial = deepcopy(self.persisted)
+        self.profile_states = {str(self.window.cfg.get("active_game_profile_id") or ""): self.persisted}
         self.patches = [
-            patch("mod_manager.ui.controllers.labels_controller.load_label_state", side_effect=lambda: deepcopy(self.persisted)),
+            patch("mod_manager.ui.controllers.labels_controller.load_label_state", side_effect=self._load),
             patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=self._save),
             patch("mod_manager.ui.app.mods_view", side_effect=self._view),
         ]
@@ -38,9 +40,14 @@ class LabelsGuiTests(WindowTestCase):
         for patcher in reversed(self.patches):
             patcher.stop()
 
+    def _load(self):
+        profile = str(self.window.cfg.get("active_game_profile_id") or "")
+        self.persisted = self.profile_states.setdefault(profile, deepcopy(self.initial))
+        return deepcopy(self.persisted)
+
     def _save(self, state):
-        state.validate()
         self.persisted = deepcopy(state)
+        self.profile_states[str(self.window.cfg.get("active_game_profile_id") or "")] = self.persisted
 
     def _view(self, _cfg, page, label_filter, search, _order, *_args):
         labels = ResolvedLabels(self.persisted, [mod.name for mod in self.mods])
@@ -65,11 +72,17 @@ class LabelsGuiTests(WindowTestCase):
         self.qt_app.processEvents()
 
     def click_fragment_action(self, row, column):
-        view = self.editor.terms_edit.view
-        index = view.model().index(row, column)
+        fragments = self.editor.terms_edit
+        view = fragments.view
+        index = view.model().index(row, 1)
         view.scrollTo(index)
         self.qt_app.processEvents()
-        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=view.visualRect(index).center())
+        if column == 2 and fragments.draft.editing == row:
+            QtTest.QTest.keyClick(view.indexWidget(index), QtCore.Qt.Key_Return)
+            return
+        rect = view.visualRect(index)
+        point = rect.center() if column == 2 else QtCore.QPoint(rect.right() - tokens.ICON_BUTTON_SIZE // 2, rect.center().y())
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=point)
 
     def test_fragment_enter_deduplication_and_save_include_unconfirmed_input(self):
         self.open_label("Looks")
@@ -84,10 +97,10 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(fragments.model.index(1, 0).data(), "2")
         fragments.new_edit.setText(" pak ")
         self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
-        self.editor.toolbar.button("save").click()
+        self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin", "pak"])
-        self.assertEqual(fragments.new_edit.text(), "")
-        self.assertEqual(fragments.model.rowCount(), 3)
+        self.assertEqual(fragments.new_edit.text(), " pak ")
+        self.assertEqual(fragments.model.rowCount(), 2)
 
     def test_fragment_row_edit_save_and_enter_return_to_new_input(self):
         self.open_label("Looks")
@@ -98,7 +111,7 @@ class LabelsGuiTests(WindowTestCase):
         self.assertIsInstance(field, QtWidgets.QLineEdit)
         field.setText("combat")
         self.assertEqual(self.editor.matches_model.names, ["combat.pak"])
-        self.assertEqual(fragments.model.index(0, 2).data(), "Save")
+        self.assertEqual(fragments.model.index(0, 2).data(), "Edit fragment")
         self.click_fragment_action(0, 2)
         self.assertTrue(fragments.new_edit.hasFocus())
         self.assertEqual(fragments.model.index(0, 1).data(), "combat")
@@ -117,16 +130,16 @@ class LabelsGuiTests(WindowTestCase):
         field = fragments.view.indexWidget(fragments.model.index(0, 1))
         field.setText(" combat ")
         fragments.new_edit.setText("pak")
-        self.editor.toolbar.button("save").click()
+        self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
-        self.assertIsNone(fragments.draft.editing)
-        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual(fragments.draft.editing, 0)
+        self.assertEqual(fragments.new_edit.text(), "pak")
 
     def test_fragment_actions_support_keyboard_activation_and_escape_cancels_edit(self):
         self.open_label("Looks")
         self.show_editor()
         fragments = self.editor.terms_edit
-        fragments.view.setCurrentIndex(fragments.model.index(0, 2))
+        fragments.view.setCurrentIndex(fragments.model.index(0, 1))
         fragments.view.setFocus()
         QtTest.QTest.keyClick(fragments.view, QtCore.Qt.Key_Return)
         field = fragments.view.indexWidget(fragments.model.index(0, 1))
@@ -203,11 +216,12 @@ class LabelsGuiTests(WindowTestCase):
         self.assertIn("nonempty fragment", self.editor.status.text())
         self.assertEqual(fragments.draft.editing, 0)
         self.controller._rebuild("Combat")
-        self.editor.toolbar.button("save").click()
-        self.assertEqual(self.controller.selected, "Looks")
+        self.controller.flush()
         self.assertIn("nonempty fragment", self.editor.status.text())
+        self.controller._rebuild("Looks")
         field = fragments.view.indexWidget(fragments.model.index(0, 1))
         self.assertEqual(field.text(), "   ")
+        QtTest.QTest.mouseClick(field, QtCore.Qt.LeftButton)
         self.assertTrue(field.hasFocus())
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
         fragments.cancel_edit()
@@ -257,9 +271,8 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(model.index(1, 1).data(), "1")
         self.assertEqual(self.editor.terms_edit.model.index(1, 0).data(), "2")
         self.set_fragments()
-        with patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
-            self.controller.save()
-        self.assertIn("at least one", error.call_args.args[2])
+        self.controller.flush()
+        self.assertIn("at least one", self.editor.status.text())
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
 
     def test_fragment_drafts_follow_rename_and_reset_discards_input(self):
@@ -302,6 +315,97 @@ class LabelsGuiTests(WindowTestCase):
         self.assertGreater(view.columnWidth(0), before)
         self.controller._rebuild("Combat")
         self.assertTrue(view.isColumnHidden(1))
+
+    def test_autosave_waits_for_pause_and_preserves_active_fragment_input(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        fragments.new_edit.setFocus()
+        fragments.new_edit.setText("skin")
+        QtTest.QTest.qWait(tokens.LABEL_SAVE_DELAY_MS // 2)
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+        fragments.new_edit.setText("skin_blue")
+        QtTest.QTest.qWait(tokens.LABEL_SAVE_DELAY_MS // 2)
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+        cursor = fragments.new_edit.cursorPosition()
+        saved = QtTest.QSignalSpy(self.controller.save_timer.timeout)
+        self.assertTrue(saved.wait(3000))
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin_blue"])
+        self.assertEqual(fragments.new_edit.text(), "skin_blue")
+        self.assertEqual(fragments.new_edit.cursorPosition(), cursor)
+        self.assertTrue(fragments.new_edit.hasFocus())
+        self.assertEqual(self.editor.status.text(), "All changes saved")
+        self.assertIsNone(self.editor.toolbar.button("save"))
+        self.assertIsNone(self.editor.toolbar.button("reset"))
+
+    def test_invalid_name_survives_label_navigation_until_corrected(self):
+        self.open_label("Combat")
+        self.editor.name_edit.setText("looks")
+        self.editor.name_edit.textEdited.emit("looks")
+        self.controller._rebuild("Looks")
+        self.controller._rebuild("Combat")
+        self.assertEqual(self.editor.name_edit.text(), "looks")
+        self.controller.flush()
+        self.assertEqual(set(self.persisted.definitions), {"Combat", "Looks"})
+        self.editor.name_edit.setText("Renamed")
+        self.editor.name_edit.textEdited.emit("Renamed")
+        saved = QtTest.QSignalSpy(self.controller.save_timer.timeout)
+        self.assertTrue(saved.wait(3000))
+        self.assertEqual(self.persisted.members("combat.pak"), ("Renamed",))
+
+    def test_new_label_waits_for_autosave_and_close_flushes_valid_edits(self):
+        self.open_label("Combat")
+        self.controller.add()
+        self.assertEqual(set(self.persisted.definitions), {"Combat", "Looks"})
+        self.editor.name_edit.setText("Fresh")
+        self.editor.name_edit.textEdited.emit("Fresh")
+        self.assertNotIn("Fresh", self.persisted.definitions)
+        self.window.close()
+        self.assertIn("Fresh", self.persisted.definitions)
+        self.assertNotIn("New label", self.persisted.definitions)
+
+    def test_failed_save_keeps_window_and_profile_open_until_retry(self):
+        self.open_label("Looks")
+        self.show_editor()
+        self.editor.terms_edit.new_edit.setText("skin")
+        with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")), patch(
+            "mod_manager.ui.controllers.games_controller.set_active_game_profile") as switch:
+            self.window._navigate("library")
+            self.assertIn("locked", self.window.runner.status_text)
+            self.assertFalse(self.window.close())
+            self.assertTrue(self.window.isVisible())
+            self.window.games.select("other")
+            switch.assert_not_called()
+        self.window._navigate("labels")
+        self.editor.retry.click()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin"])
+        self.assertTrue(self.window.close())
+
+    def test_external_label_deletion_updates_the_editor_without_resurrecting_it(self):
+        self.open_label("Looks")
+        self.persisted.delete("Looks")
+        self.controller.flush()
+        self.assertEqual(self.controller.selected, "Combat")
+        self.assertEqual(self.editor.list_model.rowCount(), 1)
+        self.controller.flush()
+        self.assertNotIn("Looks", self.persisted.definitions)
+
+    def test_fragment_chips_wrap_and_all_remain_visible(self):
+        self.open_label("Looks")
+        self.set_fragments(*[f"fragment_{index}" for index in range(18)])
+        self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
+        self.show_editor()
+        view = self.editor.terms_edit.view
+        wide = view.height()
+        rects = [view.visualRect(view.model().index(row, 1)) for row in range(view.model().rowCount())]
+        self.assertTrue(any(rect.top() == rects[0].top() for rect in rects[1:]))
+        self.assertTrue(all(view.viewport().rect().contains(rect) for rect in rects))
+        self.window.resize(tokens.MIN_WIDTH, tokens.MIN_HEIGHT)
+        self.qt_app.processEvents()
+        self.assertGreater(view.height(), wide)
+        last = view.visualRect(view.model().index(17, 1))
+        self.assertTrue(view.viewport().rect().contains(last))
+        self.assertFalse(view.verticalScrollBar().isVisible())
 
     def test_compact_label_list_shows_mode_icon_and_count_and_restores_names(self):
         self.open_label("Looks")
@@ -390,7 +494,7 @@ class LabelsGuiTests(WindowTestCase):
         self.editor.mode_box.setCurrentIndex(0)
         self.assertEqual(self.editor.matches_model.names, ["combat.pak"])
         self.assertEqual(self.controller.state.definitions["Combat"].terms, ["ui"])
-        self.editor.toolbar.button("reset").click()
+        self.controller.reset()
         self.assertEqual(self.controller.state, self.persisted)
 
     def test_manual_choices_include_mods_outside_the_current_library_page(self):
@@ -402,7 +506,7 @@ class LabelsGuiTests(WindowTestCase):
         index = self.editor.manual_proxy.index(0, 0)
         self.editor.manual_proxy.setData(index, QtCore.Qt.Checked, QtCore.Qt.CheckStateRole)
         self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
-        self.editor.toolbar.button("save").click()
+        self.controller.flush()
         self.assertEqual(self.persisted.members("ui.pak"), ("Combat", "Looks"))
         self.assertEqual(self.window.current_mod_labels["ui.pak"], "Combat, Looks")
 
@@ -412,9 +516,8 @@ class LabelsGuiTests(WindowTestCase):
         self.editor.name_edit.setText("Fresh")
         self.editor.name_edit.textEdited.emit("Fresh")
         self.editor.mode_box.setCurrentIndex(1)
-        with patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
-            self.controller.save()
-        self.assertIn("at least one", error.call_args.args[2])
+        self.controller.flush()
+        self.assertIn("at least one", self.editor.status.text())
         self.assertNotIn("Fresh", self.persisted.definitions)
         self.editor.terms_edit.new_edit.setText("pak")
         self.controller.save()
@@ -438,11 +541,12 @@ class LabelsGuiTests(WindowTestCase):
         self.set_fragments("ui")
         with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")), patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
             self.controller.save()
-        self.assertIn("locked", error.call_args.args[2])
+        self.assertIn("locked", self.editor.status.text())
+        self.assertFalse(self.editor.retry.isHidden())
         self.assertEqual(self.controller.state.members("ui.pak"), ("Combat", "Looks"))
         self.assertEqual(self.persisted.members("ui.pak"), ("Looks",))
 
-    def test_profile_drafts_are_separate_and_navigation_does_not_save(self):
+    def test_profile_drafts_are_separate_when_active_profile_changes(self):
         self.open_label("Combat")
         first = self.controller.profile_id
         self.editor.mode_box.setCurrentIndex(1)
@@ -455,14 +559,29 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(self.controller.state.definitions["Combat"].mode, AUTOMATIC)
         self.assertEqual(self.persisted.definitions["Combat"].mode, MANUAL)
 
-    def test_concurrent_saved_changes_are_reported_instead_of_overwritten(self):
+    def test_independent_saved_membership_changes_are_merged(self):
         self.open_label("Combat")
         self.set_fragments("new")
         self.persisted.assignments["ui.pak"] = ["Combat"]
-        with patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
-            self.controller.save()
-        self.assertIn("changed while", error.call_args.args[2])
+        self.controller.flush()
         self.assertEqual(self.persisted.assignments["ui.pak"], ["Combat"])
+        self.assertEqual(self.persisted.definitions["Combat"].terms, ["new"])
+        self.assertEqual(self.editor.status.text(), "All changes saved")
+
+    def test_conflicting_saved_fragments_keep_draft_and_offer_reload(self):
+        self.open_label("Looks")
+        self.set_fragments("new")
+        self.persisted.definitions["Looks"].terms = ["external"]
+        self.controller.flush()
+        self.assertIn("changed while", self.editor.status.text())
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["external"])
+        self.assertEqual(self.editor.terms_edit.draft.preview_terms(), ["new"])
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False):
+            self.editor.reload.click()
+        self.assertEqual(self.editor.terms_edit.draft.preview_terms(), ["new"])
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True):
+            self.editor.reload.click()
+        self.assertEqual(self.editor.terms_edit.draft.preview_terms(), ["external"])
 
     def test_saved_rename_updates_the_active_filter(self):
         self.window.label_filter_var.set("Combat")
@@ -479,6 +598,19 @@ class LabelsGuiTests(WindowTestCase):
         run.assert_not_called()
         self.assertEqual(self.window.workspace.current_page, "labels")
         self.assertEqual(self.controller.selected, "Looks")
+
+    def test_detail_new_label_rejects_duplicates_and_existing_assignment_is_separate(self):
+        self.select_mod_rows(0)
+        with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=(" combat ", True)), patch(
+            "mod_manager.ui.dialogs.prompts.show_error") as error, patch.object(self.window, "_change_label_selected") as change:
+            self.window._add_label_selected()
+        error.assert_called_once()
+        change.assert_not_called()
+        with patch("mod_manager.ui.dialogs.prompts.choose_item", return_value=("Combat", True)) as choose, patch.object(
+            self.window, "_change_label_selected") as change:
+            self.window._assign_existing_label()
+        self.assertEqual(choose.call_args.args[3], ["Combat"])
+        change.assert_called_once_with("Combat")
 
     def test_label_menu_dismissal_and_refresh_release_and_invalidate_actions(self):
         names = ("Combat", "Looks")
@@ -541,42 +673,39 @@ class LabelsGuiTests(WindowTestCase):
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class AdaptiveFiltersTests(WindowTestCase):
-    def test_typing_animates_width_and_focus_loss_restores_it(self):
+    def test_filters_use_available_width_without_focus_and_keep_it_on_focus_loss(self):
         self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
         self.window.show()
-        self.window.activateWindow()
         self.qt_app.processEvents()
         box = self.window.search_box
-        baseline = box.minimumWidth()
+        width = box.width()
+        self.assertGreater(width, box.minimumWidth())
         box.lineEdit().setFocus()
-        QtTest.QTest.keyClicks(box.lineEdit(), "zz")
-        QtTest.QTest.qWait(tokens.FILTER_ANIMATION_MS // 2)
-        self.assertGreater(box.minimumWidth(), baseline)
-        self.assertLess(box.minimumWidth(), baseline * tokens.FILTER_EXPAND_FACTOR)
-        QtTest.QTest.qWait(tokens.FILTER_ANIMATION_MS)
-        self.assertLessEqual(box.minimumWidth(), baseline * tokens.FILTER_EXPAND_FACTOR)
-        box.completer().popup().hide()
         self.window.order_box.setFocus()
-        QtTest.QTest.qWait(tokens.FILTER_ANIMATION_MS * 2)
-        self.assertEqual(box.minimumWidth(), baseline)
-
-    def test_expansion_does_not_wrap_other_sections_and_popup_retains_expansion(self):
+        self.qt_app.processEvents()
+        self.assertEqual(box.width(), width)
         self.window.resize(tokens.MIN_WIDTH, tokens.MIN_HEIGHT)
+        self.qt_app.processEvents()
+        self.assertLess(box.width(), width)
+
+    def test_popup_fits_long_values_inside_the_screen_and_applies_selection(self):
         self.window.show()
         self.qt_app.processEvents()
-        section = self.window.mods_toolbar.sections["filter"]
-        before = {name: widget.y() for name, widget in self.window.mods_toolbar.sections.items()}
-        box = self.window.search_box
-        box.lineEdit().setFocus()
-        box.lineEdit().textEdited.emit("a")
-        QtTest.QTest.qWait(tokens.FILTER_ANIMATION_MS * 2)
-        after = {name: widget.y() for name, widget in self.window.mods_toolbar.sections.items()}
-        self.assertEqual(after, before)
-        popup = box.completer().popup()
-        popup.show()
-        self.window.filter_expansion._check_focus()
-        self.assertIs(self.window.filter_expansion.active, box)
-        popup.hide()
+        box = self.window.label_filter_box
+        name = "Long label " * 20
+        with QtCore.QSignalBlocker(box):
+            box.addItem(name)
+        box.showPopup()
+        self.qt_app.processEvents()
+        popup = box.view().window()
+        self.assertGreater(popup.width(), box.width())
+        self.assertTrue(box.screen().availableGeometry().contains(popup.geometry()))
+        with patch.object(self.window, "refresh_mods") as refresh:
+            box.setCurrentIndex(box.findText(name))
+            box.activated.emit(box.currentIndex())
+        self.assertEqual(self.window.label_filter_var.get(), name.strip())
+        refresh.assert_called_once()
+        box.hidePopup()
 
     def test_large_font_preview_stays_in_the_settings_field_column(self):
         self.window._navigate("settings")

@@ -47,6 +47,7 @@ class GuiTests(unittest.TestCase):
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),
             patch("mod_manager.ui.dialogs.prompts.review_plan", return_value=True),
+            patch("mod_manager.ui.dialogs.prompts.review_preset_plan", return_value=True),
             patch("mod_manager.preset_plan.load_presets", side_effect=lambda: self.presets),
             patch("mod_manager.preset_plan.discover_mods", side_effect=lambda _cfg: self.mods),
             patch("mod_manager.preset_plan.mark_preset_managed"),
@@ -242,32 +243,26 @@ class GuiTests(unittest.TestCase):
         self.assertFalse(self.window.eventFilter(line_edit, event))
         self.assertEqual(line_edit.text(), "")
 
-    def test_label_edit_suggests_available_labels_without_inline_autofill(self):
-        completer = self.window.label_edit.completer()
+    def test_library_label_input_is_replaced_by_detail_actions(self):
+        self.assertFalse(hasattr(self.window, "label_edit"))
+        self.assertNotIn("label", self.window.mods_actions.sections)
+        self.select_mod_rows(0)
+        actions = self.window.detail_frame.findChildren(QtWidgets.QPushButton)
+        self.assertTrue(any(button.toolTip() == "New label" for button in actions))
+        self.assertTrue(any(button.toolTip() == "Assign label…" for button in actions))
 
-        self.assertIsNotNone(completer)
-        self.assertEqual(completer.completionMode(), QtWidgets.QCompleter.PopupCompletion)
-        self.assertEqual(completer.filterMode(), QtCore.Qt.MatchContains)
-        self.assertEqual(completer.caseSensitivity(), QtCore.Qt.CaseInsensitive)
-        self.assertEqual(self.window.label_edit_model.stringList(), ["combat"])
+    def test_creating_label_from_details_requests_simple_text(self):
+        self.select_mod_rows(0)
+        with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=(" New ", True)) as choose, patch.object(self.window, "_change_label_selected") as change:
+            self.window._add_label_selected()
+        self.assertEqual(choose.call_args.args[1:], ("New label", "Label"))
+        change.assert_called_once_with("New")
 
-    def test_tab_completes_label_edit_to_available_label(self):
-        self.window.label_edit.setText("bat")
-        event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Tab, QtCore.Qt.NoModifier)
-
-        self.assertTrue(self.window.eventFilter(self.window.label_edit, event))
-        self.assertEqual(self.window.label_edit.text(), "combat")
-
-    def test_tab_in_label_edit_without_match_leaves_input_unchanged(self):
-        event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Tab, QtCore.Qt.NoModifier)
-
-        self.window.label_edit.setText("zzz")
-        self.assertFalse(self.window.eventFilter(self.window.label_edit, event))
-        self.assertEqual(self.window.label_edit.text(), "zzz")
-
-        self.window.label_edit.setText("")
-        self.assertFalse(self.window.eventFilter(self.window.label_edit, event))
-        self.assertEqual(self.window.label_edit.text(), "")
+    def test_cancelled_or_empty_detail_label_input_preserves_labels(self):
+        for value, accepted in (("", True), ("unused", False)):
+            with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=(value, accepted)), patch.object(self.window, "_change_label_selected") as change:
+                self.window._add_label_selected()
+            change.assert_not_called()
 
     def test_enter_applies_filter_with_typed_partial_text(self):
         self.window.search_box.setCurrentText("co")
@@ -635,8 +630,6 @@ class GuiTests(unittest.TestCase):
         self.assertGreater(image_index, 3)
 
     def test_action_buttons_and_settings_fields_do_not_expand_to_full_width(self):
-        self.assertEqual(self.window.label_edit.sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Fixed)
-        self.assertLessEqual(self.window.label_edit.maximumWidth(), 200)
         self.assertEqual(self.window.mod_selection_widgets[0].sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Fixed)
 
     def test_dialog_fields_expand_to_available_width(self):

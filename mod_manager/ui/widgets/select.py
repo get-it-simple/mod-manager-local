@@ -5,7 +5,26 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..theme import tokens
 
 
+def fit_popup(view: QtWidgets.QAbstractItemView, anchor: QtWidgets.QWidget) -> None:
+    screen = anchor.screen()
+    if screen is None or not view.isVisible():
+        return
+    available = screen.availableGeometry().adjusted(tokens.FILTER_POPUP_MARGIN, tokens.FILTER_POPUP_MARGIN,
+                                                   -tokens.FILTER_POPUP_MARGIN, -tokens.FILTER_POPUP_MARGIN)
+    popup = view.window()
+    width = min(available.width(), max(anchor.width(), view.sizeHintForColumn(0) + tokens.SCROLLBAR_WIDTH + tokens.SPACE_LG))
+    height = min(popup.height(), available.height())
+    origin = anchor.mapToGlobal(QtCore.QPoint())
+    x = max(available.left(), min(origin.x(), available.right() - width + 1))
+    y = max(available.top(), min(popup.y(), available.bottom() - height + 1))
+    popup.setGeometry(x, y, width, height)
+
+
 class SelectBox(QtWidgets.QComboBox):
+    def showPopup(self) -> None:
+        super().showPopup()
+        fit_popup(self.view(), self)
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         painter = QtGui.QPainter(self)

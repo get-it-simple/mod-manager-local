@@ -7,7 +7,6 @@ from typing import Callable
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...folder_actions import select_in_explorer
-from ...labels import AUTOMATIC, ResolvedLabels, label_names
 from ..dialogs import prompts
 
 
@@ -115,19 +114,6 @@ class ModContextMenu(QtCore.QObject):
             "favorite_filled" if favorite else "favorite", window._toggle_favorite_selected,
         )
         self._action(menu, names, "add_label", t('assign_label'), "label_add", self._assign_label)
-        remove_menu = menu.addMenu(window._icon("label_remove"), t('remove_label'))
-        remove_menu.menuAction().setData("remove_label")
-        remove_menu.menuAction().setIconVisibleInMenu(True)
-        labels = sorted({label for name in names for label in label_names(window.current_mod_labels, name)})
-        if isinstance(window.current_mod_labels, ResolvedLabels):
-            labels = [label for label in labels if window.current_mod_labels.state.definitions[label].mode != AUTOMATIC]
-        remove_menu.setEnabled(bool(labels))
-        for label in labels:
-            self._action(
-                remove_menu, names, "remove_label", label, "label_remove",
-                lambda label=label: window._change_label_selected(label, remove=True),
-            )
-        self._action(menu, names, "manage_labels", t('manage_labels'), "label_add", lambda: window._navigate("labels"))
         self._action(menu, names, "set_image", t('set_preview_image'), "image", window._set_mod_image)
         if len(mods) == 1:
             menu.addSeparator()
@@ -138,6 +124,6 @@ class ModContextMenu(QtCore.QObject):
         self._action(menu, names, "show_details", t('show_details'), "details_show", lambda: window._set_details_visible(True))
 
     def _assign_label(self) -> None:
-        label, accepted = prompts.choose_text(self.window, t('text_bb1f28b586be'), t('label'), self.window.label_edit.text())
+        label, accepted = prompts.choose_text(self.window, t('text_bb1f28b586be'), t('label'))
         if accepted and label.strip():
             self.window._change_label_selected(label.strip())

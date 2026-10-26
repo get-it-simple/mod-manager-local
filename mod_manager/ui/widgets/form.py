@@ -176,7 +176,13 @@ class FormBuilder:
     def add_spec(self, spec: FieldSpec, value, on_browse: Callable | None = None, action=None) -> QtWidgets.QWidget:
         field, label, container = self._build_spec_widgets(spec, value, on_browse, action)
         form_layout = self._form_layout()
-        form_layout.addRow(label, container)
+        if spec.kind == SHORTCUTS:
+            form_layout.addRow(container)
+            label.hide()
+            if self._current_section.title_label is not None:
+                self._current_section.title_label.hide()
+        else:
+            form_layout.addRow(label, container)
         self._register_spec(spec, field, label, container, form_layout)
         return field
 

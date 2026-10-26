@@ -53,6 +53,8 @@ class WindowTestCase(unittest.TestCase):
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),
             patch("mod_manager.ui.dialogs.prompts.review_plan", return_value=True),
+            patch("mod_manager.ui.dialogs.prompts.review_preset_plan", return_value=True),
+            patch("mod_manager.ui.controllers.labels_controller.save_label_state"),
             patch("mod_manager.preset_plan.load_presets", side_effect=lambda: self.presets),
             patch("mod_manager.preset_plan.discover_mods", side_effect=lambda _cfg: self.mods),
             patch("mod_manager.preset_plan.mark_preset_managed"),
