@@ -8,6 +8,8 @@ from unittest.mock import patch
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from mod_manager.ui.theme import tokens
+from mod_manager.ui.theme.colors import build_palette
+from mod_manager.ui.theme.stylesheet import build_stylesheet
 from mod_manager.ui.widgets.detail_view import DetailImageLabel, DetailPanel
 from tests.qt_support import dispose, qt_app
 from tests.window_fixture import WindowTestCase
@@ -110,25 +112,33 @@ class DetailPreviewTests(unittest.TestCase):
         self.assertEqual(image.pixmap().size(), original)
 
     def test_wrapped_metadata_and_font_changes_reduce_available_image_height(self):
-        panel, image = self.panel((400, 1600), (420, 900))
-        font = panel.font()
-        font.setPointSize(10)
-        panel.setFont(font)
-        settle(self.app)
-        original = image.height()
-        panel.layout.insertWidget(2, QtWidgets.QLabel("A long mod description " * 12))
-        description = panel.layout.itemAt(2).widget()
-        description.setWordWrap(True)
-        settle(self.app)
-        self.assertLess(image.height(), original)
-        before_font = image.height()
-        font = panel.font()
-        font.setPointSize(16)
-        panel.setFont(font)
-        settle(self.app)
-        self.assertLess(image.height(), before_font)
-        self.assert_fits(panel, image, (400, 1600))
-        self.assertGreaterEqual(description.height(), description.heightForWidth(description.width()))
+        self.addCleanup(self.app.setStyleSheet, self.app.styleSheet())
+        self.addCleanup(self.app.setFont, self.app.font())
+        for theme in (None, "light", "dark"):
+            with self.subTest(theme=theme):
+                stylesheet = build_stylesheet(build_palette(theme)) if theme else ""
+                font = self.app.font()
+                font.setPointSize(10)
+                self.app.setFont(font)
+                self.app.setStyleSheet(stylesheet)
+                panel, image = self.panel((400, 1600), (420, 900))
+                original = image.height()
+                panel.layout.insertWidget(2, QtWidgets.QLabel("A long mod description " * 12))
+                description = panel.layout.itemAt(2).widget()
+                description.setWordWrap(True)
+                settle(self.app)
+                self.assertEqual(description.font().pointSize(), 10)
+                self.assertLess(image.height(), original)
+                before_font = image.height()
+                font.setPointSize(16)
+                self.app.setFont(font)
+                self.app.setStyleSheet(stylesheet)
+                settle(self.app)
+                self.assertEqual(description.font().pointSize(), 16)
+                self.assertLess(image.height(), before_font)
+                self.assert_fits(panel, image, (400, 1600))
+                self.assertGreaterEqual(description.height(), description.heightForWidth(description.width()))
+                panel.hide()
 
     def test_long_heading_wraps_without_overlapping_preview(self):
         panel, image = self.panel((400, 1600), (300, 800))
