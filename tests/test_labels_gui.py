@@ -51,6 +51,305 @@ class LabelsGuiTests(WindowTestCase):
         self.window._navigate("labels")
         self.controller._rebuild(name)
 
+    def set_fragments(self, *terms):
+        editor = self.editor.terms_edit
+        while editor.model.rowCount():
+            editor.delete_fragment(0)
+        for term in terms:
+            editor.new_edit.setText(term)
+            QtTest.QTest.keyClick(editor.new_edit, QtCore.Qt.Key_Return)
+
+    def show_editor(self):
+        self.window.show()
+        self.window.activateWindow()
+        self.qt_app.processEvents()
+
+    def click_fragment_action(self, row, column):
+        view = self.editor.terms_edit.view
+        index = view.model().index(row, column)
+        view.scrollTo(index)
+        self.qt_app.processEvents()
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=view.visualRect(index).center())
+
+    def test_fragment_enter_deduplication_and_save_include_unconfirmed_input(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        for text in (" skin ", "SKIN", "   "):
+            fragments.new_edit.setText(text)
+            QtTest.QTest.keyClick(fragments.new_edit, QtCore.Qt.Key_Return)
+            self.assertEqual(fragments.new_edit.text(), "")
+            self.assertTrue(fragments.new_edit.hasFocus())
+        self.assertEqual(fragments.model.rowCount(), 2)
+        self.assertEqual(fragments.model.index(1, 0).data(), "2")
+        fragments.new_edit.setText(" pak ")
+        self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
+        self.editor.toolbar.button("save").click()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin", "pak"])
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual(fragments.model.rowCount(), 3)
+
+    def test_fragment_row_edit_save_and_enter_return_to_new_input(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        self.click_fragment_action(0, 2)
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        self.assertIsInstance(field, QtWidgets.QLineEdit)
+        field.setText("combat")
+        self.assertEqual(self.editor.matches_model.names, ["combat.pak"])
+        self.assertEqual(fragments.model.index(0, 2).data(), "Save")
+        self.click_fragment_action(0, 2)
+        self.assertTrue(fragments.new_edit.hasFocus())
+        self.assertEqual(fragments.model.index(0, 1).data(), "combat")
+        self.click_fragment_action(0, 2)
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        field.setText(" pak ")
+        QtTest.QTest.keyClick(field, QtCore.Qt.Key_Return)
+        self.assertTrue(fragments.new_edit.hasFocus())
+        self.assertEqual(fragments.model.index(0, 1).data(), "pak")
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+
+    def test_global_save_includes_open_row_editor_without_enter(self):
+        self.open_label("Looks")
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        field.setText(" combat ")
+        fragments.new_edit.setText("pak")
+        self.editor.toolbar.button("save").click()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
+        self.assertIsNone(fragments.draft.editing)
+        self.assertEqual(fragments.new_edit.text(), "")
+
+    def test_fragment_actions_support_keyboard_activation_and_escape_cancels_edit(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        fragments.view.setCurrentIndex(fragments.model.index(0, 2))
+        fragments.view.setFocus()
+        QtTest.QTest.keyClick(fragments.view, QtCore.Qt.Key_Return)
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        self.assertIsInstance(field, QtWidgets.QLineEdit)
+        field.setText("combat")
+        QtTest.QTest.keyClick(field, QtCore.Qt.Key_Escape)
+        self.assertEqual(fragments.model.index(0, 1).data(), "ui")
+        self.assertEqual(self.editor.matches_model.names, ["ui.pak"])
+        self.assertTrue(fragments.new_edit.hasFocus())
+
+    def test_switching_edited_rows_after_deduplication_keeps_the_clicked_fragment(self):
+        self.open_label("Looks")
+        self.set_fragments("ui", "pak", "combat")
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        fragments.view.indexWidget(fragments.model.index(0, 1)).setText("pak")
+        fragments.start_edit(2)
+        self.assertEqual(fragments.model.rowCount(), 2)
+        self.assertEqual(fragments.draft.editing, 1)
+        self.assertEqual(fragments.view.indexWidget(fragments.model.index(1, 1)).text(), "combat")
+        self.assertEqual(fragments.next_id.text(), "3")
+
+    def test_deleting_a_row_before_an_open_editor_preserves_its_unconfirmed_text(self):
+        self.open_label("Looks")
+        self.set_fragments("ui", "pak", "combat")
+        fragments = self.editor.terms_edit
+        fragments.start_edit(2)
+        fragments.view.indexWidget(fragments.model.index(2, 1)).setText("skin")
+        fragments.delete_fragment(0)
+        self.assertEqual(fragments.draft.editing, 1)
+        self.assertEqual(fragments.view.indexWidget(fragments.model.index(1, 1)).text(), "skin")
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["pak", "skin"])
+
+    def test_failed_save_preserves_open_edit_and_pending_input_for_retry(self):
+        self.open_label("Looks")
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        fragments.view.indexWidget(fragments.model.index(0, 1)).setText(" combat ")
+        fragments.new_edit.setText(" pak ")
+        with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")), patch("mod_manager.ui.controllers.labels_controller.prompts.show_error"):
+            self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), " combat ")
+        self.assertEqual(fragments.new_edit.text(), " pak ")
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
+
+    def test_switching_to_manual_keeps_an_invalid_open_fragment_accessible(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        fragments.view.indexWidget(fragments.model.index(0, 1)).setText("")
+        self.editor.mode_box.setCurrentIndex(0)
+        self.controller.save()
+        self.assertEqual(self.editor.mode_box.currentIndex(), 0)
+        self.assertFalse(fragments.isHidden())
+        self.assertIn("nonempty fragment", self.editor.status.text())
+        fragments.cancel_edit()
+        self.assertTrue(fragments.isHidden())
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].mode, MANUAL)
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+
+    def test_empty_edited_fragment_blocks_save_and_survives_navigation(self):
+        self.open_label("Looks")
+        self.show_editor()
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        field.setText("   ")
+        self.click_fragment_action(0, 2)
+        self.assertIn("nonempty fragment", self.editor.status.text())
+        self.assertEqual(fragments.draft.editing, 0)
+        self.controller._rebuild("Combat")
+        self.editor.toolbar.button("save").click()
+        self.assertEqual(self.controller.selected, "Looks")
+        self.assertIn("nonempty fragment", self.editor.status.text())
+        field = fragments.view.indexWidget(fragments.model.index(0, 1))
+        self.assertEqual(field.text(), "   ")
+        self.assertTrue(field.hasFocus())
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+        fragments.cancel_edit()
+        fragments.new_edit.setText("   ")
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+
+    def test_pending_and_open_edit_drafts_survive_labels_pages_and_profiles(self):
+        self.open_label("Looks")
+        first = self.controller.profile_id
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        fragments.view.indexWidget(fragments.model.index(0, 1)).setText("combat")
+        fragments.new_edit.setText("  pak  ")
+        self.controller._rebuild("Combat")
+        self.window._navigate("library")
+        self.window.cfg["active_game_profile_id"] = "other"
+        self.open_label("Looks")
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual(fragments.model.index(0, 1).data(), "ui")
+        self.window.cfg["active_game_profile_id"] = first
+        self.open_label("Looks")
+        self.assertEqual(fragments.new_edit.text(), "  pak  ")
+        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "combat")
+        self.controller._rebuild("Combat")
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
+
+    def test_unchanged_open_fragment_editor_is_retained_on_reactivation(self):
+        self.open_label("Looks")
+        fragments = self.editor.terms_edit
+        fragments.start_edit(0)
+        self.window._navigate("library")
+        self.open_label("Looks")
+        self.assertEqual(fragments.draft.editing, 0)
+        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "ui")
+
+    def test_delete_renumbers_all_match_ids_and_empty_automatic_cannot_save(self):
+        self.open_label("Looks")
+        self.show_editor()
+        self.set_fragments("ui", "pak", "combat")
+        model = self.editor.matches_model
+        self.assertEqual(model.index(0, 1).data(), "2, 3")
+        self.assertEqual(model.index(1, 1).data(), "1, 2")
+        self.click_fragment_action(0, 3)
+        self.assertEqual(model.index(0, 1).data(), "1, 2")
+        self.assertEqual(model.index(1, 1).data(), "1")
+        self.assertEqual(self.editor.terms_edit.model.index(1, 0).data(), "2")
+        self.set_fragments()
+        with patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
+            self.controller.save()
+        self.assertIn("at least one", error.call_args.args[2])
+        self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui"])
+
+    def test_fragment_drafts_follow_rename_and_reset_discards_input(self):
+        self.open_label("Looks")
+        self.editor.terms_edit.new_edit.setText("pak")
+        self.editor.name_edit.setText("Visuals")
+        self.editor.name_edit.textEdited.emit("Visuals")
+        self.controller._rebuild("Combat")
+        self.controller.save()
+        self.assertEqual(self.persisted.definitions["Visuals"].terms, ["ui", "pak"])
+        self.controller._rebuild("Visuals")
+        self.editor.terms_edit.new_edit.setText("combat")
+        self.controller.reset()
+        self.assertEqual(self.editor.terms_edit.new_edit.text(), "")
+        self.assertEqual(self.editor.terms_edit.model.rowCount(), 2)
+        self.controller.delete()
+        self.controller.save()
+        self.assertNotIn("Visuals", self.persisted.definitions)
+
+    def test_matching_columns_keep_full_tooltips_and_fixed_fragment_width(self):
+        name = "UI_" + "long_mod_name_" * 12 + ".pak"
+        self.mods.append(mod_item(name))
+        self.window.refresh_mods()
+        self.open_label("Looks")
+        self.set_fragments("ui", "pak", *["long_mod_name"[:length] for length in range(1, 13)])
+        self.show_editor()
+        view = self.editor.matches_view
+        self.editor.search_edit.setText("long_mod_name")
+        self.assertEqual(self.editor.matches_proxy.rowCount(), 1)
+        first = self.editor.matches_proxy.index(0, 0)
+        second = self.editor.matches_proxy.index(0, 1)
+        self.assertEqual(first.data(QtCore.Qt.ToolTipRole), name)
+        self.assertEqual(second.data(QtCore.Qt.ToolTipRole), second.data())
+        self.assertIn("1, 2, 3", second.data())
+        self.assertGreater(view.fontMetrics().horizontalAdvance(second.data()), view.columnWidth(1))
+        before = view.columnWidth(0)
+        self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
+        self.qt_app.processEvents()
+        self.assertEqual(view.columnWidth(1), tokens.LABEL_FRAGMENTS_COLUMN_WIDTH)
+        self.assertGreater(view.columnWidth(0), before)
+        self.controller._rebuild("Combat")
+        self.assertTrue(view.isColumnHidden(1))
+
+    def test_compact_label_list_shows_mode_icon_and_count_and_restores_names(self):
+        self.open_label("Looks")
+        self.show_editor()
+        view = self.editor.list_view
+        selected = view.currentIndex().data(QtCore.Qt.UserRole)
+        self.editor.splitter.setSizes([view.minimumWidth(), self.editor.splitter.width()])
+        self.qt_app.processEvents()
+        self.assertTrue(view.compact)
+        images = []
+        for row, name in enumerate(("Combat", "Looks")):
+            index = self.editor.list_model.index(row, 0)
+            option = QtWidgets.QStyleOptionViewItem()
+            option.initFrom(view)
+            view.itemDelegate().initStyleOption(option, index)
+            self.assertEqual(option.text, "1")
+            self.assertFalse(option.icon.isNull())
+            self.assertIn(name, index.data(QtCore.Qt.ToolTipRole))
+            self.assertIn("Matching mods: 1", index.data(QtCore.Qt.ToolTipRole))
+            images.append(option.icon.pixmap(tokens.ICON_SIZE).toImage())
+        self.assertNotEqual(images[0], images[1])
+        self.editor.splitter.setSizes([tokens.LABEL_LIST_MIN_WIDTH * 2, self.editor.splitter.width()])
+        self.qt_app.processEvents()
+        self.assertFalse(view.compact)
+        self.assertEqual(view.currentIndex().data(QtCore.Qt.UserRole), selected)
+        option = QtWidgets.QStyleOptionViewItem()
+        view.itemDelegate().initStyleOption(option, view.currentIndex())
+        self.assertIn("Looks", option.text)
+        self.assertIn("Automatic", option.text)
+
+    def test_compact_minimum_fits_large_font_and_multi_digit_counts(self):
+        self.mods.extend(mod_item(f"ui_{number}.pak") for number in range(120))
+        self.window.refresh_mods()
+        self.open_label("Looks")
+        self.show_editor()
+        view = self.editor.list_view
+        for point_size in (20, 72):
+            with self.subTest(point_size=point_size):
+                font = view.font()
+                font.setPointSize(point_size)
+                view.setFont(font)
+                self.editor.splitter.setSizes([view.minimumWidth(), self.editor.splitter.width()])
+                self.qt_app.processEvents()
+                self.assertTrue(view.compact)
+                self.assertGreaterEqual(view.viewport().width(), view.fontMetrics().horizontalAdvance("121") + tokens.ICON_SIZE)
+                self.assertGreater(view.width(), 0)
+                self.assertEqual(view.currentIndex().data(QtCore.Qt.UserRole), "Looks")
+
     def test_filters_retain_the_complete_catalog_including_empty_labels(self):
         self.persisted.definitions["Empty"] = LabelDefinition()
         self.window.search_box.setCurrentText("nothing")
@@ -80,16 +379,16 @@ class LabelsGuiTests(WindowTestCase):
 
     def test_draft_preview_mode_switching_and_reset_preserve_inactive_settings(self):
         self.open_label("Combat")
-        self.assertEqual(self.editor.matches_model.stringList(), ["combat.pak"])
+        self.assertEqual(self.editor.matches_model.names, ["combat.pak"])
         self.editor.mode_box.setCurrentIndex(1)
-        self.editor.terms_edit.setPlainText("ui\nUI\n")
-        self.assertEqual(self.editor.matches_model.stringList(), ["ui.pak"])
+        self.set_fragments("ui", "UI", "")
+        self.assertEqual(self.editor.matches_model.names, ["ui.pak"])
         self.assertEqual(self.persisted.definitions["Combat"].mode, MANUAL)
         self.window._navigate("library")
         self.open_label("Combat")
         self.assertEqual(self.editor.mode_box.currentIndex(), 1)
         self.editor.mode_box.setCurrentIndex(0)
-        self.assertEqual(self.editor.matches_model.stringList(), ["combat.pak"])
+        self.assertEqual(self.editor.matches_model.names, ["combat.pak"])
         self.assertEqual(self.controller.state.definitions["Combat"].terms, ["ui"])
         self.editor.toolbar.button("reset").click()
         self.assertEqual(self.controller.state, self.persisted)
@@ -102,7 +401,7 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(self.editor.manual_proxy.rowCount(), 1)
         index = self.editor.manual_proxy.index(0, 0)
         self.editor.manual_proxy.setData(index, QtCore.Qt.Checked, QtCore.Qt.CheckStateRole)
-        self.assertEqual(self.editor.matches_model.stringList(), ["combat.pak", "ui.pak"])
+        self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
         self.editor.toolbar.button("save").click()
         self.assertEqual(self.persisted.members("ui.pak"), ("Combat", "Looks"))
         self.assertEqual(self.window.current_mod_labels["ui.pak"], "Combat, Looks")
@@ -117,10 +416,10 @@ class LabelsGuiTests(WindowTestCase):
             self.controller.save()
         self.assertIn("at least one", error.call_args.args[2])
         self.assertNotIn("Fresh", self.persisted.definitions)
-        self.editor.terms_edit.setPlainText("pak")
+        self.editor.terms_edit.new_edit.setText("pak")
         self.controller.save()
         self.assertIn("Fresh", self.persisted.definitions)
-        self.assertEqual(len(self.editor.matches_model.stringList()), 2)
+        self.assertEqual(len(self.editor.matches_model.names), 2)
         self.controller.delete()
         self.controller.save()
         self.assertNotIn("Fresh", self.persisted.definitions)
@@ -136,7 +435,7 @@ class LabelsGuiTests(WindowTestCase):
     def test_save_failure_keeps_draft_and_library_unchanged(self):
         self.open_label("Combat")
         self.editor.mode_box.setCurrentIndex(1)
-        self.editor.terms_edit.setPlainText("ui")
+        self.set_fragments("ui")
         with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")), patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
             self.controller.save()
         self.assertIn("locked", error.call_args.args[2])
@@ -158,7 +457,7 @@ class LabelsGuiTests(WindowTestCase):
 
     def test_concurrent_saved_changes_are_reported_instead_of_overwritten(self):
         self.open_label("Combat")
-        self.editor.terms_edit.setPlainText("new")
+        self.set_fragments("new")
         self.persisted.assignments["ui.pak"] = ["Combat"]
         with patch("mod_manager.ui.controllers.labels_controller.prompts.show_error") as error:
             self.controller.save()

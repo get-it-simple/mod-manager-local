@@ -8,6 +8,11 @@ MANUAL = "manual"
 AUTOMATIC = "automatic"
 
 
+def matching_fragment_ids(mod_name: str, terms: Iterable[str]) -> tuple[int, ...]:
+    folded = mod_name.casefold()
+    return tuple(index for index, term in enumerate(terms, 1) if term.strip() and term.strip().casefold() in folded)
+
+
 def unique_names(values: Iterable[str]) -> list[str]:
     result = {}
     for value in values:
@@ -33,11 +38,10 @@ class LabelState:
 
     def members(self, mod_name: str) -> tuple[str, ...]:
         manual = {name.casefold() for name in self.assignments.get(mod_name, ())}
-        folded = mod_name.casefold()
         return tuple(sorted((
             name for name, definition in self.definitions.items()
             if (definition.mode == MANUAL and name.casefold() in manual)
-            or (definition.mode == AUTOMATIC and any(term.casefold() in folded for term in definition.terms if term.strip()))
+            or (definition.mode == AUTOMATIC and matching_fragment_ids(mod_name, definition.terms))
         ), key=str.casefold))
 
     def rename(self, old: str, new: str) -> None:

@@ -57,7 +57,7 @@ LABEL_MODE_FIELD = FieldSpec(
     CHOICE, choices=("Manual", "Automatic"),
 )
 LABEL_TERMS_FIELD = FieldSpec(
-    "label_terms", "Name fragments", "Enter one fragment per line. A mod matches when its name contains any fragment, ignoring letter case.", TEXT,
+    "label_terms", "Name fragments", "Enter a fragment and press Enter to add another. Edit or delete existing fragments using their row actions. Save also includes unfinished input. Matches ignore letter case.", TEXT,
 )
 LABEL_MEMBERS_FIELD = FieldSpec(
     "label_members", "Manual mods", "Check mods to assign this label manually. These choices are retained when switching to Automatic.", TEXT,

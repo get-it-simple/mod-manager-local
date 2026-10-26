@@ -4,13 +4,20 @@ import unittest
 from unittest.mock import patch
 
 from mod_manager import storage
-from mod_manager.labels import AUTOMATIC, MANUAL, LabelDefinition, LabelState, label_names
+from mod_manager.labels import AUTOMATIC, MANUAL, LabelDefinition, LabelState, label_names, matching_fragment_ids
 from mod_manager.mods import add_label_to_mods, remove_label_from_mods, mods_view
 from mod_manager.storage_policy import StorageError, storage_policy
 from tests.cli_support import CliEnvironment
 
 
 class LabelRulesTests(unittest.TestCase):
+    def test_matching_fragment_ids_preserve_positions_and_report_every_match(self):
+        terms = [" Skin ", "", "синій", "pak", "missing"]
+        self.assertEqual(matching_fragment_ids("СИНІЙ_SKIN.pak", terms), (1, 3, 4))
+        self.assertEqual(matching_fragment_ids("other.txt", terms), ())
+        state = LabelState({"Looks": LabelDefinition(AUTOMATIC, terms)})
+        self.assertEqual(state.members("СИНІЙ_SKIN.pak"), ("Looks",))
+
     def test_any_fragment_matches_unicode_and_substrings_ignoring_case(self):
         state = LabelState({"Texture": LabelDefinition(AUTOMATIC, ["SKIN", "синій"])})
         self.assertEqual(state.members("NewSkin_P.pak"), ("Texture",))

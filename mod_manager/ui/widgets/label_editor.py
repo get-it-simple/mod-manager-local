@@ -9,6 +9,8 @@ from .select import select_box
 from .style_utils import apply_margins
 from .toolbar import IconToolbar
 from .completer import FullTextDelegate
+from .label_fragments import FragmentEditor
+from .label_lists import LabelListView, LabelMatchesModel, matching_mods_view
 
 
 class ModChoicesModel(QtCore.QAbstractListModel):
@@ -58,17 +60,14 @@ class ModChoicesModel(QtCore.QAbstractListModel):
 class LabelEditor(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.list_view = QtWidgets.QListView()
-        self.list_view.setMinimumWidth(tokens.LABEL_LIST_MIN_WIDTH)
+        self.list_view = LabelListView()
         self.list_model = QtGui.QStandardItemModel(self)
         self.list_view.setModel(self.list_model)
         self.details = DetailPanel()
         self.name_edit = QtWidgets.QLineEdit()
         self.mode_box = select_box()
         self.mode_box.addItems(LABEL_MODE_FIELD.choices)
-        self.terms_edit = QtWidgets.QPlainTextEdit()
-        self.terms_edit.setPlaceholderText("One name fragment per line")
-        self.terms_edit.setFixedHeight(tokens.LABEL_TERMS_HEIGHT)
+        self.terms_edit = FragmentEditor()
         self.details.add_heading("Label settings")
         form_host = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(form_host)
@@ -98,9 +97,9 @@ class LabelEditor(QtWidgets.QWidget):
         self.details.add_widget(self.manual_view)
         self.matches_heading = QtWidgets.QLabel()
         self.details.add_widget(self.matches_heading)
-        self.matches_model = QtCore.QStringListModel(self)
+        self.matches_model = LabelMatchesModel(self)
         self.matches_proxy = self._proxy(self.matches_model)
-        self.matches_view = self._list(self.matches_proxy)
+        self.matches_view = matching_mods_view(self.matches_proxy)
         self.details.add_widget(self.matches_view)
         self.search_edit.textChanged.connect(self.manual_proxy.setFilterFixedString)
         self.search_edit.textChanged.connect(self.matches_proxy.setFilterFixedString)
@@ -114,10 +113,12 @@ class LabelEditor(QtWidgets.QWidget):
         self.status = QtWidgets.QLabel()
         self.status.setWordWrap(True)
         self.splitter = QtWidgets.QSplitter()
+        self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(self.list_view)
         self.splitter.addWidget(self.details)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 3)
+        self.splitter.setSizes([tokens.LABEL_LIST_DEFAULT_WIDTH, tokens.DEFAULT_WIDTH - tokens.LABEL_LIST_DEFAULT_WIDTH])
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_LG)
         layout.addWidget(self.splitter, 1)
         layout.addWidget(self.status)
@@ -138,6 +139,7 @@ class LabelEditor(QtWidgets.QWidget):
         return view
 
     def set_automatic(self, automatic: bool) -> None:
-        self.form.setRowVisible(self.terms_edit, automatic)
+        self.form.setRowVisible(self.terms_edit, automatic or self.terms_edit.draft.editing is not None)
         self.manual_heading.setVisible(not automatic)
         self.manual_view.setVisible(not automatic)
+        self.matches_view.setColumnHidden(1, not automatic)
