@@ -17,11 +17,14 @@ class TaskRunner(QtCore.QObject):
     statusChanged = QtCore.Signal(str)
     failed = QtCore.Signal(str)
     progressChanged = QtCore.Signal(object)
+    activityChanged = QtCore.Signal(bool)
+    actionFinished = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.busy = False
         self.status_text = ""
+        self.active = False
         self._pool = WorkerPool()
         self._progress = Queue()
         self._generation = 0
@@ -50,25 +53,37 @@ class TaskRunner(QtCore.QObject):
         def callback(result, error):
             self._drain_progress()
             self.set_busy(False)
-            if error:
-                self.failed.emit(str(error))
-                return
-            if done:
-                done(result)
+            try:
+                if error:
+                    self.failed.emit(str(error))
+                elif done:
+                    done(result)
+            finally:
+                if generation == self._generation and not self.busy:
+                    self.actionFinished.emit()
 
         self._pool.submit(file_key, work, callback=callback)
+        self._update_activity()
         self._timer.start(tokens.WORKER_POLL_MS)
 
     def poll(self) -> None:
         self._drain_progress()
         polled = self._pool.poll()
         self._pool.fire_callbacks(polled)
+        self._update_activity()
         if not self._pool.has_work():
             self._timer.stop()
 
     def background(self, worker: Callable, callback: Callable, file_key: str = GLOBAL_KEY) -> None:
         self._pool.submit(file_key, worker, callback=callback)
+        self._update_activity()
         self._timer.start(tokens.WORKER_POLL_MS)
+
+    def _update_activity(self) -> None:
+        active = self._pool.has_work()
+        if active != self.active:
+            self.active = active
+            self.activityChanged.emit(active)
 
     def _drain_progress(self) -> None:
         while True:
@@ -83,3 +98,4 @@ class TaskRunner(QtCore.QObject):
         self._generation += 1
         self._timer.stop()
         self._pool.shutdown()
+        self._update_activity()

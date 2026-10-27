@@ -8,6 +8,7 @@ from ...models import ModItem
 from .. import icons
 from ..theme import colors, tokens
 from ..widgets.item_feedback import blend_color
+from ..widgets.operation_feedback import paint_operation
 
 NO_IMAGE_TEXT = t('no_image')
 EMPTY_LABEL = "-"
@@ -55,6 +56,16 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         self.favorites = set(favorites)
 
     def paint(self, painter, option, index) -> None:
+        frame = index.model().operation_frames.get(index.data(QtCore.Qt.UserRole).name)
+        painter.save()
+        if frame is not None:
+            painter.setOpacity(frame.content_opacity)
+        self._paint_content(painter, option, index)
+        painter.restore()
+        if frame is not None:
+            paint_operation(painter, self._content_rect(option), frame, option.palette, self.accent_color)
+
+    def _paint_content(self, painter, option, index) -> None:
         painter.save()
         mod = index.data(QtCore.Qt.UserRole)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
@@ -112,7 +123,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         progress = feedback.value(index, "favorite", 1.0) if feedback else 1.0
         if favorite or hovered or progress < 1.0:
             favorite_rect = self._favorite_rect(image_rect)
-            painter.setOpacity(progress if favorite else 1.0 - progress if not hovered else 1.0)
+            painter.setOpacity(painter.opacity() * (progress if favorite else 1.0 - progress if not hovered else 1.0))
             self._draw_badge(painter, favorite_rect, qcolor(self.palette_colors.panel))
             icon = icons.glyph_icon(
                 "favorite_filled" if favorite else "favorite",

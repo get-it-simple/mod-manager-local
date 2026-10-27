@@ -30,7 +30,7 @@ from .storage import (
     update_favorites,
 )
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
-from .progress import report
+from .progress import mod_activity, report
 
 IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
@@ -287,6 +287,15 @@ def apply_mods_batch(mods: List[ModItem], overwrite: bool = False) -> List[Tuple
 def apply_mods_batch_result(
     mods: List[ModItem], overwrite: bool = False, *, pending_only: bool = True,
 ) -> OperationResult:
+    with mod_activity("progress_installing", tuple(mod.name for mod in mods)) as results:
+        result = _apply_mods_batch_result(mods, overwrite, pending_only=pending_only)
+        results.extend(result.items)
+        return result
+
+
+def _apply_mods_batch_result(
+    mods: List[ModItem], overwrite: bool, *, pending_only: bool,
+) -> OperationResult:
     if not mods:
         return OperationResult()
     work = [(index, f) for index, m in enumerate(mods)
@@ -336,6 +345,13 @@ def deactivate_mod(mod: ModItem) -> Tuple[bool, str]:
 
 
 def deactivate_mod_result(mod: ModItem) -> OperationItem:
+    with mod_activity("progress_uninstalling", (mod.name,)) as results:
+        result = _deactivate_mod_result(mod)
+        results.append(result)
+        return result
+
+
+def _deactivate_mod_result(mod: ModItem) -> OperationItem:
     remove = remove_path if mod.copy_install else unlink_path
     results = []
     failures = []

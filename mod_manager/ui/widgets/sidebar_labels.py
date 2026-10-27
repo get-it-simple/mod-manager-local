@@ -5,6 +5,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ...i18n import t
 from .. import icons
 from ..theme import tokens
+from .style_utils import set_variant
 
 
 class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
@@ -46,6 +47,8 @@ class SidebarLabels(QtWidgets.QListView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        set_variant(self, "transparentList")
+        self.viewport().setAutoFillBackground(False)
         self.label_model = QtGui.QStandardItemModel(self)
         self.setModel(self.label_model)
         self.delegate = SidebarLabelDelegate(self)

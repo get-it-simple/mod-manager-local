@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from weakref import WeakSet
+from math import sin, pi
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from shiboken6 import isValid
@@ -18,6 +19,8 @@ def motion_for(widget):
 
 
 class MotionController(QtCore.QObject):
+    enabledChanged = QtCore.Signal(bool)
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -26,6 +29,7 @@ class MotionController(QtCore.QObject):
         self._buttons = WeakSet()
         self._feedback = set()
         self._closed = False
+        self.operation_blocked = False
         QtWidgets.QApplication.instance().installEventFilter(self)
 
     def attach(self, widget) -> None:
@@ -116,9 +120,22 @@ class MotionController(QtCore.QObject):
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
         self.finish_all()
+        self.enabledChanged.emit(enabled)
         for button in tuple(self._buttons):
             if isValid(button):
                 button._motion_feedback.refresh()
+
+    def set_operation_blocked(self, blocked: bool) -> None:
+        if blocked == self.operation_blocked:
+            return
+        self.operation_blocked = blocked
+        for feedback in tuple(self._feedback):
+            if isValid(feedback.button):
+                feedback.frozen_image = feedback.button.grab() if blocked and feedback.button.isVisible() else QtGui.QPixmap()
+                self.stop(feedback.button, "feedback")
+                feedback.frozen_surface = feedback.surface if blocked else None
+                feedback.refresh()
+                feedback.button.update()
 
     def finish_all(self) -> None:
         transitions, self._transitions = self._transitions, {}
@@ -141,6 +158,7 @@ class MotionController(QtCore.QObject):
                 button.pressed.disconnect(feedback._press)
                 button.released.disconnect(feedback._release)
                 button.toggled.disconnect(feedback.refresh)
+                button.clicked.disconnect(feedback._click)
         self._feedback.clear()
 
 
@@ -173,12 +191,19 @@ class ButtonFeedback(QtCore.QObject):
         self.focused = button.hasFocus()
         super().__init__(button)
         self.surface = self.target()
+        self.frozen_surface = self.surface if motion.operation_blocked else None
+        self.frozen_image = QtGui.QPixmap()
+        self.click_progress = 1.0
         button.installEventFilter(self)
         button.pressed.connect(self._press)
         button.released.connect(self._release)
         button.toggled.connect(self.refresh)
+        button.clicked.connect(self._click)
 
     def target(self):
+        frozen = getattr(self, "frozen_surface", None)
+        if frozen is not None:
+            return frozen
         return colors.button_surface(self.motion.window.theme.palette, self.button.property("variant"),
                                      self.button.isEnabled(), self.button.isChecked(),
                                      self.hovered, self.pressed, self.focused)
@@ -191,8 +216,19 @@ class ButtonFeedback(QtCore.QObject):
         self.pressed = False
         self.refresh()
 
+    def _click(self, *_args):
+        if not self.button.property("pagePulse"):
+            return
+        def apply(progress):
+            self.click_progress = progress
+            self.button.update()
+        self.motion.animate(self.button, "page-pulse", 0.0, 1.0, apply, tokens.PAGE_PULSE_MS)
+
     def refresh(self, *_args):
         start, target = self.surface, self.target()
+        if start == target:
+            self.motion.stop(self.button, "feedback")
+            return
 
         def apply(progress):
             self.surface = tuple(tuple(round(a + (b - a) * progress) for a, b in zip(old, new))
@@ -210,7 +246,11 @@ class ButtonFeedback(QtCore.QObject):
         elif kind in (QtCore.QEvent.FocusIn, QtCore.QEvent.FocusOut):
             self.focused = kind == QtCore.QEvent.FocusIn
             self.refresh()
-        elif kind in (QtCore.QEvent.EnabledChange, QtCore.QEvent.PaletteChange, QtCore.QEvent.StyleChange):
+        elif kind == QtCore.QEvent.EnabledChange:
+            self.motion.stop(obj, "feedback")
+            self.surface = self.target()
+            obj.update()
+        elif kind in (QtCore.QEvent.PaletteChange, QtCore.QEvent.StyleChange):
             self.refresh()
         elif kind == QtCore.QEvent.Hide:
             self.hovered = self.pressed = False
@@ -224,8 +264,19 @@ class ButtonFeedback(QtCore.QObject):
     def paint(self):
         button = self.button
         painter = QtGui.QPainter(button)
+        if not self.frozen_image.isNull():
+            painter.drawPixmap(button.rect(), self.frozen_image)
+            painter.end()
+            return
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        pulse = sin(self.click_progress * pi) if self.click_progress < 1.0 else 0.0
+        scale = 1.0 - (1.0 - tokens.PAGE_PULSE_SCALE) * pulse
+        center = QtCore.QRectF(button.rect()).center()
+        painter.translate(center)
+        painter.scale(scale, scale)
+        painter.translate(-center)
         background, border, foreground = (QtGui.QColor(*value) for value in self.surface)
+        background = background.lighter(round(100 * (1 + tokens.PAGE_PULSE_LIGHTEN * pulse)))
         inset = tokens.BORDER_WIDTH / 2
         rect = QtCore.QRectF(button.rect()).adjusted(inset, inset, -inset, -inset)
         painter.setBrush(background)
@@ -237,11 +288,16 @@ class ButtonFeedback(QtCore.QObject):
         if isinstance(button, QtWidgets.QPushButton):
             option = QtWidgets.QStyleOptionButton()
             button.initStyleOption(option)
+            option.rect = button.style().subElementRect(QtWidgets.QStyle.SE_PushButtonContents, option, button)
             control = QtWidgets.QStyle.CE_PushButtonLabel
         else:
             option = QtWidgets.QStyleOptionToolButton()
             button.initStyleOption(option)
+            option.rect = button.style().subControlRect(QtWidgets.QStyle.CC_ToolButton, option,
+                                                        QtWidgets.QStyle.SC_ToolButton, button)
             control = QtWidgets.QStyle.CE_ToolButtonLabel
         option.palette.setColor(QtGui.QPalette.ButtonText, foreground)
+        if self.frozen_surface is not None:
+            option.state |= QtWidgets.QStyle.State_Enabled
         button.style().drawControl(control, option, painter, button)
         painter.end()

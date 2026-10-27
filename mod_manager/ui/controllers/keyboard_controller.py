@@ -45,7 +45,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_hints(self) -> None:
         window = self.window
-        targets = {"search": window.search_box, "install": window.mods_actions.button("install_selected"),
+        targets = {"search": window.filter_input.search_button, "install": window.mods_actions.button("install_selected"),
                    "uninstall": window.mods_actions.button("uninstall_selected"), "details": window.details_button,
                    "import_files": window.mods_toolbar.button("import_files"), "import_folder": window.mods_toolbar.button("import_folder"),
                    "help": window.keyboard_help_button, "save": window.settings.toolbar.button("save_settings")}
@@ -55,6 +55,8 @@ class KeyboardController(QtCore.QObject):
                 button.setProperty("commandTooltip", original)
                 shortcut = self.text(command)
                 button.setToolTip(f"{original} ({shortcut})" if shortcut else original)
+                if command == "search":
+                    window.search_box.setToolTip(button.toolTip())
                 if isinstance(button, QtWidgets.QAbstractButton) and not button.text():
                     button.setAccessibleName(button.toolTip())
 
@@ -91,7 +93,7 @@ class KeyboardController(QtCore.QObject):
         if window._editing_text() and name not in ("search", "save", "refresh", "help"):
             return
         actions = {
-            "search": lambda: (window.search_box.lineEdit().setFocus(), window.search_box.lineEdit().selectAll()),
+            "search": lambda: window.filter_input.open("search"),
             "refresh": self.refresh_page,
             "save": lambda: window.labels_controller.save() if page == "labels" else window.settings.save(),
             "help": self.show_help,
@@ -107,7 +109,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_page(self) -> None:
         window = self.window
-        {"library": window.refresh_mods, "presets": window.refresh_all, "cleanup": window.refresh_all,
+        {"library": lambda: window.refresh_all(reload_artwork=True), "presets": window.refresh_all, "cleanup": window.refresh_all,
          "games": window.games.refresh_lists, "labels": window.labels_controller.activate,
          "settings": window.settings.update_dirty}[window.workspace.current_page]()
 

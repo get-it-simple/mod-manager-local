@@ -71,8 +71,9 @@ class ModsToolbarSectionTest(WindowTestCase):
 
     def test_search_boxes_belong_to_the_filter_section(self):
         widgets = self.window.mods_toolbar.sections["filter"].widgets()
-        self.assertIn(self.window.search_box, widgets)
-        self.assertIn(self.window.label_filter_box, widgets)
+        self.assertIn(self.window.filter_input, widgets)
+        self.assertTrue(self.window.filter_input.isAncestorOf(self.window.search_box))
+        self.assertTrue(self.window.filter_input.isAncestorOf(self.window.label_filter_box))
         self.assertIn(self.window.filter_modes, self.window.mods_toolbar.sections["show"].widgets())
         self.assertIsNone(self.window.mods_toolbar.button("search"))
         self.assertIsNone(self.window.mods_toolbar.button("clear"))

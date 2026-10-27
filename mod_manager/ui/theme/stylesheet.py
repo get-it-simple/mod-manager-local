@@ -64,6 +64,7 @@ def build_stylesheet(palette: Palette) -> str:
         }}
         QComboBox QLineEdit {{ background: transparent; border: none; padding: 0 {tokens.SPACE_XS}px; }}
         QAbstractItemView {{ background: {palette.panel}; color: {palette.fg}; outline: 0; border: none; }}
+        QListView[variant="transparentList"] {{ background: transparent; border: none; }}
         QTableView::item {{ padding: {tokens.SPACE_SM}px; border: none; }}
         QTableView::item:hover, QListWidget::item:hover {{ background: {palette.button_hover}; }}
         QTableView::item:selected, QListWidget::item:selected {{ background-color: {palette.accent_fill}; color: {palette.fg}; border: none; outline: none; }}

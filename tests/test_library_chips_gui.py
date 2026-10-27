@@ -80,7 +80,8 @@ class LibraryChipsGuiTests(WindowTestCase):
         self.assertEqual(self.window.filters.labels, ("Combat",))
         self.assertEqual(self.window.filters.queries, ("first type", "combat"))
         self.assertEqual(self.names(), ["combat.pak"])
-        self.assertEqual(summary.count_label.text(), "Showing 1 of 4 mods")
+        self.assertIn("Showing 1 of 4 mods", self.window.mods_tab.subtitle.text())
+        self.assertFalse(any("Showing" in label.text() for label in summary.findChildren(QtWidgets.QLabel)))
 
     def test_radio_modes_are_exclusive_and_clear_tracks_active_filters_and_busy(self):
         clear = self.window.filter_summary.clear_button

@@ -795,9 +795,11 @@ class LabelsGuiTests(WindowTestCase):
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class AdaptiveFiltersTests(WindowTestCase):
     def test_filters_use_available_width_without_focus_and_keep_it_on_focus_loss(self):
+        self.window.motion.set_enabled(False)
         self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
         self.window.show()
         self.qt_app.processEvents()
+        self.window.filter_input.open("search")
         box = self.window.search_box
         width = box.width()
         self.assertGreater(width, box.minimumWidth())
@@ -810,8 +812,10 @@ class AdaptiveFiltersTests(WindowTestCase):
         self.assertLess(box.width(), width)
 
     def test_popup_fits_long_values_inside_the_screen_and_applies_selection(self):
+        self.window.motion.set_enabled(False)
         self.window.show()
         self.qt_app.processEvents()
+        self.window.filter_input.open("label")
         box = self.window.label_filter_box
         name = "Long label " * 20
         with QtCore.QSignalBlocker(box):

@@ -15,7 +15,6 @@ class FilterSummary(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.count_label = QtWidgets.QLabel()
         self.view = FilterChipView()
         self.model = QtGui.QStandardItemModel(self)
         self.view.setModel(self.model)
@@ -24,12 +23,10 @@ class FilterSummary(QtWidgets.QWidget):
         self.clear_button.setEnabled(False)
         self._chips = []
         layout = apply_margins(QtWidgets.QHBoxLayout(self), margins=None, spacing=tokens.SPACE_SM)
-        layout.addWidget(self.count_label)
         layout.addWidget(self.view, 1)
         layout.addWidget(self.clear_button)
 
-    def update_filters(self, count: int, total: int, chips, active: bool, busy: bool = False) -> None:
-        self.count_label.setText(t("showing_mods", count=count, total=total))
+    def update_filters(self, chips, active: bool, busy: bool = False) -> None:
         self.clear_button.setEnabled(active and not busy)
         self.view.setEnabled(not busy)
         if self._chips == chips:

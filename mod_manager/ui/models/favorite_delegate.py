@@ -42,7 +42,9 @@ class FavoriteDelegate(AnimatedItemDelegate):
         color = option.palette.color(QtGui.QPalette.Highlight if favorite else QtGui.QPalette.Text)
         icon = icons.glyph_icon("favorite_filled" if favorite else "favorite", color)
         painter.save()
-        painter.setOpacity(progress if favorite else 1.0 - progress if not hovered else 1.0)
+        frame = index.model().operation_frames.get(mod.name)
+        opacity = frame.content_opacity if frame is not None else 1.0
+        painter.setOpacity(opacity * (progress if favorite else 1.0 - progress if not hovered else 1.0))
         icon.paint(painter, self.star_rect(option.rect), QtCore.Qt.AlignCenter)
         painter.restore()
 

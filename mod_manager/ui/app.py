@@ -17,7 +17,7 @@ from ..library_state import folder_issues
 from ..library_filters import LibraryFilters
 from .controllers.keyboard_controller import KeyboardController
 from .widgets.buttons import text_button
-from .widgets.operation_progress import OperationProgress
+from .controllers.activity_controller import ActivityController
 from ..labels import AUTOMATIC, ResolvedLabels, label_names
 from ..link_recovery import preset_install_names
 from ..preset_plan import plan_presets, execute_preset_plan
@@ -179,15 +179,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.preset_sort_reverse = bool(self.cfg.get("preset_sort_reverse", False))
 
         self._build()
-        self.operation_progress = OperationProgress(self)
-        self.takeCentralWidget()
-        central = QtWidgets.QWidget(self)
-        layout = apply_margins(QtWidgets.QVBoxLayout(central), margins=None, spacing=tokens.SPACE_SM)
-        layout.addWidget(self.workspace, 1)
-        layout.addWidget(self.operation_progress)
-        self.setCentralWidget(central)
-        self.runner.progressChanged.connect(self.operation_progress.update_progress)
-        self.runner.busyChanged.connect(self.operation_progress.set_busy)
+        self.activity = ActivityController(self)
+        self.runner.actionFinished.connect(self.library.ensure_refresh)
         self._setup_com_drop_targets()
         self._bind_navigation_events()
         self.keyboard = KeyboardController(self)
@@ -217,6 +210,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             event.ignore()
             return
         self.keyboard.shutdown()
+        self.activity.shutdown()
         self.library.shutdown()
         self.images.shutdown()
         self.motion.shutdown()
@@ -668,19 +662,26 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _on_busy_changed(self, busy: bool) -> None:
         if busy:
+            self.motion.set_operation_blocked(True)
             self.library.invalidate()
         self._close_label_choices()
-        self.registry.set_enabled(ACTIONS, not busy)
+        self.registry.set_enabled(ACTIONS, not busy and not self.library.loading)
         self._sync_workspace()
-        self.workspace.stack.setEnabled(not busy)
+        for key, page in self.workspace.pages.items():
+            if key != "library":
+                page.setEnabled(not busy)
+        self._update_detail_actions()
         self.filter_summary.clear_button.setEnabled(self.filters.active and not busy)
         self.filter_summary.view.setEnabled(not busy)
         self._update_mod_selection_actions()
-        if not busy and self.library.loading:
-            self.library.refresh()
+
+        if not busy and not self.library.loading:
+            self.motion.set_operation_blocked(False)
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self.runner.set_busy(busy, text)
+        if not busy:
+            self.library.ensure_refresh()
 
     def _run_action(self, label: str, worker: Callable, done: Callable | None = None, file_key: str = "global") -> None:
         self.runner.run(label, worker, done, file_key)
@@ -907,8 +908,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._refresh_multi_detail([self.current_mods_shown[i] for i in rows if i < len(self.current_mods_shown)])
         else:
             self._refresh_mod_detail(None)
+        self._update_detail_actions()
         if self.detail_scroll.isVisible():
             self.motion.fade_in(self.detail_frame)
+
+    def _update_detail_actions(self) -> None:
+        enabled = not self.busy and self.library.ready
+        for button in self.detail_frame.findChildren(QtWidgets.QAbstractButton):
+            button.setEnabled(enabled)
 
     def _clear_detail(self) -> None:
         self._detail_preview = None
@@ -1149,11 +1156,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
                 self.tiles_view.viewport().update(self.tiles_view.visualRect(index))
                 break
 
-    def refresh_all(self) -> None:
+    def refresh_all(self, *, reload_artwork: bool = False) -> None:
+        if reload_artwork:
+            self.images.reset()
         self.refresh_mods()
 
     def refresh_mods(self, selected_names: List[str] | None = None) -> None:
-        self.images.reset()
         self.library.refresh(selected_names)
 
     def _clear_library_models(self) -> None:
@@ -1178,17 +1186,23 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not hasattr(self, "mods_actions"):
             return
         self.mod_menu.close()
-        self.library_status.update_state(self.library.loading, self.library.error, self.library.snapshot is not None)
+        if not self.busy and not self.library.loading:
+            self.registry.set_enabled(ACTIONS, True)
+            self._sync_workspace()
+            self._update_detail_actions()
+        self.library_status.update_state(self.library.error)
         for key in ("import_files", "import_folder"):
             self.mods_toolbar.button(key).setEnabled(not self.busy and self.library.ready)
         self._update_mod_selection_actions()
         self._refresh_library_state()
         if self.library.error:
-            self.statusBar().showMessage(self.library.error)
+            self.statusBar().clearMessage()
         elif self.library.loading:
             self.statusBar().showMessage(t("updating_library" if self.library.snapshot else "loading_library"))
         elif not self.busy:
             self.statusBar().showMessage(self.runner.status_text or t("ready"))
+        if not self.busy and not self.library.loading:
+            self.motion.set_operation_blocked(False)
 
     def _render_mods(self, selected_names: List[str] | None = None) -> None:
         if self.library.snapshot is None:
@@ -1255,8 +1269,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._render_mods()
 
     def _refresh_library_state(self) -> None:
-        self.filter_summary.update_filters(len(self.current_mod_items), len(self.current_mod_names),
-                                           self.filters.chips, self.filters.active, self.busy)
+        self.filter_summary.update_filters(self.filters.chips, self.filters.active, self.busy)
         if not self.current_mods_shown:
             issues = self.library.snapshot.issues if self.library.snapshot else ()
             if self.library.loading:
@@ -1297,7 +1310,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
                         row = page_keys.index(name)
                         idx = self.presets_model.index(row, 0)
                         selection.select(idx, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
-                        self.presets_table.setCurrentIndex(idx)
+                        selection.setCurrentIndex(idx, QtCore.QItemSelectionModel.NoUpdate)
         finally:
             self.presets_table.setUpdatesEnabled(True)
             if blocker is not None:

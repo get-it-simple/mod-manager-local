@@ -60,6 +60,7 @@
   "uninstall_action": "Uninstall",
   "apply_plan": "Apply changes",
   "cancel_action": "Cancel",
+  "close_filter": "Close filter input (Escape); keep applied filters",
   "import_preview": "Import destination preview",
   "import_selection_summary": "{mods} mods selected from {archives} archives · {files} files",
   "review_import": "Review final import destinations",

@@ -35,6 +35,8 @@ def build_presets(window) -> None:
     window.preset_page_control.pageRequested.connect(window._set_preset_page)
     window.preset_page_label = window.preset_page_control
     page_section.add_action("next_page", "forward", t('next_presets_page'), lambda: window._change_preset_page(1))
+    for key in ("prev_page", "next_page"):
+        window.presets_toolbar.button(key).setProperty("pagePulse", True)
 
     window.preset_name = QtWidgets.QLineEdit()
     window.preset_name.setPlaceholderText(t('preset_name'))
@@ -76,4 +78,3 @@ def build_broken(window) -> None:
     window.registry.extend(ACTIONS, window.broken_toolbar.buttons.values())
     window.broken_toolbar.add_stretch()
     layout.addWidget(window.broken_toolbar)
-

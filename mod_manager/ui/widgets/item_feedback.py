@@ -4,6 +4,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..motion import motion_for
 from ..theme import tokens
+from .operation_feedback import paint_operation
 
 
 def blend_color(first, second, progress):
@@ -90,9 +91,20 @@ class ItemFeedback(QtCore.QObject):
 
 class AnimatedItemDelegate(QtWidgets.QStyledItemDelegate):
     def paint(self, painter, option, index):
+        frame = index.model().operation_frames.get(index.data(QtCore.Qt.UserRole).name)
+        painter.save()
+        if frame is not None:
+            painter.setOpacity(frame.content_opacity)
+        self._paint_content(painter, option, index)
+        painter.restore()
+        if frame is not None and index.column() == 1:
+            paint_operation(painter, option.rect, frame, option.palette, index.model().activity_color)
+
+    def _paint_content(self, painter, option, index):
         feedback = getattr(option.widget, "_item_feedback", None)
         if feedback is None:
-            return super().paint(painter, option, index)
+            super().paint(painter, option, index)
+            return
         option = QtWidgets.QStyleOptionViewItem(option)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)

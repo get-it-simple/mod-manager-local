@@ -114,6 +114,13 @@ class GamesController(QtCore.QObject):
         return self.window.cfg
 
     def select(self, profile_id: str) -> None:
+        if not profile_id:
+            return
+        if profile_id == self.cfg.get("active_game_profile_id"):
+            if self.window.workspace.current_page == "labels" and not self.window.labels_controller.flush():
+                return
+            self.window._set_main_page(self.window.mods_tab)
+            return
         if not self.window.labels_controller.flush():
             return
         if profile_id and set_active_game_profile(self.cfg, profile_id):

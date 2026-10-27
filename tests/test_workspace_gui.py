@@ -89,7 +89,8 @@ class WorkspaceGuiTests(WindowTestCase):
                 self.assertEqual(self.window.workspace.current_page, "library")
             self.assertFalse(self.window.workspace.profile_box.isEnabled())
             self.assertFalse(self.window.details_button.isEnabled())
-            self.assertFalse(self.window.detail_frame.isEnabled())
+            self.assertTrue(self.window.detail_frame.isEnabled())
+            self.assertTrue(all(not button.isEnabled() for button in self.window.detail_frame.findChildren(QtWidgets.QAbstractButton)))
             self.window._navigate("settings")
             self.assertEqual(self.window.workspace.current_page, "library")
         finally:

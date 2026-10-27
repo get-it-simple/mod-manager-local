@@ -5,6 +5,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ...i18n import t
 from .. import icons
 from ..theme import tokens
+from .style_utils import set_variant
 
 
 class FilterChipDelegate(QtWidgets.QStyledItemDelegate):
@@ -41,6 +42,8 @@ class FilterChipView(QtWidgets.QListView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        set_variant(self, "transparentList")
+        self.viewport().setAutoFillBackground(False)
         self.setFlow(QtWidgets.QListView.LeftToRight)
         self.setWrapping(False)
         self.setResizeMode(QtWidgets.QListView.Adjust)

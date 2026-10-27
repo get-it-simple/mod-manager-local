@@ -22,6 +22,7 @@ class LibraryController(QtCore.QObject):
         self._pending = None
         self._closed = False
         self._identity = None
+        self._needs_refresh = False
         self.selected_names = None
 
     @property
@@ -32,12 +33,14 @@ class LibraryController(QtCore.QObject):
         if self._closed:
             return
         self._generation += 1
+        self._needs_refresh = False
         cfg = deepcopy(self.window.cfg)
         identity = tuple(str(cfg.get(key, "")) for key in ("active_game_profile_id", "mods_source_dir", "game_mods_dir",
                                                           "mod_extensions", "mod_group_extensions", "mod_recursive_scan", "install_mode", "link_prefix"))
         if self._identity is not None and self._identity != identity:
             self.snapshot = None
-            self.window.images.reset()
+            if self._identity[:2] != identity[:2]:
+                self.window.images.reset()
             self.window._clear_library_models()
         self._identity = identity
         self.selected_names = selected_names if selected_names is not None else self.window._selected_mod_names()
@@ -49,9 +52,14 @@ class LibraryController(QtCore.QObject):
 
     def invalidate(self) -> None:
         self._generation += 1
+        self._needs_refresh = True
         self._pending = None
         self.loading = True
         self.changed.emit()
+
+    def ensure_refresh(self) -> None:
+        if self._needs_refresh and not self.window.busy:
+            self.refresh()
 
     def _dispatch(self) -> None:
         if self._running or self._pending is None or self._closed:

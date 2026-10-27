@@ -24,6 +24,7 @@ from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
 from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
 from ..widgets.library_status import LibraryStatus
+from ..widgets.filter_input import FilterInput
 from ..view_modes import MOD_ORDER_OPTIONS, order_label_for_key
 from ..localization import system_action_text as _sys_str
 from .toolbar_specs import MODS_ACTION_SECTIONS, MODS_TOOLBAR_SECTIONS, SELECTION_ACTIONS
@@ -47,8 +48,8 @@ def build_mods_toolbar(window) -> IconToolbar:
     window.filter_boxes = (window.search_box, window.label_filter_box)
     filter_section = toolbar.sections["filter"]
     filter_section.setProperty("toolbarStretch", 1)
-    filter_section.add_widget(window.search_box, 2)
-    filter_section.add_widget(window.label_filter_box, 1)
+    window.filter_input = FilterInput(window.search_box, window.label_filter_box, window)
+    filter_section.add_widget(window.filter_input, 1)
     window.filter_modes = SegmentedControl((
         ("all", t("all"), "", t("all_mods")),
         ("installed", t("installed"), "", t("installed_mods")),
@@ -103,6 +104,8 @@ def build_mods_actions(window) -> IconToolbar:
     window.page_control.pageRequested.connect(window._set_mod_page)
     window.page_label = window.page_control
     page_section.add_action("next_page", "forward", t('next_mods_page'), lambda: window._change_mod_page(1))
+    for key in ("prev_page", "next_page"):
+        toolbar.button(key).setProperty("pagePulse", True)
 
     toolbar.button("install_page").setAccessibleName(_sys_str("install"))
     toolbar.button("uninstall_page").setAccessibleName(_sys_str("uninstall"))
@@ -145,7 +148,8 @@ def build_mods(window) -> None:
     window.filter_summary.clearRequested.connect(window._mods_clear)
     layout.addWidget(window.filter_summary)
     window.library_status = LibraryStatus(window.refresh_mods, window.mods_tab)
-    layout.addWidget(window.library_status)
+    window.statusBar().addPermanentWidget(window.library_status, 1)
+    window.statusBar().setMinimumHeight(window.library_status.retry.sizeHint().height() + tokens.SPACE_SM)
 
     window.mods_model = ModTableModel(window.theme.palette.accent, window)
     window.mods_stack = QtWidgets.QStackedWidget()

@@ -363,18 +363,17 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
 
     def test_profile_context_and_operation_result_remain_visible_across_pages(self):
         self.assertIn("Links", self.window.mods_tab.subtitle.text())
-        self.window.operation_progress.summarize(2, 1, 1)
+        self.window._set_status("Successful: 2 · Skipped: 1 · Failed: 1")
         self.window._open_settings_page()
         self.window.show()
         self.qt_app.processEvents()
-        self.assertTrue(self.window.operation_progress.isVisible())
-        self.assertEqual(self.window.operation_progress.label.text(), "Successful: 2 · Skipped: 1 · Failed: 1")
+        self.assertEqual(self.window.statusBar().currentMessage(), "Successful: 2 · Skipped: 1 · Failed: 1")
+        self.assertIs(self.window.centralWidget(), self.window.workspace)
 
     def test_completed_settings_tasks_do_not_leave_a_preparing_message(self):
-        progress = self.window.operation_progress
-        progress.set_busy(True)
-        self.assertFalse(progress.isHidden())
-        progress.set_busy(False)
-        self.assertTrue(progress.isHidden())
-        progress.summarize(1, 0, 0)
-        self.assertFalse(progress.isHidden())
+        indicator = self.window.activity.indicator
+        self.window._set_busy(True)
+        self.assertFalse(indicator.isHidden())
+        self.window._set_busy(False)
+        self.assertTrue(indicator.isHidden())
+        self.assertFalse(self.window.library.loading)
