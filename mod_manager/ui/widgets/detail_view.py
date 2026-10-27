@@ -26,6 +26,11 @@ class DetailImageLabel(QtWidgets.QLabel):
         super().resizeEvent(event)
         self.update_scaled_pixmap()
 
+    def set_source_pixmap(self, pixmap: QtGui.QPixmap) -> None:
+        self._source_pixmap = pixmap
+        self._target_size = None
+        self.update_scaled_pixmap()
+
     def update_scaled_pixmap(self, size: QtCore.QSize | None = None) -> None:
         if self._source_pixmap.isNull():
             return

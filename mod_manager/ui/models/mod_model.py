@@ -10,6 +10,12 @@ from . import columns
 
 COLUMNS = tokens.MOD_COLUMNS
 HEADERS = columns.titles(COLUMNS)
+DISPLAY_ROLE = QtCore.Qt.DisplayRole
+TOOLTIP_ROLE = QtCore.Qt.ToolTipRole
+ITEM_ROLE = QtCore.Qt.UserRole
+DECORATION_ROLE = QtCore.Qt.DecorationRole
+ALIGNMENT_ROLE = QtCore.Qt.TextAlignmentRole
+DATA_ROLES = frozenset((DISPLAY_ROLE, TOOLTIP_ROLE, ITEM_ROLE, DECORATION_ROLE, ALIGNMENT_ROLE))
 
 
 class ModTableModel(QtCore.QAbstractTableModel):
@@ -54,19 +60,19 @@ class ModTableModel(QtCore.QAbstractTableModel):
         return None
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
-        if not index.isValid():
+        if role not in DATA_ROLES or not index.isValid():
             return None
         mod = self.mods[index.row()]
         column = index.column()
-        if role == QtCore.Qt.ToolTipRole and column in (1, 2):
+        if role == TOOLTIP_ROLE and column in (1, 2):
             return mod.name if column == 1 else self.labels.get(mod.name, "-")
-        if role == QtCore.Qt.UserRole:
+        if role == ITEM_ROLE:
             return mod
-        if role == QtCore.Qt.DecorationRole and column == 0:
+        if role == DECORATION_ROLE and column == 0:
             return self._installed_icon if mod.installed else self._empty_icon
-        if role == QtCore.Qt.TextAlignmentRole:
+        if role == ALIGNMENT_ROLE:
             return columns.alignment(self.COLUMNS, column)
-        if role != QtCore.Qt.DisplayRole:
+        if role != DISPLAY_ROLE:
             return None
         record = self.records.get(mod.name, {})
         values = ("", mod.name, self.labels.get(mod.name, "-"), record.get("last_managed") or "-")

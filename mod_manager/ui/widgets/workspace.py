@@ -30,8 +30,8 @@ class WorkspacePage(QtWidgets.QWidget):
         self.outer = apply_margins(QtWidgets.QVBoxLayout(self), tokens.PAGE_MARGIN, tokens.SPACE_2XL)
         self.header = apply_margins(QtWidgets.QHBoxLayout())
         headings = apply_margins(QtWidgets.QVBoxLayout(), spacing=tokens.SPACE_SM)
-        self.title = page_title_label(title)
-        self.subtitle = muted_label(subtitle)
+        self.title = page_title_label(title, self)
+        self.subtitle = muted_label(subtitle, self)
         self.subtitle.setWordWrap(True)
         self._subtitle_text = subtitle
         self._elide_subtitle = False
@@ -54,7 +54,7 @@ class WorkspacePage(QtWidgets.QWidget):
 
     def _update_subtitle(self) -> None:
         text = self._subtitle_text
-        if self._elide_subtitle:
+        if self._elide_subtitle and self.isVisible():
             text = self.subtitle.fontMetrics().elidedText(text, QtCore.Qt.ElideMiddle, self.subtitle.width())
         self.subtitle.setText(text)
 
@@ -158,9 +158,14 @@ class Workspace(QtWidgets.QWidget):
         self.stack.addWidget(page)
 
     def show_page(self, key: str) -> None:
+        changed = self.stack.currentWidget() is not self.pages[key]
         self.stack.setCurrentWidget(self.pages[key])
         for name, button in self.navigation.items():
             button.setChecked(name == key)
+        from ..motion import motion_for
+        motion = motion_for(self)
+        if changed and motion:
+            motion.fade_in(self.pages[key].title)
 
     @property
     def current_page(self) -> str:

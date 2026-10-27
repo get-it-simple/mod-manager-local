@@ -212,6 +212,7 @@ class WorkspaceGuiTests(WindowTestCase):
         self.assertIs(self.window.presets_stack.currentWidget(), self.window.presets_empty)
         self.assertTrue(self.window.presets_toolbar.button("save").isEnabled())
         with patch("mod_manager.ui.app.list_broken_links", return_value=[]):
+            self.window.refresh_mods()
             self.window._navigate("cleanup")
         self.assertIs(self.window.broken_stack.currentWidget(), self.window.broken_empty)
 

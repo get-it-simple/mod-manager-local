@@ -22,6 +22,8 @@ from ..widgets.workspace import EmptyState
 from ..widgets.detail_view import DetailPanel
 from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
+from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
+from ..widgets.library_status import LibraryStatus
 from ..view_modes import MOD_ORDER_OPTIONS, order_label_for_key
 from ..localization import system_action_text as _sys_str
 from .toolbar_specs import MODS_ACTION_SECTIONS, MODS_TOOLBAR_SECTIONS, SELECTION_ACTIONS
@@ -142,11 +144,14 @@ def build_mods(window) -> None:
     window.filter_summary.removeRequested.connect(window._clear_one_filter)
     window.filter_summary.clearRequested.connect(window._mods_clear)
     layout.addWidget(window.filter_summary)
+    window.library_status = LibraryStatus(window.refresh_mods, window.mods_tab)
+    layout.addWidget(window.library_status)
 
     window.mods_model = ModTableModel(window.theme.palette.accent, window)
     window.mods_stack = QtWidgets.QStackedWidget()
     window.mods_table = QtWidgets.QTableView()
     window.mods_table.setModel(window.mods_model)
+    window.mods_table.setItemDelegate(AnimatedItemDelegate(window.mods_table))
     window.mods_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     window.mods_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     window.mods_table.setMouseTracking(True)
@@ -168,6 +173,8 @@ def build_mods(window) -> None:
     window.tiles_view = ModListView()
     window.tiles_view.setModel(window.mods_model)
     window.tiles_view.setSelectionModel(window.mods_table.selectionModel())
+    ItemFeedback(window.mods_table)
+    ItemFeedback(window.tiles_view)
     window.tiles_view.setItemDelegate(window.tile_delegate)
     window.tiles_view.setViewMode(QtWidgets.QListView.IconMode)
     window.tiles_view.setResizeMode(QtWidgets.QListView.Adjust)
@@ -208,4 +215,3 @@ def build_mods(window) -> None:
     window.mods_tab.body.addWidget(window.mods_actions)
     window.mod_menu = ModContextMenu(window)
     window._show_mod_view()
-

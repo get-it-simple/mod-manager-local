@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from tests.qt_support import qt_app, qt_available
+from tests.gui_background import InlineRunner
 
 from mod_manager.models import ModItem
 
@@ -13,6 +14,7 @@ if qt_available():
 
     from mod_manager.ui.models import BrokenTableModel, FavoriteDelegate, ModTableModel, PresetTableModel, TileDelegate, configure_header
     from mod_manager.ui.models import columns as columns_module
+    from mod_manager.ui.image_cache import ImageCache
     from mod_manager.ui.theme import colors, tokens
 
 SRC = Path(tempfile.gettempdir()) / "mm_model_source"
@@ -190,11 +192,27 @@ class TileDelegateTest(unittest.TestCase):
         self.assertFalse(self.delegate.dark_theme)
 
     def test_cache_can_be_cleared_entirely_or_per_mod(self):
-        self.delegate._pixmaps = {("a", 10): None, ("b", 10): None}
-        self.delegate.clear_cache("a")
-        self.assertEqual(set(self.delegate._pixmaps), {("b", 10)})
-        self.delegate.clear_cache()
-        self.assertEqual(self.delegate._pixmaps, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.delegate.image_cache = ImageCache(InlineRunner(), lambda _cfg, name: root / f"{name}.png", self.delegate)
+            image = QtGui.QImage(10, 10, QtGui.QImage.Format_RGB32)
+            for name, color in (("a", "red"), ("b", "blue")):
+                image.fill(QtGui.QColor(color))
+                self.assertTrue(image.save(str(root / f"{name}.png")))
+            a, b = mods()
+            a.name, b.name = "a", "b"
+            size = QtCore.QSize(10, 10)
+            self.assertEqual(self.delegate._pixmap_for(a, size).toImage().pixelColor(0, 0), QtGui.QColor("red"))
+            self.assertEqual(self.delegate._pixmap_for(b, size).toImage().pixelColor(0, 0), QtGui.QColor("blue"))
+            image.fill(QtGui.QColor("green"))
+            for name in ("a", "b"):
+                self.assertTrue(image.save(str(root / f"{name}.png")))
+            self.delegate.clear_cache("a")
+            self.assertEqual(self.delegate._pixmap_for(a, size).toImage().pixelColor(0, 0), QtGui.QColor("green"))
+            self.assertEqual(self.delegate._pixmap_for(b, size).toImage().pixelColor(0, 0), QtGui.QColor("blue"))
+            self.delegate.clear_cache()
+            self.assertEqual(self.delegate._pixmap_for(b, size).toImage().pixelColor(0, 0), QtGui.QColor("green"))
+            self.delegate.image_cache.shutdown()
 
     def test_badges_stay_inside_the_card(self):
         option = QtWidgets.QStyleOptionViewItem()

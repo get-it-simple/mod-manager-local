@@ -50,7 +50,7 @@ class LabelsGuiTests(WindowTestCase):
         self.persisted = deepcopy(state)
         self.profile_states[str(self.window.cfg.get("active_game_profile_id") or "")] = self.persisted
 
-    def _view(self, _cfg, page, label_filter, search, _order, *_args):
+    def _view(self, _cfg, page, label_filter, search, _order, *_args, **_kwargs):
         labels = ResolvedLabels(self.persisted, [mod.name for mod in self.mods])
         items = [mod for mod in filter_items_by_query(self.mods, search)
                  if not label_filter or set(label_filter).intersection(self.persisted.members(mod.name))]
@@ -821,7 +821,7 @@ class AdaptiveFiltersTests(WindowTestCase):
         popup = box.view().window()
         self.assertGreater(popup.width(), box.width())
         self.assertTrue(box.screen().availableGeometry().contains(popup.geometry()))
-        with patch.object(self.window, "refresh_mods") as refresh:
+        with patch.object(self.window, "_render_mods") as refresh:
             box.setCurrentIndex(box.findText(name))
             box.activated.emit(box.currentIndex())
         self.assertEqual(self.window.filters.labels, (name.strip(),))

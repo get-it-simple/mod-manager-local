@@ -5,6 +5,7 @@ from PySide6 import QtWidgets
 from ...i18n import t
 from ..theme import tokens
 from .style_utils import apply_margins
+from ..motion import motion_for
 
 
 class OperationProgress(QtWidgets.QWidget):
@@ -27,6 +28,8 @@ class OperationProgress(QtWidgets.QWidget):
         else:
             self.hide()
         self.bar.setVisible(busy)
+        if busy:
+            self._animate_appearance()
 
     def update_progress(self, progress) -> None:
         self.show()
@@ -39,3 +42,9 @@ class OperationProgress(QtWidgets.QWidget):
         self.show()
         self.bar.hide()
         self.label.setText(t("operation_summary", success=success, skipped=skipped, failed=failed))
+        self._animate_appearance()
+
+    def _animate_appearance(self) -> None:
+        motion = motion_for(self)
+        if motion:
+            motion.fade_in(self)

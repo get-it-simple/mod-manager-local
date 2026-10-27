@@ -12,7 +12,7 @@ from typing import Dict, List
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
 from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
-from .storage_policy import StorageError, current_policy
+from .storage_policy import StorageError, current_policy, profile_config
 from .labels import LabelDefinition, LabelState, state_from_records, unique_names
 
 FAVORITES_KEY = "__favorites__"
@@ -225,7 +225,9 @@ def delete_game_profile(cfg: Dict, profile_id: str) -> bool:
     return True
 
 def _active_profile_context(base_path: Path) -> tuple[Path, Dict | None, Dict]:
-    raw = load_config()
+    raw = profile_config()
+    if raw is None:
+        raw = load_config()
     profile = active_game_profile(raw)
     if not profile:
         return base_path, None, raw

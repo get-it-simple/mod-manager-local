@@ -80,6 +80,8 @@ class KeyboardController(QtCore.QObject):
         app = QtWidgets.QApplication.instance()
         if window.busy or app.activeModalWidget() is not None or app.activeWindow() is not window:
             return
+        if name in ("install", "uninstall", "import_files", "import_folder", "paste") and not window.library.ready:
+            return
         command = next(command for command in COMMANDS if command.id == name)
         page = window.workspace.current_page
         if command.context == "library" and page != "library":
@@ -105,7 +107,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_page(self) -> None:
         window = self.window
-        {"library": window.refresh_mods, "presets": window.refresh_presets, "cleanup": window.refresh_broken,
+        {"library": window.refresh_mods, "presets": window.refresh_all, "cleanup": window.refresh_all,
          "games": window.games.refresh_lists, "labels": window.labels_controller.activate,
          "settings": window.settings.update_dirty}[window.workspace.current_page]()
 

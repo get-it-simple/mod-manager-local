@@ -4,6 +4,7 @@ import ast
 import json
 import importlib.util
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -250,12 +251,14 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             source.mkdir()
             game.mkdir()
             self.window.cfg.update(mods_source_dir=str(source), game_mods_dir=str(game))
+            self.window.library.snapshot = replace(self.window.library.snapshot, issues=folder_issues(self.window.cfg))
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "Your mod library is empty")
             self.window.filters.add("search", "missing")
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "No matching mods")
             self.window.cfg["mods_source_dir"] = str(root / "absent")
+            self.window.library.snapshot = replace(self.window.library.snapshot, issues=folder_issues(self.window.cfg))
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "Check your mod folders")
             self.assertFalse((root / "absent").exists())
@@ -313,7 +316,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
     def test_typed_filters_wait_for_enter_and_completions_add_another_chip(self):
         box = self.window.search_box
         box.lineEdit().setText("comb")
-        with patch.object(self.window, "refresh_mods") as refresh:
+        with patch.object(self.window, "_render_mods") as refresh:
             box.lineEdit().textEdited.emit("comb")
             self.assertEqual(self.window.filters.queries, ())
             QtTest.QTest.qWait(300)

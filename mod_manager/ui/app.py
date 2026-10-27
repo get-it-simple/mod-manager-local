@@ -76,6 +76,10 @@ from .dialogs.prompts import show_error
 from .localization import system_action_text as _sys_str
 from .theme import colors, tokens
 from .task_runner import TaskRunner
+from .motion import MotionController
+from .image_cache import ImageCache
+from .controllers.library_controller import LibraryController
+from .widgets.completer import replace_filter_options
 from .theme.manager import ThemeManager
 from .widgets import (
     DetailImageLabel,
@@ -141,6 +145,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.previews = PreviewController(self)
         self._init_theme()
         self.context = AppContext(self.cfg, self.theme, self.runner)
+        self.motion = MotionController(self)
+        self.images = ImageCache(self.runner, lambda cfg, name: mod_image_path(cfg, name), self)
+        self.images.ready.connect(self._image_ready)
+        self.library = LibraryController(self)
+        self.library.changed.connect(self._library_state_changed)
+        self._detail_preview = None
         self.errors = ErrorHistoryController(self)
         self.registry = WidgetRegistry()
         self.resize(
@@ -207,6 +217,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
             event.ignore()
             return
         self.keyboard.shutdown()
+        self.library.shutdown()
+        self.images.shutdown()
+        self.motion.shutdown()
         self._close_label_choices()
         self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
@@ -375,7 +388,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._bound = True
 
     def _is_mods_tab_active(self) -> bool:
-        return self.workspace.current_page == "library" and not self.busy
+        return self.workspace.current_page == "library" and not self.busy and self.library.ready
 
     def _editing_text(self) -> bool:
         return isinstance(QtWidgets.QApplication.focusWidget(), (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit, QtWidgets.QAbstractSpinBox))
@@ -569,7 +582,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _add_filter(self, box) -> None:
         if self._commit_filter(box):
             self.mod_page.set(1)
-            self.refresh_mods()
+            self._render_mods()
 
     def _build_mods_toolbar(self):
         return build_mods_toolbar(self)
@@ -654,6 +667,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.runner.set_status(text)
 
     def _on_busy_changed(self, busy: bool) -> None:
+        if busy:
+            self.library.invalidate()
         self._close_label_choices()
         self.registry.set_enabled(ACTIONS, not busy)
         self._sync_workspace()
@@ -661,6 +676,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.filter_summary.clear_button.setEnabled(self.filters.active and not busy)
         self.filter_summary.view.setEnabled(not busy)
         self._update_mod_selection_actions()
+        if not busy and self.library.loading:
+            self.library.refresh()
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self.runner.set_busy(busy, text)
@@ -705,7 +722,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(1)
         save_config(self.cfg)
         self._update_mod_order_direction_button()
-        self.refresh_mods()
+        self._render_mods()
 
     def _activate_mod_order(self, _index: int) -> None:
         self._set_mod_order(self.order_box.currentText())
@@ -738,7 +755,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(1)
         save_config(self.cfg)
         self._update_mod_order_direction_button()
-        self.refresh_mods()
+        self._render_mods()
 
     def _sort_mods_by_section(self, section: int) -> None:
         key = sort_key_for_column(section)
@@ -753,7 +770,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         save_config(self.cfg)
         self._update_mod_order_direction_button()
         self.mod_page.set(1)
-        self.refresh_mods()
+        self._render_mods()
 
     def _update_mod_order_direction_button(self) -> None:
         button = getattr(self, "order_direction_button", None)
@@ -793,7 +810,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return bool(self._selected_rows(self.tiles_view if self._is_tile_view() else self.mods_table))
 
     def _update_mod_selection_actions(self) -> None:
-        enabled = (not self.busy) and self._has_mod_selection()
+        enabled = (not self.busy) and self.library.ready and self._has_mod_selection()
         for widget in self.mod_selection_widgets:
             widget.setEnabled(enabled)
         if not hasattr(self, "mods_actions"):
@@ -805,7 +822,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             count = sum(mod.installed == installed for mod in mods)
             button = self.mods_actions.button(key)
             button.setText(t(key, count=count))
-            button.setEnabled(not self.busy and count > 0)
+            button.setEnabled(not self.busy and self.library.ready and count > 0)
 
     def _on_mod_selection_changed(self) -> None:
         self._update_mod_selection_actions()
@@ -890,8 +907,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._refresh_multi_detail([self.current_mods_shown[i] for i in rows if i < len(self.current_mods_shown)])
         else:
             self._refresh_mod_detail(None)
+        if self.detail_scroll.isVisible():
+            self.motion.fade_in(self.detail_frame)
 
     def _clear_detail(self) -> None:
+        self._detail_preview = None
         self._clear_layout(self.detail_layout)
 
     def _clear_layout(self, layout) -> None:
@@ -906,10 +926,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             value = record.get(key)
             if value:
                 return str(value)
-        try:
-            return datetime.fromtimestamp(mod.src.stat().st_ctime).strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            return "-"
+        created = self.library.snapshot.created.get(mod.name, 0) if self.library.snapshot else 0
+        return datetime.fromtimestamp(created).strftime("%Y-%m-%d %H:%M:%S") if created else "-"
 
     def _dates_fit_on_one_row(self, last_managed: str, created: str, available_width: int | None = None) -> bool:
         return self.detail_scroll.dates_fit_on_one_row(last_managed, created, available_width)
@@ -1008,7 +1026,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return [row + 1 for row in rows if row < len(self.current_mods_shown) and self.current_mods_shown[row].installed == installed]
 
     def _toggle_selected_indexes(self, indexes: list[int]) -> None:
-        if not indexes:
+        if not indexes or self.busy or not self.library.ready:
             return
         selected = mods_by_indexes(self.current_mods_shown, indexes)
         if not self._confirm_overwrite([m for m in selected if not m.installed]):
@@ -1056,15 +1074,43 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._detail_label_row()
 
     def _detail_image(self, mod_name: str) -> None:
-        img_path = mod_image_path(self.cfg, mod_name)
-        if not img_path:
+        size = QtCore.QSize(tokens.DETAIL_DECODE_SIZE, tokens.DETAIL_DECODE_SIZE)
+        pixmap = self.images.request(self.cfg, mod_name, size, priority=True)
+        if pixmap is not None and pixmap.isNull():
             return
-        pixmap = QtGui.QPixmap(str(img_path))
-        if pixmap.isNull():
-            return
-        image = DetailImageLabel(pixmap)
+        image = DetailImageLabel(pixmap) if pixmap is not None else QtWidgets.QLabel(t("loading_preview"), self.detail_frame)
+        self._detail_preview = (mod_name, image, size)
         self.detail_layout.addWidget(image)
         self.detail_scroll.rescale_images()
+
+    def _image_ready(self, mod_name: str) -> None:
+        for row, mod in enumerate(self.current_mods_shown):
+            if mod.name == mod_name:
+                index = self.mods_model.index(row, 0)
+                self.tiles_view.viewport().update(self.tiles_view.visualRect(index))
+                break
+        if self._detail_preview is None or self._detail_preview[0] != mod_name:
+            return
+        name, image, size = self._detail_preview
+        pixmap = self.images.request(self.cfg, name, size, priority=True)
+        if pixmap is not None:
+            if pixmap.isNull():
+                image.hide()
+                return
+            if isinstance(image, DetailImageLabel):
+                if image._source_pixmap.cacheKey() == pixmap.cacheKey():
+                    return
+                image.set_source_pixmap(pixmap)
+            else:
+                replacement = DetailImageLabel(pixmap, self.detail_frame)
+                self.detail_layout.replaceWidget(image, replacement)
+                image.hide()
+                image.deleteLater()
+                image = replacement
+                image.show()
+                self._detail_preview = (name, image, size)
+            self.detail_scroll.rescale_images()
+            self.motion.fade_in(image)
 
     def _detail_image_target_size(self, image: DetailImageLabel | None = None) -> QtCore.QSize:
         return self.detail_scroll.image_target_size(image)
@@ -1105,15 +1151,53 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def refresh_all(self) -> None:
         self.refresh_mods()
+
+    def refresh_mods(self, selected_names: List[str] | None = None) -> None:
+        self.images.reset()
+        self.library.refresh(selected_names)
+
+    def _clear_library_models(self) -> None:
+        self.current_mod_items = []
+        self.current_mod_names = []
+        self.current_mods_shown = []
+        self.current_mod_labels = {}
+        self.current_mod_records = {}
+        self.current_mod_favorites = set()
+        self.mods_model.set_data([], {}, {})
+        self.presets_model.set_data({}, [], {}, set())
+        self.current_broken = []
+        self.broken_model.set_data([])
+        self._show_mod_view()
+
+    def _apply_library_snapshot(self, selected_names=None) -> None:
+        self._render_mods(selected_names)
         self.refresh_presets()
         self.refresh_broken()
 
-    def refresh_mods(self, selected_names: List[str] | None = None) -> None:
+    def _library_state_changed(self) -> None:
+        if not hasattr(self, "mods_actions"):
+            return
+        self.mod_menu.close()
+        self.library_status.update_state(self.library.loading, self.library.error, self.library.snapshot is not None)
+        for key in ("import_files", "import_folder"):
+            self.mods_toolbar.button(key).setEnabled(not self.busy and self.library.ready)
+        self._update_mod_selection_actions()
+        self._refresh_library_state()
+        if self.library.error:
+            self.statusBar().showMessage(self.library.error)
+        elif self.library.loading:
+            self.statusBar().showMessage(t("updating_library" if self.library.snapshot else "loading_library"))
+        elif not self.busy:
+            self.statusBar().showMessage(self.runner.status_text or t("ready"))
+
+    def _render_mods(self, selected_names: List[str] | None = None) -> None:
+        if self.library.snapshot is None:
+            return
         self._close_label_choices()
         page, label_filter, search, order = self._view_args()
         favorite_only = self.filters.mode == "favorite"
         view_args = (self.cfg, page, label_filter, search, order)
-        kwargs = {"state_filter": self.filters.state} if self.filters.state != "all" else {}
+        kwargs = {"state_filter": self.filters.state, "snapshot": self.library.snapshot}
         items, shown, page, pages, labels = mods_view(*view_args, favorite_only, **kwargs)
         if isinstance(labels, ResolvedLabels):
             self.filters.reconcile_labels(labels.state.definitions)
@@ -1124,8 +1208,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.current_mod_names = sorted(labels.memberships if isinstance(labels, ResolvedLabels) else [mod.name for mod in items], key=str.casefold)
         self.current_mods_shown = shown
         self.current_mod_labels = labels
-        self.current_mod_records = mods_records()
-        self.current_mod_favorites = load_favorites(self.cfg)
+        self.current_mod_records = self.library.snapshot.records
+        favorite_changes = self.current_mod_favorites.symmetric_difference(self.library.snapshot.favorites)
+        self.current_mod_favorites = set(self.library.snapshot.favorites)
         self.mod_page.set(page)
         list_blocker = QtCore.QSignalBlocker(self.mods_table.selectionModel())
         try:
@@ -1136,14 +1221,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             label_values = sorted(labels.state.definitions if isinstance(labels, ResolvedLabels) else {v for v in labels.values() if v}, key=str.casefold)
             for box, values in ((self.search_box, self.current_mod_names), (self.label_filter_box, label_values)):
                 text = box.currentText()
-                existing = [box.itemText(index) for index in range(box.count())]
-                if existing == values and box.currentText() == text:
+                if box.model().stringList() == values:
                     continue
                 with QtCore.QSignalBlocker(box), QtCore.QSignalBlocker(box.lineEdit()):
-                    box.clear()
-                    box.addItems(values)
-                    for index, value in enumerate(values):
-                        box.setItemData(index, value, QtCore.Qt.ToolTipRole)
+                    replace_filter_options(box, values)
                     box.setCurrentText(text)
             self.filter_modes.set_value(self.filters.mode)
             self._select_mod_names(selected_names)
@@ -1154,26 +1235,36 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.selection_status.setText(t("selection_count", count=len(self._selected_rows(self._current_mod_view()))))
         self._refresh_library_state()
 
+        view = self._current_mod_view()
+        for row, mod in enumerate(shown):
+            if mod.name in favorite_changes:
+                view._item_feedback.pulse_favorite(self.mods_model.index(row, 0))
+
     def _change_filter_mode(self, mode: str) -> None:
         if self.busy:
             return
         self.filters.mode = mode
         self.mod_page.set(1)
-        self.refresh_mods()
+        self._render_mods()
 
     def _clear_one_filter(self, kind: str, value: str) -> None:
         if self.busy:
             return
         self.filters.remove(kind, value)
         self.mod_page.set(1)
-        self.refresh_mods()
+        self._render_mods()
 
     def _refresh_library_state(self) -> None:
         self.filter_summary.update_filters(len(self.current_mod_items), len(self.current_mod_names),
                                            self.filters.chips, self.filters.active, self.busy)
         if not self.current_mods_shown:
-            issues = folder_issues(self.cfg)
-            if issues:
+            issues = self.library.snapshot.issues if self.library.snapshot else ()
+            if self.library.loading:
+                self.library_empty.configure(t("loading_library"), "")
+            elif self.library.error:
+                self.library_empty.configure(t("error"), self.library.error,
+                                             ((t("retry_refresh"), "reset", self.refresh_mods),))
+            elif issues:
                 self.library_empty.configure(t("invalid_folders"), "\n".join(issues),
                                              ((t("edit_profile"), "edit", lambda: self.games.edit(self.cfg.get("active_game_profile_id", ""))),))
             elif self.filters.active:
@@ -1183,19 +1274,21 @@ class ModManagerGui(QtWidgets.QMainWindow):
                                              ((t("import_files"), "import", self._import_mod_files), (t("import_folder"), "folder", self._import_mod_folder)))
 
     def refresh_presets(self) -> None:
+        if self.library.snapshot is None:
+            return
         selected_names = [
             self.presets_model.keys[row]
             for row in self._selected_rows(self.presets_table)
             if row < len(self.presets_model.keys)
         ]
-        presets, keys, page_keys, page, pages = presets_view(self.cfg, self.preset_page.get(), self._preset_order_mode())
-        installed = {mod.name for mod in list_installed_mods(self.cfg)}
+        presets, keys, page_keys, page, pages = presets_view(self.cfg, self.preset_page.get(), self._preset_order_mode(), snapshot=self.library.snapshot)
+        installed = set(self.library.snapshot.installed)
         self.preset_page.set(page)
         selection = self.presets_table.selectionModel()
         blocker = QtCore.QSignalBlocker(selection) if selection else None
         self.presets_table.setUpdatesEnabled(False)
         try:
-            self.presets_model.set_data(presets, page_keys, presets_records(), installed)
+            self.presets_model.set_data(presets, page_keys, self.library.snapshot.preset_records, installed)
             self.preset_page_control.set_page(page, pages)
             if selection:
                 selection.clearSelection()
@@ -1212,7 +1305,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.presets_stack.setCurrentWidget(self.presets_table if page_keys else self.presets_empty)
 
     def refresh_broken(self) -> None:
-        self.current_broken = list_broken_links(self.cfg)
+        self.current_broken = list(self.library.snapshot.broken) if self.library.snapshot else []
         self.broken_model.set_data(self.current_broken)
         self.broken_stack.setCurrentWidget(self.broken_table if self.current_broken else self.broken_empty)
 
@@ -1220,10 +1313,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         changes = [self._commit_filter(box) for box in self.filter_boxes]
         if any(changes):
             self.mod_page.set(1)
-            self.refresh_mods()
+            self._render_mods()
 
     def _set_favorite_names(self, names: list[str], favorite: bool) -> None:
-        if not names:
+        if not names or self.busy or not self.library.ready:
             return
         message = (
             add_favorites_to_mods(self.cfg, names)
@@ -1248,15 +1341,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.search_box.setCurrentText("")
         self.label_filter_box.setCurrentText("")
         self.mod_page.set(1)
-        self.refresh_mods()
+        self._render_mods()
 
     def _change_mod_page(self, delta: int) -> None:
         self.mod_page.set(max(1, int(self.mod_page.get()) + delta))
-        self.refresh_mods()
+        self._render_mods()
 
     def _set_mod_page(self, page: int) -> None:
         self.mod_page.set(page)
-        self.refresh_mods()
+        self._render_mods()
 
     def _change_preset_page(self, delta: int) -> None:
         self.preset_page.set(max(1, int(self.preset_page.get()) + delta))
@@ -1267,6 +1360,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.refresh_presets()
 
     def _install_page(self) -> None:
+        if self.busy or not self.library.ready:
+            return
         page, label_filter, search, order = self._view_args()
         if not self._confirm_overwrite([m for m in self.current_mods_shown if not m.installed]):
             return
@@ -1284,6 +1379,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=state_filter), done)
 
     def _uninstall_page(self) -> None:
+        if self.busy or not self.library.ready:
+            return
         page, label_filter, search, order = self._view_args()
 
         def done(result):
@@ -1330,6 +1427,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._change_label_selected(label)
 
     def _change_label_selected(self, label: str, *, remove: bool = False) -> None:
+        if self.busy or not self.library.ready:
+            return
         self.labels_controller.flush()
         if isinstance(self.current_mod_labels, ResolvedLabels):
             state = self.current_mod_labels.state
@@ -1362,6 +1461,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._run_action(t('saving_preset'), lambda: save_preset_from_installed(self.cfg, name), done)
 
     def _toggle_selected_presets(self, names: list[str] | None = None) -> None:
+        if self.busy or not self.library.ready:
+            return
         names = self._selected_preset_names() if names is None else names
         if not names:
             return
@@ -1437,6 +1538,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def apply_saved_settings(self, new_cfg: dict, theme_changed: bool) -> None:
         self.cfg = self.context.replace_config(new_cfg)
+        self.motion.set_enabled(bool(new_cfg.get("gui_animations_enabled", True)))
         self.tile_delegate.cfg = new_cfg
         self._apply_state_column_width()
         self.mod_view_mode.set(normalize_view_mode(self.cfg.get("mod_view_mode")))
@@ -1458,6 +1560,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._remove_broken(list(self.current_broken))
 
     def _remove_broken(self, mods: list[ModItem]) -> None:
+        if self.busy or not self.library.ready:
+            return
         def done(result):
             count = sum(item.success for item in result.items)
             self._set_status(t('removed_broken_links_value0_errors_value1', value0=f'{count}', value1=f'{result.errors}'))
@@ -1597,7 +1701,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return name if ok else ""
 
     def _set_mod_image(self) -> None:
-        self.previews.choose()
+        if not self.busy and self.library.ready:
+            self.previews.choose()
 
 
 def _app_icon() -> QtGui.QIcon | None:

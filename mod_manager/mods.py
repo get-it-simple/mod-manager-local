@@ -356,16 +356,19 @@ def mods_view(
     search_query: str | Sequence[str],
     order_mode: str,
     favorite_only: bool = False,
-    *, state_filter: str = "all",
+    *, state_filter: str = "all", snapshot=None,
 ) -> Tuple[List[ModItem], List[ModItem], int, int, Dict]:
-    items_all = discover_mods(cfg)
-    ensure_mod_records([m.name for m in items_all])
+    if snapshot is None:
+        items_all = discover_mods(cfg)
+        ensure_mod_records([m.name for m in items_all])
+        manual_labels = load_labels()
+        records = load_mod_records()
+        state = state_from_records(records, load_label_definitions(), manual_labels)
+        labels = ResolvedLabels(state, [item.name for item in items_all])
+        labels.catalog_count = len(items_all)
+    else:
+        items_all, records, labels = list(snapshot.items), snapshot.records, snapshot.labels
     items = filter_items_by_query(items_all, search_query)
-    manual_labels = load_labels()
-    records = load_mod_records()
-    state = state_from_records(records, load_label_definitions(), manual_labels)
-    labels = ResolvedLabels(state, [item.name for item in items_all])
-    labels.catalog_count = len(items_all)
     if state_filter not in ("all", "installed", "not_installed"):
         raise ValueError(state_filter)
     if state_filter != "all":
@@ -374,7 +377,7 @@ def mods_view(
         selected_labels = {name.casefold() for name in filter_values(label_filter)}
         items = [m for m in items if any(name.casefold() in selected_labels for name in label_names(labels, m.name))]
     if favorite_only:
-        favorites = load_favorites(cfg)
+        favorites = load_favorites(cfg) if snapshot is None else snapshot.favorites
         items = [m for m in items if m.name in favorites]
     reverse = order_mode.startswith("-")
     mode = order_mode[1:] if reverse else order_mode
@@ -390,7 +393,8 @@ def mods_view(
     elif mode == "last_managed":
         items = sorted(items, key=lambda m: (records.get(m.name, {}).get("last_managed") or "", m.name.lower()), reverse=reverse)
     elif mode in {"cd", "created_date", t('text_79158168a621')}:
-        ctimes = {m.name: (m.src.stat().st_ctime if m.src.exists() else 0) for m in items}
+        ctimes = ({m.name: (m.src.stat().st_ctime if m.src.exists() else 0) for m in items}
+                  if snapshot is None else snapshot.created)
         items = sorted(items, key=lambda m: (ctimes[m.name], m.name.lower()), reverse=reverse)
     else:
         items = sort_items(items, order_mode)

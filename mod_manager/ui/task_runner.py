@@ -66,6 +66,10 @@ class TaskRunner(QtCore.QObject):
         if not self._pool.has_work():
             self._timer.stop()
 
+    def background(self, worker: Callable, callback: Callable, file_key: str = GLOBAL_KEY) -> None:
+        self._pool.submit(file_key, worker, callback=callback)
+        self._timer.start(tokens.WORKER_POLL_MS)
+
     def _drain_progress(self) -> None:
         while True:
             try:

@@ -484,5 +484,12 @@
   "inclusion_mode": "Include matching names. Click to enter exclusions instead.",
   "exclusion_mode": "Exclude matching names. Click to enter inclusions instead.",
   "inclusion_rule": "Include: {value}. Click the mode icon to change this rule to an exclusion.",
-  "exclusion_rule": "Exclude: {value}. Click the mode icon to change this rule to an inclusion."
+  "exclusion_rule": "Exclude: {value}. Click the mode icon to change this rule to an inclusion.",
+  "interface_animations": "Interface animations",
+  "interface_animations_help": "Use short, smooth transitions for controls, panels and dialogs. Save to apply without restarting.",
+  "loading_library": "Loading library…",
+  "loading_preview": "Loading preview…",
+  "updating_library": "Updating library…",
+  "library_refresh_failed": "Could not update the library: {error}",
+  "retry_refresh": "Retry loading the library"
 }

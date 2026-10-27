@@ -6,9 +6,10 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from .. import icons
 from ..theme import tokens
+from ..widgets.item_feedback import AnimatedItemDelegate
 
 
-class FavoriteDelegate(QtWidgets.QStyledItemDelegate):
+class FavoriteDelegate(AnimatedItemDelegate):
     favoriteToggled = QtCore.Signal(str)
 
     def __init__(self, parent=None):
@@ -34,11 +35,16 @@ class FavoriteDelegate(QtWidgets.QStyledItemDelegate):
             return
         favorite = mod.name in self.favorites
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
-        if not favorite and not hovered:
+        feedback = getattr(option.widget, "_item_feedback", None)
+        progress = feedback.value(index, "favorite", 1.0) if feedback else 1.0
+        if not favorite and not hovered and progress >= 1.0:
             return
         color = option.palette.color(QtGui.QPalette.Highlight if favorite else QtGui.QPalette.Text)
         icon = icons.glyph_icon("favorite_filled" if favorite else "favorite", color)
+        painter.save()
+        painter.setOpacity(progress if favorite else 1.0 - progress if not hovered else 1.0)
         icon.paint(painter, self.star_rect(option.rect), QtCore.Qt.AlignCenter)
+        painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:
         if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease} and event.button() == QtCore.Qt.LeftButton:

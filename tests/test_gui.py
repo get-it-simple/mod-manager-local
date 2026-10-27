@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from tests.qt_support import dispose, qt_app
+from tests.gui_background import inline_background, synthetic_snapshot
 
 from mod_manager.models import ModItem, OperationItem, OperationResult
 from tests.window_fixture import FAKE_DEST as _FAKE_DEST
@@ -43,6 +44,9 @@ class GuiTests(unittest.TestCase):
         self.presets = {"core": ["combat.pak"], "ui": ["ui.pak"]}
         self.broken = [self.mod_item("missing.pak", installed=True)]
         self.patchers = [
+            patch("mod_manager.ui.task_runner.TaskRunner.background", new=inline_background),
+            patch("mod_manager.ui.controllers.library_controller.load_library_snapshot", side_effect=synthetic_snapshot),
+            patch("mod_manager.ui.app.load_favorites", return_value=set()),
             # storage.save_config is imported lazily inside workers, so it must be patched at
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),
@@ -163,7 +167,7 @@ class GuiTests(unittest.TestCase):
 
     def test_page_inputs_apply_on_enter_for_mods_and_presets(self):
         self.window.page_control.set_page(1, 5)
-        with patch.object(self.window, "refresh_mods") as refresh_mods:
+        with patch.object(self.window, "_render_mods") as refresh_mods:
             self.window.page_control.input.setText("3")
             self.window.page_control.input.returnPressed.emit()
         self.assertEqual(self.window.mod_page.get(), 3)
@@ -186,7 +190,8 @@ class GuiTests(unittest.TestCase):
             self.window.filter_modes.buttons["favorite"].click()
 
         self.assertEqual(self.window.filters.mode, "favorite")
-        mods_view.assert_called_once_with(self.window.cfg, 1, ("combat",), ("pak",), "default", True)
+        mods_view.assert_called_once_with(self.window.cfg, 1, ("combat",), ("pak",), "default", True,
+                                          state_filter="all", snapshot=self.window.library.snapshot)
 
     def test_selected_favorite_action_adds_or_removes_the_whole_selection(self):
         self.select_mod_rows(0, 1)
@@ -269,7 +274,7 @@ class GuiTests(unittest.TestCase):
         self.window.search_box.setCurrentText("co")
         item_count = self.window.search_box.count()
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods:
+        with patch.object(self.window, "_render_mods") as refresh_mods:
             self.window.search_box.lineEdit().returnPressed.emit()
 
         self.assertEqual(self.window.filters.queries, ("co",))
@@ -285,7 +290,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window._view_args(), (3, ("combat",), ("ui",), "default"))
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods:
+        with patch.object(self.window, "_render_mods") as refresh_mods:
             self.window._mods_clear()
 
         self.assertEqual(self.window.mod_page.get(), 1)
@@ -294,7 +299,7 @@ class GuiTests(unittest.TestCase):
         refresh_mods.assert_called_once_with()
 
     def test_order_control_restores_default_and_created_date_modes(self):
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config") as save_config:
+        with patch.object(self.window, "_render_mods") as refresh_mods, patch("mod_manager.ui.app.save_config") as save_config:
             self.window._set_mod_order("Created date")
 
         self.assertEqual(self.window.order_var.get(), "Created date")
@@ -307,7 +312,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window._view_args()[3], "default")
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
+        with patch.object(self.window, "_render_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(2)
 
         self.assertEqual(self.window.mod_sort_key, "label")
@@ -320,7 +325,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window._view_args()[3], "-label")
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
+        with patch.object(self.window, "_render_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(2)
 
         self.assertEqual(self.window._view_args()[3], "label")
@@ -329,7 +334,7 @@ class GuiTests(unittest.TestCase):
         self.window.order_box.setCurrentText("Default")
         self.window.mod_sort_key = "default"
         self.window.mod_sort_reverse = True
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
+        with patch.object(self.window, "_render_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._activate_mod_order(self.window.order_box.currentIndex())
 
         self.assertEqual(self.window._view_args()[3], "default")
@@ -609,6 +614,7 @@ class GuiTests(unittest.TestCase):
         self.qt_app.processEvents()
 
         with patch("mod_manager.ui.app.mod_image_path", return_value=image_path):
+            self.window.images.invalidate(self.mods[0].name)
             self.window._refresh_mod_detail(self.mods[0])
 
         image_labels = [
@@ -983,21 +989,33 @@ class GuiTests(unittest.TestCase):
         self.window._run_action = self.run_action_inline
         self.window.current_mod_items = list(self.mods)
         self.window.current_mods_shown = list(self.mods)
-        self.window.tile_delegate._pixmaps[("combat.pak", 140)] = QtGui.QPixmap(1, 1)
-        image_path = _FAKE_DROP / "new-preview.png"
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "new-preview.png"
+            stored = Path(directory) / "stored.png"
+            image = QtGui.QImage(10, 10, QtGui.QImage.Format_RGB32)
+            image.fill(QtGui.QColor("red"))
+            self.assertTrue(image.save(str(image_path)))
+            image.fill(QtGui.QColor("blue"))
+            self.assertTrue(image.save(str(stored)))
 
-        with patch("mod_manager.ui.app.is_image_file", return_value=True), patch(
-            "mod_manager.ui.app._run_import_batch", return_value=(["combat.pak.png"], [])
-        ) as import_batch, patch("mod_manager.ui.app.prompts.choose_item") as picker, patch.object(
-            self.window, "refresh_mods"
-        ) as refresh_mods:
-            self.window._handle_mods_drop([image_path], target_mod_name="combat.pak")
+            def import_preview(*_args):
+                self.assertTrue(QtGui.QImage(str(image_path)).save(str(stored)))
+                return ["combat.pak.png"], []
+
+            with patch("mod_manager.ui.app.mod_image_path", return_value=stored), patch(
+                "mod_manager.ui.app.is_image_file", return_value=True
+            ), patch("mod_manager.ui.app._run_import_batch", side_effect=import_preview) as import_batch, patch(
+                "mod_manager.ui.app.prompts.choose_item"
+            ) as picker, patch.object(self.window, "refresh_mods") as refresh_mods:
+                size = QtCore.QSize(10, 10)
+                self.assertEqual(self.window.tile_delegate._pixmap_for(self.mods[0], size).toImage().pixelColor(0, 0), QtGui.QColor("blue"))
+                self.window._handle_mods_drop([image_path], target_mod_name="combat.pak")
+                self.assertEqual(self.window.tile_delegate._pixmap_for(self.mods[0], size).toImage().pixelColor(0, 0), QtGui.QColor("red"))
 
         picker.assert_not_called()
         import_batch.assert_called_once()
         tasks = import_batch.call_args.args[1]
         self.assertEqual(tasks, [("image", image_path, "combat.pak", False)])
-        self.assertNotIn(("combat.pak", 140), self.window.tile_delegate._pixmaps)
         refresh_mods.assert_called_once_with(["combat.pak"])
 
     def test_image_named_after_mod_opens_picker_with_that_mod_preselected(self):
