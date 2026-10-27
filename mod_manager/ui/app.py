@@ -14,6 +14,7 @@ from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
 from ..i18n import t
 from ..library_state import folder_issues
+from ..library_filters import LibraryFilters
 from .controllers.keyboard_controller import KeyboardController
 from .widgets.buttons import text_button
 from .widgets.operation_progress import OperationProgress
@@ -151,10 +152,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         self.mod_page = _Var(1)
         self.preset_page = _Var(1)
-        self.search_var = _Var("")
-        self.label_filter_var = _Var("")
-        self.favorite_filter_var = _Var(False)
-        self.state_filter = "all"
+        self.filters = LibraryFilters()
         self.order_var = _Var(self._mod_order_label_from_config())
         self.mod_view_mode = _Var(normalize_view_mode(self.cfg.get("mod_view_mode")))
 
@@ -209,7 +207,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
             event.ignore()
             return
         self.keyboard.shutdown()
-        self.filter_apply_timer.stop()
         self._close_label_choices()
         self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
@@ -275,6 +272,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.presets_model.set_palette(palette)
             self.tile_delegate.set_palette(palette)
             self.workspace.refresh_icons()
+            self._update_sidebar_labels()
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tiles_view.viewport().update()
             for button in self.findChildren(QtWidgets.QAbstractButton):
@@ -341,7 +339,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if event.type() == QtCore.QEvent.KeyPress and event.key() == QtCore.Qt.Key_Tab:
             line_edit = self._completion_line_edit_for_object(obj)
             if line_edit is not None and self._complete_line_edit(line_edit):
-                self._mods_search()
+                self._add_filter(next(box for box in self.filter_boxes if box.lineEdit() is line_edit))
                 return True
         if self._is_mod_drop_target(obj):
             if event.type() in (QtCore.QEvent.DragEnter, QtCore.QEvent.DragMove) and event.mimeData().hasUrls():
@@ -401,6 +399,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.workspace = Workspace(self)
         self.setCentralWidget(self.workspace)
         self.workspace.pageRequested.connect(self._navigate)
+        self.workspace.labelRequested.connect(self._sidebar_label_requested)
         self.workspace.profileRequested.connect(self._select_game_profile)
         self.game_button = self.workspace.game_button
         self.games_page = WorkspacePage(t('game_profiles'), t('choose_a_game_or_add_a_profile_to_get_started'))
@@ -465,6 +464,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _sync_workspace(self) -> None:
         profile = active_game_profile(self.cfg)
         self.workspace.set_profiles(self.cfg.get("game_profiles", []), profile.get("id", "") if profile else "", self.busy)
+        self._update_sidebar_labels()
         count = t("showing_mods", count=len(self.current_mod_items), total=len(self.current_mod_names))
         self.mods_tab.set_subtitle(t("profile_summary", game=profile.get("name", t('game')),
                                    mode=t("copies_mode" if is_copy_install(self.cfg) else "links_mode"), count=count) if profile else "", elide=True)
@@ -536,24 +536,40 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _mod_order_label_from_config(self) -> str:
         return order_label_from_config(self.cfg)
 
-    def _filter_box(self, placeholder: str) -> QtWidgets.QComboBox:
-        if not hasattr(self, "filter_apply_timer"):
-            self.filter_apply_timer = QtCore.QTimer(self)
-            self.filter_apply_timer.setSingleShot(True)
-            self.filter_apply_timer.setInterval(tokens.FILTER_APPLY_DELAY_MS)
-            self.filter_apply_timer.timeout.connect(self._mods_search)
+    def _filter_box(self, placeholder: str, kind: str) -> QtWidgets.QComboBox:
         box = select_box(editable=True)
+        box.setProperty("filterKind", kind)
         box.lineEdit().setPlaceholderText(placeholder)
-        box.lineEdit().returnPressed.connect(self._mods_search)
-        box.activated.connect(lambda _index: self._mods_search())
-        box.lineEdit().textEdited.connect(lambda _text: self.filter_apply_timer.start())
+        box.setToolTip(t("search_chips_help" if kind == "search" else "label_chips_help"))
+        box.lineEdit().returnPressed.connect(lambda: self._add_filter(box))
+        box.activated.connect(lambda _index: self._add_filter(box))
         configure_filter_box(box)
         box.completer().activated[str].connect(lambda text: self._complete_filter(box, text))
         return box
 
     def _complete_filter(self, box, text: str) -> None:
         box.setCurrentText(text)
-        self._mods_search()
+        self._add_filter(box)
+
+    def _commit_filter(self, box) -> bool:
+        if self.busy:
+            return False
+        value = box.currentText().strip()
+        kind = box.property("filterKind")
+        if kind == "label":
+            names = [box.itemText(index) for index in range(box.count())]
+            value = next((name.strip() for name in names if name.strip().casefold() == value.casefold()), "")
+            if not value:
+                return False
+        changed = self.filters.add(kind, value)
+        with QtCore.QSignalBlocker(box), QtCore.QSignalBlocker(box.lineEdit()):
+            box.setCurrentText("")
+        return changed
+
+    def _add_filter(self, box) -> None:
+        if self._commit_filter(box):
+            self.mod_page.set(1)
+            self.refresh_mods()
 
     def _build_mods_toolbar(self):
         return build_mods_toolbar(self)
@@ -642,6 +658,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.registry.set_enabled(ACTIONS, not busy)
         self._sync_workspace()
         self.workspace.stack.setEnabled(not busy)
+        self.filter_summary.clear_button.setEnabled(self.filters.active and not busy)
+        self.filter_summary.view.setEnabled(not busy)
         self._update_mod_selection_actions()
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
@@ -654,7 +672,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.runner.poll()
 
     def _view_args(self):
-        return self.mod_page.get(), self.label_filter_var.get(), self.search_var.get(), self._mod_order_mode()
+        return self.mod_page.get(), self.filters.labels, self.filters.queries, self._mod_order_mode()
 
     def _mod_order_mode(self) -> str:
         return order_mode(self.mod_sort_key, self.mod_sort_reverse)
@@ -956,13 +974,26 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return button
 
     def _toggle_label_filter(self, label: str) -> None:
-        if not label or label == "-":
+        if not label or label == "-" or self.busy:
             return
-        current = self.label_filter_var.get()
-        self.label_filter_var.set("" if current.lower() == label.lower() else label)
-        self.label_filter_box.setCurrentText(self.label_filter_var.get())
+        self.filters.toggle_label(label)
         self.mod_page.set(1)
         self.refresh_mods()
+
+    def _sidebar_label_requested(self, label: str) -> None:
+        if not self.busy:
+            self._navigate("library")
+            self._toggle_label_filter(label)
+
+    def _update_sidebar_labels(self) -> None:
+        labels = self.current_mod_labels
+        catalog = labels.catalog() if isinstance(labels, ResolvedLabels) else [
+            (name, "manual", sum(value == name for value in labels.values()))
+            for name in set(labels.values()) if name]
+        active = {name.casefold() for name in self.filters.labels}
+        entries = [(name, mode, count, name.casefold() in active)
+                   for name, mode, count in sorted(catalog, key=lambda entry: (-entry[2], entry[0].casefold()))]
+        self.workspace.labels_list.update_labels(entries, self.theme.system_accent)
 
     def _confirm_overwrite(self, mods: list) -> bool:
         """Ask before a copy install replaces files that are already in the game mods folder."""
@@ -1080,10 +1111,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def refresh_mods(self, selected_names: List[str] | None = None) -> None:
         self._close_label_choices()
         page, label_filter, search, order = self._view_args()
-        favorite_only = bool(self.favorite_filter_var.get())
+        favorite_only = self.filters.mode == "favorite"
         view_args = (self.cfg, page, label_filter, search, order)
-        kwargs = {"state_filter": self.state_filter} if self.state_filter != "all" else {}
+        kwargs = {"state_filter": self.filters.state} if self.filters.state != "all" else {}
         items, shown, page, pages, labels = mods_view(*view_args, favorite_only, **kwargs)
+        if isinstance(labels, ResolvedLabels):
+            self.filters.reconcile_labels(labels.state.definitions)
+            if self.filters.labels != label_filter:
+                self.mod_page.set(1)
+                items, shown, page, pages, labels = mods_view(self.cfg, *self._view_args(), favorite_only, **kwargs)
         self.current_mod_items = items
         self.current_mod_names = sorted(labels.memberships if isinstance(labels, ResolvedLabels) else [mod.name for mod in items], key=str.casefold)
         self.current_mods_shown = shown
@@ -1098,7 +1134,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.tile_delegate.set_favorites(self.current_mod_favorites)
             self.page_control.set_page(page, pages)
             label_values = sorted(labels.state.definitions if isinstance(labels, ResolvedLabels) else {v for v in labels.values() if v}, key=str.casefold)
-            for box, values, text in ((self.search_box, self.current_mod_names, search), (self.label_filter_box, label_values, label_filter)):
+            for box, values in ((self.search_box, self.current_mod_names), (self.label_filter_box, label_values)):
+                text = box.currentText()
                 existing = [box.itemText(index) for index in range(box.count())]
                 if existing == values and box.currentText() == text:
                     continue
@@ -1108,7 +1145,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
                     for index, value in enumerate(values):
                         box.setItemData(index, value, QtCore.Qt.ToolTipRole)
                     box.setCurrentText(text)
-            self.favorite_filter_button.setChecked(favorite_only)
+            self.filter_modes.set_value(self.filters.mode)
             self._select_mod_names(selected_names)
         finally:
             del list_blocker
@@ -1117,34 +1154,29 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.selection_status.setText(t("selection_count", count=len(self._selected_rows(self._current_mod_view()))))
         self._refresh_library_state()
 
-    def _change_state_filter(self, *_args) -> None:
-        self.state_filter = self.state_filter_box.currentData()
+    def _change_filter_mode(self, mode: str) -> None:
+        if self.busy:
+            return
+        self.filters.mode = mode
         self.mod_page.set(1)
         self.refresh_mods()
 
-    def _clear_one_filter(self, name: str) -> None:
-        if name == "state":
-            self.state_filter_box.setCurrentIndex(0)
+    def _clear_one_filter(self, kind: str, value: str) -> None:
+        if self.busy:
             return
-        {"search": self.search_var, "label": self.label_filter_var, "favorite": self.favorite_filter_var}[name].set(False if name == "favorite" else "")
+        self.filters.remove(kind, value)
         self.mod_page.set(1)
         self.refresh_mods()
 
     def _refresh_library_state(self) -> None:
-        filters = []
-        for name, value, key in (("search", self.search_var.get(), "search_chip"), ("label", self.label_filter_var.get(), "label_chip"),
-                                 ("favorite", self.favorite_filter_var.get(), "favorites_chip")):
-            if value:
-                filters.append((t(key, value=value), lambda name=name: self._clear_one_filter(name)))
-        if self.state_filter != "all":
-            filters.append((self.state_filter_box.currentText(), lambda: self._clear_one_filter("state")))
-        self.filter_summary.update_filters(len(self.current_mod_items), len(self.current_mod_names), filters)
+        self.filter_summary.update_filters(len(self.current_mod_items), len(self.current_mod_names),
+                                           self.filters.chips, self.filters.active, self.busy)
         if not self.current_mods_shown:
             issues = folder_issues(self.cfg)
             if issues:
                 self.library_empty.configure(t("invalid_folders"), "\n".join(issues),
                                              ((t("edit_profile"), "edit", lambda: self.games.edit(self.cfg.get("active_game_profile_id", ""))),))
-            elif filters:
+            elif self.filters.active:
                 self.library_empty.configure(t("no_matches"), t("no_matches_help"), ((t("clear_filters"), "clear", self._mods_clear),))
             else:
                 self.library_empty.configure(t("empty_library"), t("empty_library_help"),
@@ -1185,16 +1217,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.broken_stack.setCurrentWidget(self.broken_table if self.current_broken else self.broken_empty)
 
     def _mods_search(self) -> None:
-        self.filter_apply_timer.stop()
-        self.search_var.set(self.search_box.currentText().strip())
-        self.label_filter_var.set(self.label_filter_box.currentText().strip())
-        self.mod_page.set(1)
-        self.refresh_mods()
-
-    def _toggle_favorite_filter(self) -> None:
-        self.favorite_filter_var.set(self.favorite_filter_button.isChecked())
-        self.mod_page.set(1)
-        self.refresh_mods()
+        changes = [self._commit_filter(box) for box in self.filter_boxes]
+        if any(changes):
+            self.mod_page.set(1)
+            self.refresh_mods()
 
     def _set_favorite_names(self, names: list[str], favorite: bool) -> None:
         if not names:
@@ -1216,15 +1242,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._set_favorite_names(names, favorite)
 
     def _mods_clear(self) -> None:
-        self.state_filter = "all"
-        with QtCore.QSignalBlocker(self.state_filter_box):
-            self.state_filter_box.setCurrentIndex(0)
-        self.search_var.set("")
-        self.label_filter_var.set("")
+        if self.busy:
+            return
+        self.filters.clear()
         self.search_box.setCurrentText("")
         self.label_filter_box.setCurrentText("")
-        self.favorite_filter_var.set(False)
-        self.favorite_filter_button.setChecked(False)
         self.mod_page.set(1)
         self.refresh_mods()
 
@@ -1256,9 +1278,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods()
             self.refresh_presets()
 
-        favorite_only = bool(self.favorite_filter_var.get())
+        favorite_only = self.filters.mode == "favorite"
         view_args = (self.cfg, page, label_filter, search, order, favorite_only, True)
-        self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=self.state_filter), done)
+        state_filter = self.filters.state
+        self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=state_filter), done)
 
     def _uninstall_page(self) -> None:
         page, label_filter, search, order = self._view_args()
@@ -1271,10 +1294,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_presets()
 
         view_args = (self.cfg, page, label_filter, search, order)
-        favorite_only = bool(self.favorite_filter_var.get())
+        favorite_only = self.filters.mode == "favorite"
+        state_filter = self.filters.state
         self.errors.run(
             t('uninstalling_mods'),
-            lambda: change_mods_page(*view_args, favorite_only, action="uninstall", state_filter=self.state_filter),
+            lambda: change_mods_page(*view_args, favorite_only, action="uninstall", state_filter=state_filter),
             done,
         )
 

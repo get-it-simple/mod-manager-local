@@ -148,7 +148,8 @@ class LabelsController(QtCore.QObject):
         editor.details.setEnabled(True)
         editor.name_edit.setText(self.name_inputs[self.profile_id].get(self.selected, self.selected))
         editor.mode_box.setCurrentIndex(1 if definition.mode == AUTOMATIC else 0)
-        draft = self.fragments[self.profile_id].setdefault(self.selected, FragmentDraft(list(definition.terms)))
+        draft = self.fragments[self.profile_id].setdefault(
+            self.selected, FragmentDraft(list(definition.terms), exclusions=list(definition.exclusions)))
         editor.terms_edit.bind(draft)
         editor.manual_model.set_choices(
             self.window.current_mod_names,
@@ -186,6 +187,7 @@ class LabelsController(QtCore.QObject):
         definition = self.state.definitions[self.selected]
         definition.mode = AUTOMATIC if self.editor.mode_box.currentIndex() else MANUAL
         definition.terms = self.editor.terms_edit.draft.preview_terms()
+        definition.exclusions = self.editor.terms_edit.draft.preview_exclusions()
         self.editor.set_automatic(definition.mode == AUTOMATIC)
         self._preview()
 
@@ -251,6 +253,7 @@ class LabelsController(QtCore.QObject):
         for name, draft in self.fragments[self.profile_id].items():
             try:
                 candidate.definitions[name].terms = draft.committed_terms()
+                candidate.definitions[name].exclusions = draft.committed_exclusions()
             except ValueError as error:
                 self.editor.status.setText(str(error))
                 return
@@ -274,17 +277,17 @@ class LabelsController(QtCore.QObject):
         for name, draft in tuple(self.fragments[self.profile_id].items()):
             if name not in merged.definitions:
                 del self.fragments[self.profile_id][name]
-            elif merged.definitions[name].terms != candidate.definitions[name].terms:
+            elif (merged.definitions[name].terms != candidate.definitions[name].terms
+                  or merged.definitions[name].exclusions != candidate.definitions[name].exclusions):
                 draft.terms = list(merged.definitions[name].terms)
+                draft.exclusions = list(merged.definitions[name].exclusions)
                 draft.pending = draft.edited = ""
                 draft.editing = None
                 if name == self.selected:
                     self.editor.terms_edit.bind(draft)
         self.drafts[self.profile_id] = merged
         self.saved[self.profile_id] = deepcopy(merged)
-        active = self.window.label_filter_var.get()
-        renamed = next((value for original, value in self.renames[self.profile_id].items() if original.casefold() == active.casefold()), active)
-        self.window.label_filter_var.set(renamed if renamed in self.state.definitions else "")
+        self.window.filters.reconcile_labels(self.state.definitions, self.renames[self.profile_id])
         self.renames[self.profile_id] = {name: name for name in self.state.definitions}
         self.editor.retry.hide()
         self.editor.reload.hide()

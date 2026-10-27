@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Sequence
+from .library_filters import filter_values
+
 from .i18n import t
 
 import shutil
@@ -349,8 +352,8 @@ def deactivate_mod_result(mod: ModItem) -> OperationItem:
 def mods_view(
     cfg: Dict,
     page: int,
-    label_filter: str,
-    search_query: str,
+    label_filter: str | Sequence[str],
+    search_query: str | Sequence[str],
     order_mode: str,
     favorite_only: bool = False,
     *, state_filter: str = "all",
@@ -368,8 +371,8 @@ def mods_view(
     if state_filter != "all":
         items = [mod for mod in items if mod.installed == (state_filter == "installed")]
     if label_filter:
-        lf = label_filter.casefold()
-        items = [m for m in items if any(name.casefold() == lf for name in label_names(labels, m.name))]
+        selected_labels = {name.casefold() for name in filter_values(label_filter)}
+        items = [m for m in items if any(name.casefold() in selected_labels for name in label_names(labels, m.name))]
     if favorite_only:
         favorites = load_favorites(cfg)
         items = [m for m in items if m.name in favorites]
@@ -448,7 +451,7 @@ def change_mods(
 
 
 def change_mods_page(
-    cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
+    cfg: Dict, page: int, label_filter: str | Sequence[str], search_query: str | Sequence[str], order_mode: str,
     favorite_only: bool = False, overwrite: bool = False, *, action: str = "install", state_filter: str = "all",
 ) -> Tuple[int, OperationResult]:
     _items, shown, target_page, _pages, _labels = mods_view(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 from ...i18n import t
 from ..widgets.filter_summary import FilterSummary
+from ..widgets.segmented_control import SegmentedControl
 from ..widgets.style_utils import apply_margins
 from ... import settings_schema
 
@@ -35,8 +36,8 @@ def build_mods_toolbar(window) -> IconToolbar:
     set_variant(import_button, "primary")
     import_section.add_action("import_folder", "folder", t('import_a_mod_folder'), window._import_mod_folder)
 
-    window.search_box = window._filter_box(t('search'))
-    window.label_filter_box = window._filter_box(t('label'))
+    window.search_box = window._filter_box(t('search'), "search")
+    window.label_filter_box = window._filter_box(t('label'), "label")
     for box, width in ((window.search_box, tokens.SEARCH_MIN_WIDTH), (window.label_filter_box, tokens.LABEL_FILTER_MIN_WIDTH)):
         box.setMinimumWidth(width)
         box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -46,13 +47,14 @@ def build_mods_toolbar(window) -> IconToolbar:
     filter_section.setProperty("toolbarStretch", 1)
     filter_section.add_widget(window.search_box, 2)
     filter_section.add_widget(window.label_filter_box, 1)
-    window.state_filter_box = select_box()
-    for label, value in (("all_mods", "all"), ("installed_mods", "installed"), ("not_installed_mods", "not_installed")):
-        window.state_filter_box.addItem(t(label), value)
-    window.state_filter_box.currentIndexChanged.connect(window._change_state_filter)
-    filter_section.add_widget(window.state_filter_box)
-    window.favorite_filter_button = toolbar.button("favorite_filter")
-    window.favorite_filter_button.setCheckable(True)
+    window.filter_modes = SegmentedControl((
+        ("all", t("all"), "", t("all_mods")),
+        ("installed", t("installed"), "", t("installed_mods")),
+        ("not_installed", t("not_installed"), "", t("not_installed_mods")),
+        ("favorite", "", "favorite", t("show_favorite_mods_only")),
+    ))
+    window.filter_modes.valueChanged.connect(window._change_filter_mode)
+    toolbar.sections["show"].add_widget(window.filter_modes)
 
     window.order_box = select_box()
     window.order_box.setMinimumWidth(tokens.ORDER_MIN_WIDTH)
@@ -75,9 +77,6 @@ def build_mods_toolbar(window) -> IconToolbar:
     window._set_icon_button_checked(window.view_tiles_button, window._is_tile_view())
 
     toolbar.connect({
-        "search": window._mods_search,
-        "clear": window._mods_clear,
-        "favorite_filter": window._toggle_favorite_filter,
         "view_list": lambda: window._set_view_mode("list"),
         "view_tiles": lambda: window._set_view_mode("tiles"),
     })
@@ -140,6 +139,8 @@ def build_mods(window) -> None:
     window.mods_toolbar = window._build_mods_toolbar()
     layout.addWidget(window.mods_toolbar)
     window.filter_summary = FilterSummary(window.mods_tab)
+    window.filter_summary.removeRequested.connect(window._clear_one_filter)
+    window.filter_summary.clearRequested.connect(window._mods_clear)
     layout.addWidget(window.filter_summary)
 
     window.mods_model = ModTableModel(window.theme.palette.accent, window)

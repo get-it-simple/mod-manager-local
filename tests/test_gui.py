@@ -177,16 +177,16 @@ class GuiTests(unittest.TestCase):
         refresh_presets.assert_called_once_with()
 
     def test_favorite_filter_combines_with_search_and_label(self):
-        self.window.search_var.set("pak")
-        self.window.label_filter_var.set("combat")
+        self.window.filters.add("search", "pak")
+        self.window.filters.add("label", "combat")
         with patch(
             "mod_manager.ui.app.mods_view",
             return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"}),
         ) as mods_view:
-            self.window.favorite_filter_button.click()
+            self.window.filter_modes.buttons["favorite"].click()
 
-        self.assertTrue(self.window.favorite_filter_var.get())
-        mods_view.assert_called_once_with(self.window.cfg, 1, "combat", "pak", "default", True)
+        self.assertEqual(self.window.filters.mode, "favorite")
+        mods_view.assert_called_once_with(self.window.cfg, 1, ("combat",), ("pak",), "default", True)
 
     def test_selected_favorite_action_adds_or_removes_the_whole_selection(self):
         self.select_mod_rows(0, 1)
@@ -229,7 +229,8 @@ class GuiTests(unittest.TestCase):
         event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Tab, QtCore.Qt.NoModifier)
 
         self.assertTrue(self.window.eventFilter(line_edit, event))
-        self.assertEqual(line_edit.text(), "combat.pak")
+        self.assertEqual(line_edit.text(), "")
+        self.assertEqual(self.window.filters.queries, ("combat.pak",))
 
     def test_tab_without_text_or_match_leaves_input_unchanged(self):
         line_edit = self.window.search_box.lineEdit()
@@ -271,25 +272,25 @@ class GuiTests(unittest.TestCase):
         with patch.object(self.window, "refresh_mods") as refresh_mods:
             self.window.search_box.lineEdit().returnPressed.emit()
 
-        self.assertEqual(self.window.search_var.get(), "co")
-        self.assertEqual(self.window.search_box.currentText(), "co")
+        self.assertEqual(self.window.filters.queries, ("co",))
+        self.assertEqual(self.window.search_box.currentText(), "")
         self.assertEqual(self.window.search_box.count(), item_count)
         self.assertEqual(self.window.mod_page.get(), 1)
         refresh_mods.assert_called_once_with()
 
     def test_view_args_and_clear_search_update_filter_state(self):
         self.window.mod_page.set(3)
-        self.window.search_var.set("ui")
-        self.window.label_filter_var.set("combat")
+        self.window.filters.add("search", "ui")
+        self.window.filters.add("label", "combat")
 
-        self.assertEqual(self.window._view_args(), (3, "combat", "ui", "default"))
+        self.assertEqual(self.window._view_args(), (3, ("combat",), ("ui",), "default"))
 
         with patch.object(self.window, "refresh_mods") as refresh_mods:
             self.window._mods_clear()
 
         self.assertEqual(self.window.mod_page.get(), 1)
-        self.assertEqual(self.window.search_var.get(), "")
-        self.assertEqual(self.window.label_filter_var.get(), "")
+        self.assertEqual(self.window.filters.queries, ())
+        self.assertEqual(self.window.filters.labels, ())
         refresh_mods.assert_called_once_with()
 
     def test_order_control_restores_default_and_created_date_modes(self):
@@ -381,14 +382,14 @@ class GuiTests(unittest.TestCase):
         with patch.object(self.window, "refresh_mods") as refresh_mods:
             self.window._toggle_label_filter("combat")
 
-        self.assertEqual(self.window.label_filter_var.get(), "combat")
+        self.assertEqual(self.window.filters.labels, ("combat",))
         self.assertEqual(self.window.mod_page.get(), 1)
         refresh_mods.assert_called_once_with()
 
         with patch.object(self.window, "refresh_mods") as refresh_mods:
             self.window._toggle_label_filter("combat")
 
-        self.assertEqual(self.window.label_filter_var.get(), "")
+        self.assertEqual(self.window.filters.labels, ())
         refresh_mods.assert_called_once_with()
 
     def test_tile_tooltips_show_full_text_only_when_badges_are_truncated(self):
@@ -435,7 +436,7 @@ class GuiTests(unittest.TestCase):
             handled = self.window.eventFilter(self.window.tiles_view.viewport(), event)
 
         self.assertTrue(handled)
-        self.assertEqual(self.window.label_filter_var.get(), "combat")
+        self.assertEqual(self.window.filters.labels, ("combat",))
         refresh_mods.assert_called_once_with()
 
         with patch.object(self.window.tiles_view, "indexAt", return_value=index), patch.object(
@@ -444,7 +445,7 @@ class GuiTests(unittest.TestCase):
             handled = self.window.eventFilter(self.window.tiles_view.viewport(), event)
 
         self.assertTrue(handled)
-        self.assertEqual(self.window.label_filter_var.get(), "")
+        self.assertEqual(self.window.filters.labels, ())
         refresh_mods.assert_called_once_with()
 
     def test_double_click_toggles_mods_in_list_and_tile_views(self):
@@ -534,8 +535,8 @@ class GuiTests(unittest.TestCase):
     def test_install_uninstall_and_toggle_selected_mods_dispatch_gui_options(self):
         self.window._run_action = self.run_action_inline
         self.window.mod_page.set(2)
-        self.window.search_var.set("pak")
-        self.window.label_filter_var.set("combat")
+        self.window.filters.add("search", "pak")
+        self.window.filters.add("label", "combat")
 
         operation = OperationResult((
             OperationItem("a.pak", "installed", True, "OK"),
@@ -547,7 +548,7 @@ class GuiTests(unittest.TestCase):
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
 
-        apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default", False, True, state_filter="all")
+        apply_mods.assert_called_once_with(self.window.cfg, 2, ("combat",), ("pak",), "default", False, True, state_filter="all")
         self.assertEqual(self.window.context.status_text, "Installed 2/3 on page 2. Errors: 1.")
         refresh_mods.assert_called_once_with()
         refresh_presets.assert_called_once_with()

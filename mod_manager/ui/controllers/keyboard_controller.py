@@ -45,7 +45,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_hints(self) -> None:
         window = self.window
-        targets = {"search": window.mods_toolbar.button("search"), "install": window.mods_actions.button("install_selected"),
+        targets = {"search": window.search_box, "install": window.mods_actions.button("install_selected"),
                    "uninstall": window.mods_actions.button("uninstall_selected"), "details": window.details_button,
                    "import_files": window.mods_toolbar.button("import_files"), "import_folder": window.mods_toolbar.button("import_folder"),
                    "help": window.keyboard_help_button, "save": window.settings.toolbar.button("save_settings")}
@@ -55,7 +55,7 @@ class KeyboardController(QtCore.QObject):
                 button.setProperty("commandTooltip", original)
                 shortcut = self.text(command)
                 button.setToolTip(f"{original} ({shortcut})" if shortcut else original)
-                if not button.text():
+                if isinstance(button, QtWidgets.QAbstractButton) and not button.text():
                     button.setAccessibleName(button.toolTip())
 
     def eventFilter(self, obj, event) -> bool:

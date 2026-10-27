@@ -475,5 +475,14 @@
   "retry_label_save": "Retry saving label changes",
   "reload_saved_labels": "Reload saved labels",
   "discard_label_draft": "Discard pending label edits and load the saved labels?",
-  "label_save_conflict": "Saved labels changed while you were editing the same values. Your edits are retained. Reload saved labels to resolve the conflict."
+  "label_save_conflict": "Saved labels changed while you were editing the same values. Your edits are retained. Reload saved labels to resolve the conflict.",
+  "show": "Show",
+  "all": "All",
+  "active_filters": "Active search and label filters. Use Delete or Backspace to remove the focused filter.",
+  "search_chips_help": "Enter a name fragment and press Enter, or choose a suggestion, to add a search filter. Matches any search chip; phrases keep their spaces.",
+  "label_chips_help": "Choose a label or enter its full name and press Enter to add a filter. Matches any selected label.",
+  "inclusion_mode": "Include matching names. Click to enter exclusions instead.",
+  "exclusion_mode": "Exclude matching names. Click to enter inclusions instead.",
+  "inclusion_rule": "Include: {value}. Click the mode icon to change this rule to an exclusion.",
+  "exclusion_rule": "Exclude: {value}. Click the mode icon to change this rule to an inclusion."
 }

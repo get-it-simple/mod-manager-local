@@ -233,13 +233,14 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             validate_bindings(bindings)
 
     def test_filter_chips_remove_only_the_chosen_filter(self):
-        self.window.search_var.set("combat")
-        self.window.favorite_filter_var.set(True)
+        self.window.filters.add("search", "combat")
+        self.window.filters.mode = "favorite"
         self.window._refresh_library_state()
-        buttons = self.window.filter_summary.findChildren(QtWidgets.QPushButton)
-        next(button for button in buttons if button.text() == "Search: combat").click()
-        self.assertEqual(self.window.search_var.get(), "")
-        self.assertTrue(self.window.favorite_filter_var.get())
+        view = self.window.filter_summary.view
+        view.setCurrentIndex(view.model().index(0, 0))
+        QtTest.QTest.keyClick(view, QtCore.Qt.Key_Delete)
+        self.assertEqual(self.window.filters.queries, ())
+        self.assertEqual(self.window.filters.mode, "favorite")
 
     def test_empty_states_offer_contextual_actions(self):
         self.window.current_mods_shown = []
@@ -251,7 +252,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             self.window.cfg.update(mods_source_dir=str(source), game_mods_dir=str(game))
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "Your mod library is empty")
-            self.window.search_var.set("missing")
+            self.window.filters.add("search", "missing")
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "No matching mods")
             self.window.cfg["mods_source_dir"] = str(root / "absent")
@@ -309,18 +310,21 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.assertEqual(self.window.keyboard.text("refresh"), "")
         self.assertEqual(self.window.cfg["keyboard_shortcuts"]["refresh"]["combo"], "")
 
-    def test_typed_filters_apply_after_pause_and_completions_apply_immediately(self):
+    def test_typed_filters_wait_for_enter_and_completions_add_another_chip(self):
         box = self.window.search_box
         box.lineEdit().setText("comb")
         with patch.object(self.window, "refresh_mods") as refresh:
             box.lineEdit().textEdited.emit("comb")
-            self.assertEqual(self.window.search_var.get(), "")
+            self.assertEqual(self.window.filters.queries, ())
             QtTest.QTest.qWait(300)
-            self.assertEqual(self.window.search_var.get(), "comb")
+            self.assertEqual(self.window.filters.queries, ())
+            refresh.assert_not_called()
+            box.lineEdit().returnPressed.emit()
+            self.assertEqual(self.window.filters.queries, ("comb",))
             refresh.assert_called_once()
             refresh.reset_mock()
             box.completer().activated[str].emit("combat.pak")
-            self.assertEqual(self.window.search_var.get(), "combat.pak")
+            self.assertEqual(self.window.filters.queries, ("comb", "combat.pak"))
             refresh.assert_called_once()
 
     def test_save_applies_shortcut_and_updates_tooltips(self):
@@ -330,7 +334,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.window.settings.save()
         self.assertEqual(self.window.cfg["keyboard_shortcuts"]["search"]["combo"], "ctrl+g")
         self.assertEqual(self.window.keyboard.text("search"), "Ctrl+G")
-        self.assertIn("Ctrl+G", self.window.mods_toolbar.button("search").toolTip())
+        self.assertIn("Ctrl+G", self.window.search_box.toolTip())
 
     def test_cancelled_preset_preview_has_no_side_effects(self):
         self.window.presets_table.selectRow(1)

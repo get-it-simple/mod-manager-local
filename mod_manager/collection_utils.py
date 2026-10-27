@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from .models import ModItem
+from .library_filters import filter_values
+from typing import Sequence
 from . import settings_schema
 from app_paths import DEFAULT_CONFIG
 
@@ -20,9 +22,9 @@ def page_slice(items: list, page: int, cfg: dict) -> list:
     return items[(page - 1) * size:page * size]
 
 
-def filter_items_by_query(items: list[ModItem], query: str) -> list[ModItem]:
-    query = (query or "").lower()
-    return [item for item in items if query in item.name.lower()] if query else items
+def filter_items_by_query(items: list[ModItem], query: str | Sequence[str]) -> list[ModItem]:
+    queries = tuple(value.casefold() for value in filter_values(query or ()))
+    return [item for item in items if any(value in item.name.casefold() for value in queries)] if queries else items
 
 
 def sort_items(items: list[ModItem], order_mode: str) -> list[ModItem]:
