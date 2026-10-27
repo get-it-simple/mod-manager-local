@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from functools import partial
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from PySide6 import QtCore, QtGui
+from PySide6 import QtCore, QtGui, QtTest
 
 from mod_manager.dragdrop import TransferredPaths
 from mod_manager.mods import mod_image_path
+from mod_manager.ui.image_clipboard import read_clipboard_image
 from tests.window_fixture import WindowTestCase
 
 
@@ -46,6 +48,130 @@ class PreviewAssignmentTests(WindowTestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.assertTrue(image.save(str(path)))
         return path
+
+    def use_qt_clipboard(self, color="red"):
+        image = QtGui.QImage(48, 24, QtGui.QImage.Format_ARGB32)
+        image.fill(QtGui.QColor(color))
+        clipboard = Mock()
+        clipboard.image.return_value = image
+        mime = QtCore.QMimeData()
+        mime.setImageData(image)
+        clipboard.mimeData.return_value = mime
+        self.start_patch("mod_manager.ui.image_clipboard.QtWidgets.QApplication.clipboard", return_value=clipboard)
+        self.start_patch("mod_manager.ui.image_clipboard.read_native_clipboard_image", return_value=None)
+        self.start_patch("mod_manager.ui.image_clipboard.tempfile.NamedTemporaryFile", side_effect=partial(tempfile.NamedTemporaryFile, dir=self.root))
+        for module in ("mod_manager.ui.app", "mod_manager.ui.controllers.preview_controller"):
+            self.start_patch(f"{module}.read_clipboard_image", side_effect=read_clipboard_image)
+        return clipboard
+
+    def test_qt_clipboard_bitmap_sets_preview_in_list_and_tiles(self):
+        self.use_qt_clipboard()
+        for mode in ("list", "tiles"):
+            with self.subTest(mode=mode):
+                self.window._set_view_mode(mode)
+                self.select_mod_rows(1)
+                self.window._handle_paste()
+                self.assert_preview("ui.pak")
+                self.assertEqual(self.window._selected_mod_names(), ["ui.pak"])
+                self.assertEqual(list(self.root.glob("mods_clip_*.png")), [])
+        self.confirm.assert_not_called()
+        self.picker.assert_not_called()
+
+    def test_qt_clipboard_offer_confirms_batch_and_cleans_up(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0, 1)
+        self.window._set_mod_image()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.confirm.call_args.args[2], 2)
+        self.assertTrue(self.confirm.call_args.kwargs["clipboard"])
+        self.assertFalse(self.confirm.call_args.args[1].exists())
+        self.chooser.assert_not_called()
+        self.assert_preview("combat.pak")
+        self.assert_preview("ui.pak")
+        self.assertEqual(set(self.window._selected_mod_names()), {"combat.pak", "ui.pak"})
+
+    def test_qt_bitmap_preserves_transparency_in_stored_preview(self):
+        color = QtGui.QColor(32, 64, 128, 96)
+        self.use_qt_clipboard(color)
+        self.select_mod_rows(1)
+        self.window._handle_paste()
+        self.assert_preview("ui.pak", color)
+        self.assertEqual(list(self.root.glob("mods_clip_*.png")), [])
+
+    def test_cancel_qt_clipboard_offer_preserves_existing_preview(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0)
+        self.make_image("mods/images/combat.pak.png", "blue")
+        self.confirm.return_value = "cancel"
+        self.window._set_mod_image()
+        self.assert_preview("combat.pak", "blue")
+        self.assertFalse(self.confirm.call_args.args[1].exists())
+        self.chooser.assert_not_called()
+
+    def test_qt_bitmap_paste_from_search_confirms_only_once(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0, 1)
+        self.window.show()
+        search = self.window.search_box.lineEdit()
+        search.setFocus()
+        self.qt_app.processEvents()
+        with patch("mod_manager.ui.app.clipboard_has_files", return_value=False):
+            QtTest.QTest.keyClick(search, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+        self.assert_preview("combat.pak")
+        self.assert_preview("ui.pak")
+        self.confirm.assert_called_once()
+        self.assertEqual(search.text(), "")
+
+    def test_image_paste_respects_disabled_and_remapped_shortcuts(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0)
+        search = self.window.search_box.lineEdit()
+        for binding in ({"combo": "ctrl+v", "enabled": False}, {"combo": "ctrl+g", "enabled": True}):
+            with self.subTest(binding=binding):
+                self.window.keyboard.bindings["paste"] = binding
+                for kind in (QtCore.QEvent.ShortcutOverride, QtCore.QEvent.KeyPress):
+                    event = QtGui.QKeyEvent(kind, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+                    with patch("mod_manager.ui.app.clipboard_has_files", return_value=False):
+                        self.assertFalse(self.window.eventFilter(search, event))
+                self.assert_no_previews()
+
+    def test_qt_bitmap_is_not_imported_while_busy_or_on_settings_page(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0)
+        self.window._set_busy(True)
+        self.window._handle_paste()
+        self.window._set_busy(False)
+        self.window._open_settings_page()
+        self.window._handle_paste()
+        self.assert_no_previews()
+        self.assertEqual(list(self.root.glob("mods_clip_*.png")), [])
+
+    def test_recording_ctrl_v_does_not_import_qt_bitmap(self):
+        self.use_qt_clipboard()
+        self.window._open_settings_page()
+        self.window.show()
+        shortcuts = self.window.settings.fields["keyboard_shortcuts"]
+        shortcuts.toggle.setChecked(True)
+        editor = shortcuts.rows["refresh"][0]
+        editor.capture.setFocus()
+        self.qt_app.processEvents()
+        QtTest.QTest.keyClick(editor.capture, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+        self.assertEqual(editor.combo(), "ctrl+v")
+        self.assert_no_previews()
+
+    def test_qt_bitmap_write_errors_are_visible_and_preserve_preview(self):
+        self.use_qt_clipboard()
+        self.select_mod_rows(0)
+        self.make_image("mods/images/combat.pak.png", "blue")
+        for action in (self.window._handle_paste, self.window._set_mod_image):
+            with self.subTest(action=action.__name__), patch.object(QtGui.QImage, "save", return_value=False), patch(
+                "mod_manager.ui.dialogs.prompts.show_error"
+            ) as error:
+                action()
+                error.assert_called_once()
+                self.assertIn("Cannot prepare", error.call_args.args[2])
+            self.assert_preview("combat.pak", "blue")
+            self.assertEqual(list(self.root.glob("mods_clip_*.png")), [])
 
     def assert_preview(self, name, color="red"):
         path = mod_image_path(self.window.cfg, name)

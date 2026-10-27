@@ -9,10 +9,11 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...archive_backend import ARCHIVE_EXTENSIONS
 from ...folder_actions import ensure_paths
-from ...dragdrop import read_clipboard_image, read_clipboard_paths
+from ...dragdrop import read_clipboard_paths
 from ...imports import create_plans, execute_plans, ignored_file, prepare_archive, resolve_plans
 from ...mods import is_image_file
 from ...log import logger
+from ..image_clipboard import read_clipboard_image
 from ...i18n import t
 from ...import_preview import destination_rows
 from ..dialogs import prompts
@@ -171,11 +172,11 @@ class ArchiveImportController(QtCore.QObject):
         if paths:
             self.handle_paths(paths)
             return
-        image = QtWidgets.QApplication.clipboard().image()
-        if not image.isNull():
-            self._assign_qimage(image, self.dialog.browser.selected_row)
+        try:
+            path = read_clipboard_image()
+        except OSError as exc:
+            self.dialog.status.setText(t('cannot_assign_preview_value0', value0=str(exc)))
             return
-        path = read_clipboard_image()
         if path:
             try:
                 self.assign_image(path, self.dialog.browser.selected_row)

@@ -9,9 +9,10 @@ from typing import Callable
 
 from PySide6 import QtGui
 
-from ...dragdrop import read_clipboard_image, read_clipboard_paths
+from ...dragdrop import read_clipboard_paths
 from ...log import logger
 from ...mods import IMAGE_EXTENSIONS, import_mod_images, is_image_file
+from ..image_clipboard import read_clipboard_image
 from ..dialogs import prompts
 
 
@@ -68,7 +69,11 @@ class PreviewController:
         names = self.window._selected_mod_names()
         if not names or self.window.busy:
             return
-        source = self._clipboard_source()
+        try:
+            source = self._clipboard_source()
+        except OSError as exc:
+            prompts.show_error(self.window, t('text_1e63fa10de76'), t('cannot_assign_preview_value0', value0=str(exc)))
+            return
         if source:
             choice = "cancel"
             try:

@@ -139,6 +139,8 @@ python build-gui-exe.py --pyz
 <summary>Mod preview images</summary>
 
 Select a mod and press **Ctrl+V** to set a copied image file, browser image, or screenshot as its preview.
+Windows bitmap images copied directly by other applications are supported without additional image libraries.
+With the default paste shortcut, this also works while the library search or another library text field has focus. Text-only clipboard contents paste normally.
 With multiple mods selected, a confirmation shows the image and the number of previews that will be replaced.
 Paste one image at a time. Without a selection, pasting an image lets you choose a mod.
 

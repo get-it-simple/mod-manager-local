@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import zipfile
+from functools import partial
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -67,7 +68,9 @@ class ArchiveImportGuiTests(WindowTestCase):
     def test_text_only_paste_in_search_is_not_intercepted(self):
         search = self.window.search_box.lineEdit()
         key = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
-        with patch("mod_manager.ui.app.clipboard_has_files", return_value=False), patch.object(self.window, "_handle_paste") as paste:
+        with patch("mod_manager.ui.app.clipboard_has_files", return_value=False), patch(
+            "mod_manager.ui.app.clipboard_has_image", return_value=False
+        ), patch.object(self.window, "_handle_paste") as paste:
             self.assertFalse(self.window.eventFilter(search, key))
         paste.assert_not_called()
 
@@ -177,6 +180,48 @@ class ArchiveImportGuiTests(WindowTestCase):
         blue = QtGui.QImage(str(mod_image_path(self.window.cfg, "b.pak")))
         self.assertEqual(red.pixelColor(0, 0), QtGui.QColor("red"))
         self.assertEqual(blue.pixelColor(0, 0), QtGui.QColor("blue"))
+
+    def test_qt_bitmap_paste_from_archive_field_assigns_preview_and_releases_temp(self):
+        self.window._import_paths([self.archive()])
+        controller = self.window.archive_import
+        browser = controller.dialog.browser
+        browser.together.setChecked(False)
+        browser.table.setCurrentIndex(browser.model.index(0, 1))
+        image = QtGui.QImage(8, 8, QtGui.QImage.Format_ARGB32)
+        color = QtGui.QColor(40, 80, 120, 128)
+        image.fill(color)
+        mime = QtCore.QMimeData()
+        mime.setImageData(image)
+        clipboard = Mock()
+        clipboard.image.return_value = image
+        clipboard.mimeData.return_value = mime
+        with patch("mod_manager.ui.image_clipboard.QtWidgets.QApplication.clipboard", return_value=clipboard), patch(
+            "mod_manager.ui.controllers.archive_import_controller.read_clipboard_paths", return_value=[]
+        ), patch("mod_manager.ui.app.clipboard_has_files", return_value=False), patch(
+            "mod_manager.ui.image_clipboard.tempfile.NamedTemporaryFile", side_effect=partial(tempfile.NamedTemporaryFile, dir=self.root)
+        ):
+            for kind in (QtCore.QEvent.ShortcutOverride, QtCore.QEvent.KeyPress):
+                event = QtGui.QKeyEvent(kind, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+                self.assertTrue(self.window.eventFilter(browser.table, event))
+                if kind == QtCore.QEvent.ShortcutOverride:
+                    self.assertEqual(browser.archive.images, {})
+        path = browser.archive.images[0]
+        self.assertEqual(QtGui.QImage(str(path)), image)
+        self.assertEqual(list(self.root.glob("mods_clip_*.png")), [])
+        controller.dialog.actions.button("import").click()
+        preview = QtGui.QImage(str(mod_image_path(self.window.cfg, "a.pak")))
+        self.assertEqual(preview.pixelColor(0, 0), color)
+
+    def test_archive_clipboard_write_failure_reports_error_without_assigning(self):
+        self.window._import_paths([self.archive()])
+        controller = self.window.archive_import
+        controller.dialog.browser.together.setChecked(False)
+        with patch("mod_manager.ui.controllers.archive_import_controller.read_clipboard_paths", return_value=[]), patch(
+            "mod_manager.ui.controllers.archive_import_controller.read_clipboard_image", side_effect=OSError("unwritable")
+        ):
+            controller.paste()
+        self.assertEqual(controller.dialog.browser.archive.images, {})
+        self.assertIn("unwritable", controller.dialog.status.text())
 
     def test_drop_image_on_mod_row_uses_drop_position(self):
         self.window._import_paths([self.archive()])

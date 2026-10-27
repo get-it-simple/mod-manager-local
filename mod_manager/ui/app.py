@@ -9,7 +9,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from app_paths import APP_NAME, APP_VERSION
 
 from ..folder_actions import ensure_paths, select_in_explorer
-from ..dragdrop import clipboard_has_files, read_clipboard_image, read_clipboard_paths
+from ..dragdrop import clipboard_has_files, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
 from ..i18n import t
@@ -56,6 +56,7 @@ from ..storage import (
     save_config,
 )
 from . import icons
+from .image_clipboard import clipboard_has_image, read_clipboard_image
 from .pages.library import build_mods, build_mods_toolbar, build_mods_actions
 from .pages.collections import build_presets, build_broken
 from .widgets.workspace import Workspace, WorkspacePage, PROFILE_PAGES
@@ -331,7 +332,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             library_active = isinstance(obj, QtWidgets.QWidget) and obj.window() is self and self._is_mods_tab_active()
             default_paste = not hasattr(self, "keyboard") or self.keyboard.bindings["paste"] == {"combo": "ctrl+v", "enabled": True}
             capturing = isinstance(QtWidgets.QApplication.focusWidget(), QtWidgets.QLineEdit) and QtWidgets.QApplication.focusWidget().isReadOnly()
-            if (archive_active or (library_active and default_paste and not capturing)) and not self.busy and clipboard_has_files():
+            paste_allowed = archive_active or (library_active and default_paste and not capturing)
+            if paste_allowed and not self.busy and (clipboard_has_files() or clipboard_has_image()):
                 event.accept()
                 if event.type() == QtCore.QEvent.KeyPress:
                     self._handle_paste()
@@ -1476,7 +1478,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if paths:
             self._handle_clipboard_paths(paths)
             return
-        image = read_clipboard_image()
+        try:
+            image = read_clipboard_image()
+        except OSError as exc:
+            prompts.show_error(self, t('text_1e63fa10de76'), t('cannot_assign_preview_value0', value0=str(exc)))
+            return
         if image:
             self.previews.paste_image(image)
 
