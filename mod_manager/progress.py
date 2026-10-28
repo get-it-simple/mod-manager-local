@@ -3,6 +3,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+
+from .models import OperationItem
 
 
 @dataclass(frozen=True)
@@ -11,15 +14,47 @@ class Progress:
     name: str = ""
     completed: int = 0
     total: int = 0
+    mod_names: tuple[str, ...] = ()
+    mod_state: str = ""
+    mod_results: tuple[OperationItem, ...] = ()
+    preset_name: str = ""
+    preset_state: str = ""
+    preset_success: bool | None = None
 
 
-_reporter = ContextVar("operation_reporter", default=None)
+_reporter: ContextVar[Callable[[Progress], None] | None] = ContextVar("operation_reporter", default=None)
 
 
-def report(stage: str, name: str = "", completed: int = 0, total: int = 0) -> None:
+def report(stage: str, name: str = "", completed: int = 0, total: int = 0, *,
+           mod_names: tuple[str, ...] = (), mod_state: str = "",
+           mod_results: tuple[OperationItem, ...] = (), preset_name: str = "",
+           preset_state: str = "", preset_success: bool | None = None) -> None:
     callback = _reporter.get()
     if callback is not None:
-        callback(Progress(stage, name, completed, total))
+        callback(Progress(stage, name, completed, total, mod_names, mod_state, mod_results,
+                          preset_name, preset_state, preset_success))
+
+
+@contextmanager
+def mod_activity(stage: str, names: tuple[str, ...]) -> Iterator[list[OperationItem]]:
+    report(stage, mod_names=names, mod_state="started")
+    results: list[OperationItem] = []
+    try:
+        yield results
+    finally:
+        report(stage, mod_names=names, mod_state="finished", mod_results=tuple(results))
+
+
+@contextmanager
+def preset_activity(name: str) -> Iterator[list[OperationItem]]:
+    report("toggling_presets", preset_name=name, preset_state="started")
+    results: list[OperationItem] = []
+    success = False
+    try:
+        yield results
+        success = all(item.success for item in results)
+    finally:
+        report("toggling_presets", preset_name=name, preset_state="finished", preset_success=success)
 
 
 @contextmanager

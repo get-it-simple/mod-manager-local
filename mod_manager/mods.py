@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Sequence
+from .library_filters import filter_values
+
 from .i18n import t
 
 import shutil
@@ -27,7 +30,7 @@ from .storage import (
     update_favorites,
 )
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
-from .progress import report
+from .progress import mod_activity, report
 
 IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
@@ -284,6 +287,15 @@ def apply_mods_batch(mods: List[ModItem], overwrite: bool = False) -> List[Tuple
 def apply_mods_batch_result(
     mods: List[ModItem], overwrite: bool = False, *, pending_only: bool = True,
 ) -> OperationResult:
+    with mod_activity("progress_installing", tuple(mod.name for mod in mods)) as results:
+        result = _apply_mods_batch_result(mods, overwrite, pending_only=pending_only)
+        results.extend(result.items)
+        return result
+
+
+def _apply_mods_batch_result(
+    mods: List[ModItem], overwrite: bool, *, pending_only: bool,
+) -> OperationResult:
     if not mods:
         return OperationResult()
     work = [(index, f) for index, m in enumerate(mods)
@@ -333,6 +345,13 @@ def deactivate_mod(mod: ModItem) -> Tuple[bool, str]:
 
 
 def deactivate_mod_result(mod: ModItem) -> OperationItem:
+    with mod_activity("progress_uninstalling", (mod.name,)) as results:
+        result = _deactivate_mod_result(mod)
+        results.append(result)
+        return result
+
+
+def _deactivate_mod_result(mod: ModItem) -> OperationItem:
     remove = remove_path if mod.copy_install else unlink_path
     results = []
     failures = []
@@ -349,29 +368,32 @@ def deactivate_mod_result(mod: ModItem) -> OperationItem:
 def mods_view(
     cfg: Dict,
     page: int,
-    label_filter: str,
-    search_query: str,
+    label_filter: str | Sequence[str],
+    search_query: str | Sequence[str],
     order_mode: str,
     favorite_only: bool = False,
-    *, state_filter: str = "all",
+    *, state_filter: str = "all", snapshot=None,
 ) -> Tuple[List[ModItem], List[ModItem], int, int, Dict]:
-    items_all = discover_mods(cfg)
-    ensure_mod_records([m.name for m in items_all])
+    if snapshot is None:
+        items_all = discover_mods(cfg)
+        ensure_mod_records([m.name for m in items_all])
+        manual_labels = load_labels()
+        records = load_mod_records()
+        state = state_from_records(records, load_label_definitions(), manual_labels)
+        labels = ResolvedLabels(state, [item.name for item in items_all])
+        labels.catalog_count = len(items_all)
+    else:
+        items_all, records, labels = list(snapshot.items), snapshot.records, snapshot.labels
     items = filter_items_by_query(items_all, search_query)
-    manual_labels = load_labels()
-    records = load_mod_records()
-    state = state_from_records(records, load_label_definitions(), manual_labels)
-    labels = ResolvedLabels(state, [item.name for item in items_all])
-    labels.catalog_count = len(items_all)
     if state_filter not in ("all", "installed", "not_installed"):
         raise ValueError(state_filter)
     if state_filter != "all":
         items = [mod for mod in items if mod.installed == (state_filter == "installed")]
     if label_filter:
-        lf = label_filter.casefold()
-        items = [m for m in items if any(name.casefold() == lf for name in label_names(labels, m.name))]
+        selected_labels = {name.casefold() for name in filter_values(label_filter)}
+        items = [m for m in items if any(name.casefold() in selected_labels for name in label_names(labels, m.name))]
     if favorite_only:
-        favorites = load_favorites(cfg)
+        favorites = load_favorites(cfg) if snapshot is None else snapshot.favorites
         items = [m for m in items if m.name in favorites]
     reverse = order_mode.startswith("-")
     mode = order_mode[1:] if reverse else order_mode
@@ -387,7 +409,8 @@ def mods_view(
     elif mode == "last_managed":
         items = sorted(items, key=lambda m: (records.get(m.name, {}).get("last_managed") or "", m.name.lower()), reverse=reverse)
     elif mode in {"cd", "created_date", t('text_79158168a621')}:
-        ctimes = {m.name: (m.src.stat().st_ctime if m.src.exists() else 0) for m in items}
+        ctimes = ({m.name: (m.src.stat().st_ctime if m.src.exists() else 0) for m in items}
+                  if snapshot is None else snapshot.created)
         items = sorted(items, key=lambda m: (ctimes[m.name], m.name.lower()), reverse=reverse)
     else:
         items = sort_items(items, order_mode)
@@ -448,7 +471,7 @@ def change_mods(
 
 
 def change_mods_page(
-    cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str,
+    cfg: Dict, page: int, label_filter: str | Sequence[str], search_query: str | Sequence[str], order_mode: str,
     favorite_only: bool = False, overwrite: bool = False, *, action: str = "install", state_filter: str = "all",
 ) -> Tuple[int, OperationResult]:
     _items, shown, target_page, _pages, _labels = mods_view(

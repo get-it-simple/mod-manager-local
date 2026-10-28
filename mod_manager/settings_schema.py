@@ -150,6 +150,7 @@ LIST_FIELDS = (
 )
 
 APPEARANCE_FIELDS = (
+    FieldSpec("gui_animations_enabled", t("interface_animations"), t("interface_animations_help"), FLAG),
     FieldSpec("gui_language", t("language_label"), t("language_help"), CHOICE, choices=available_languages()),
     FieldSpec(
         key="mod_details_visible",

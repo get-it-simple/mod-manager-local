@@ -12,9 +12,8 @@ if qt_available():
     from mod_manager.ui.widgets.style_utils import TOOLBAR_SECTION, VARIANT_PROPERTY
 
 EXPECTED_TOOLBAR = (
-    ("filter", "Search", (
-        "Apply search, label and favorite filters", "Clear search, label and favorite filters", "Show favorite mods only",
-    )),
+    ("filter", "Search", ()),
+    ("show", "Show", ()),
     ("order", "Order", ("Sort ascending",)),
     ("view", "View", ("Show mods as a list", "Show mods as tiles")),
     ("import", "Import", ("Import mod files", "Import a mod folder")),
@@ -72,9 +71,12 @@ class ModsToolbarSectionTest(WindowTestCase):
 
     def test_search_boxes_belong_to_the_filter_section(self):
         widgets = self.window.mods_toolbar.sections["filter"].widgets()
-        self.assertIn(self.window.search_box, widgets)
-        self.assertIn(self.window.label_filter_box, widgets)
-        self.assertIn(self.window.favorite_filter_button, widgets)
+        self.assertIn(self.window.filter_input, widgets)
+        self.assertTrue(self.window.filter_input.isAncestorOf(self.window.search_box))
+        self.assertTrue(self.window.filter_input.isAncestorOf(self.window.label_filter_box))
+        self.assertIn(self.window.filter_modes, self.window.mods_toolbar.sections["show"].widgets())
+        self.assertIsNone(self.window.mods_toolbar.button("search"))
+        self.assertIsNone(self.window.mods_toolbar.button("clear"))
 
     def test_order_combo_belongs_to_the_order_section(self):
         self.assertIn(self.window.order_box, self.window.mods_toolbar.sections["order"].widgets())

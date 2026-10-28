@@ -92,9 +92,9 @@ def _toggle_presets_result(
         messages.extend(_preset_messages(result, install=not all_on))
     return last_operation, OperationResult(tuple(items)), messages
 
-def presets_view(cfg: Dict, page: int, order_mode: str = "d") -> Tuple[Dict, List[str], List[str], int, int]:
-    presets = load_presets()
-    records = load_preset_records()
+def presets_view(cfg: Dict, page: int, order_mode: str = "d", *, snapshot=None) -> Tuple[Dict, List[str], List[str], int, int]:
+    presets = load_presets() if snapshot is None else snapshot.presets
+    records = load_preset_records() if snapshot is None else snapshot.preset_records
     keys = list(presets.keys())
     reverse = order_mode.startswith("-")
     mode = order_mode[1:] if reverse else order_mode

@@ -161,6 +161,40 @@ def readable_on(value: str) -> str:
     return "#000000" if luminance(value) > READABLE_THRESHOLD else "#ffffff"
 
 
+def button_ripple_color(palette, surface: tuple[int, int, int, int]) -> str:
+    red, green, blue, alpha = surface
+    background = blend(rgb_to_hex(red, green, blue), palette.panel, alpha / 255.0)
+    return readable_on(background)
+
+
+def color_channels(value: str) -> tuple[int, int, int, int]:
+    if value == "transparent":
+        return (0, 0, 0, 0)
+    if value.startswith("rgba"):
+        return tuple(int(part.strip()) for part in value[value.index("(") + 1:value.index(")")].split(","))
+    return (*hex_to_rgb(value), 255)
+
+
+def button_surface(palette, variant, enabled, checked, hovered, pressed, focused):
+    background, border, foreground = palette.panel, palette.border, palette.control_fg
+    if variant in ("navigation", "segment", "link"):
+        background = border = "transparent"
+    if checked:
+        background, border = palette.accent_fill, palette.accent_border
+    if hovered:
+        background = palette.button_hover if variant in ("navigation", "segment", "link") else palette.combo_hover
+    if pressed:
+        background = palette.combo_focus
+    if variant == "primary":
+        background = palette.accent_border if hovered else palette.accent
+        border, foreground = palette.accent, palette.accent_text
+    if focused:
+        border = palette.accent
+    if not enabled:
+        background, border, foreground = palette.button_disabled, palette.border, palette.muted
+    return tuple(color_channels(value) for value in (background, border, foreground))
+
+
 def normalize_mode(value) -> str:
     mode = str(value or "system").strip().lower()
     return mode if mode in THEME_MODES else "system"

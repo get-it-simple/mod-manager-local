@@ -45,7 +45,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_hints(self) -> None:
         window = self.window
-        targets = {"search": window.mods_toolbar.button("search"), "install": window.mods_actions.button("install_selected"),
+        targets = {"search": window.filter_input.search_button, "install": window.mods_actions.button("install_selected"),
                    "uninstall": window.mods_actions.button("uninstall_selected"), "details": window.details_button,
                    "import_files": window.mods_toolbar.button("import_files"), "import_folder": window.mods_toolbar.button("import_folder"),
                    "help": window.keyboard_help_button, "save": window.settings.toolbar.button("save_settings")}
@@ -55,7 +55,9 @@ class KeyboardController(QtCore.QObject):
                 button.setProperty("commandTooltip", original)
                 shortcut = self.text(command)
                 button.setToolTip(f"{original} ({shortcut})" if shortcut else original)
-                if not button.text():
+                if command == "search":
+                    window.search_box.setToolTip(button.toolTip())
+                if isinstance(button, QtWidgets.QAbstractButton) and not button.text():
                     button.setAccessibleName(button.toolTip())
 
     def eventFilter(self, obj, event) -> bool:
@@ -80,6 +82,8 @@ class KeyboardController(QtCore.QObject):
         app = QtWidgets.QApplication.instance()
         if window.busy or app.activeModalWidget() is not None or app.activeWindow() is not window:
             return
+        if name in ("install", "uninstall", "import_files", "import_folder", "paste") and not window.library.ready:
+            return
         command = next(command for command in COMMANDS if command.id == name)
         page = window.workspace.current_page
         if command.context == "library" and page != "library":
@@ -89,7 +93,7 @@ class KeyboardController(QtCore.QObject):
         if window._editing_text() and name not in ("search", "save", "refresh", "help"):
             return
         actions = {
-            "search": lambda: (window.search_box.lineEdit().setFocus(), window.search_box.lineEdit().selectAll()),
+            "search": lambda: window.filter_input.open("search"),
             "refresh": self.refresh_page,
             "save": lambda: window.labels_controller.save() if page == "labels" else window.settings.save(),
             "help": self.show_help,
@@ -105,7 +109,7 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_page(self) -> None:
         window = self.window
-        {"library": window.refresh_mods, "presets": window.refresh_presets, "cleanup": window.refresh_broken,
+        {"library": lambda: window.refresh_all(reload_artwork=True), "presets": window.refresh_all, "cleanup": window.refresh_all,
          "games": window.games.refresh_lists, "labels": window.labels_controller.activate,
          "settings": window.settings.update_dirty}[window.workspace.current_page]()
 

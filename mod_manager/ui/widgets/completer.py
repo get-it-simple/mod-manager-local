@@ -6,6 +6,22 @@ from .select import fit_popup
 from ..theme import tokens
 
 
+class FilterOptionsModel(QtCore.QStringListModel):
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if role in (QtCore.Qt.ToolTipRole, QtCore.Qt.AccessibleTextRole):
+            role = QtCore.Qt.DisplayRole
+        return super().data(index, role)
+
+
+def replace_filter_options(box, values):
+    model = box.model()
+    if not isinstance(model, FilterOptionsModel):
+        model = FilterOptionsModel(box)
+        box.setModel(model)
+    if model.stringList() != values:
+        model.setStringList(values)
+
+
 class CompletionPopupFit(QtCore.QObject):
     def __init__(self, completer):
         super().__init__(completer)
@@ -48,6 +64,7 @@ def configure_completer(completer: QtWidgets.QCompleter | None) -> None:
 
 
 def configure_filter_box(box: QtWidgets.QComboBox) -> QtWidgets.QComboBox:
+    replace_filter_options(box, [box.itemText(index) for index in range(box.count())])
     box.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
     box.view().setItemDelegate(FullTextDelegate(box.view()))
     configure_completer(box.completer())

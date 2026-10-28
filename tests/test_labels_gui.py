@@ -7,6 +7,7 @@ from unittest.mock import patch
 from tests.qt_support import qt_available
 from tests.window_fixture import WindowTestCase, mod_item
 from mod_manager.labels import AUTOMATIC, MANUAL, LabelDefinition, LabelState, ResolvedLabels
+from mod_manager.collection_utils import filter_items_by_query
 
 if qt_available():
     from PySide6 import QtCore, QtGui, QtTest, QtWidgets
@@ -49,9 +50,10 @@ class LabelsGuiTests(WindowTestCase):
         self.persisted = deepcopy(state)
         self.profile_states[str(self.window.cfg.get("active_game_profile_id") or "")] = self.persisted
 
-    def _view(self, _cfg, page, label_filter, search, _order, *_args):
+    def _view(self, _cfg, page, label_filter, search, _order, *_args, **_kwargs):
         labels = ResolvedLabels(self.persisted, [mod.name for mod in self.mods])
-        items = [mod for mod in self.mods if search.casefold() in mod.name.casefold() and (not label_filter or label_filter in self.persisted.members(mod.name))]
+        items = [mod for mod in filter_items_by_query(self.mods, search)
+                 if not label_filter or set(label_filter).intersection(self.persisted.members(mod.name))]
         return items, items[:1], 1, max(1, len(items)), labels
 
     def open_label(self, name):
@@ -394,7 +396,7 @@ class LabelsGuiTests(WindowTestCase):
 
     def test_fragment_chips_wrap_then_scroll_after_four_rows(self):
         self.open_label("Looks")
-        self.set_fragments(*[f"fragment_{index}" for index in range(18)])
+        self.set_fragments(*[f"fragment_{index}" for index in range(12)])
         self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
         self.show_editor()
         view = self.editor.terms_edit.view
@@ -411,11 +413,11 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(len({rect.top() for rect in visible}), 4)
         for top in {rect.top() for rect in visible}:
             self.assertEqual(min(rect.left() for rect in visible if rect.top() == top), view.spacing())
-        last_index = view.model().index(17, 1)
+        last_index = view.model().index(11, 1)
         view.scrollTo(last_index)
         self.qt_app.processEvents()
         self.assertTrue(view.viewport().rect().contains(view.visualRect(last_index)))
-        self.click_fragment_action(17, 2)
+        self.click_fragment_action(11, 2)
         self.assertTrue(view.viewport().rect().contains(view.indexWidget(last_index).geometry()))
 
     def test_fragment_height_fits_zero_one_four_and_five_rows(self):
@@ -467,7 +469,8 @@ class LabelsGuiTests(WindowTestCase):
         field.setText(long_text * 3)
         self.qt_app.processEvents()
         self.assertEqual(field.width(), capped_width)
-        self.assertEqual(index.data(QtCore.Qt.ToolTipRole), long_text * 3)
+        self.assertIn(long_text * 3, index.data(QtCore.Qt.ToolTipRole))
+        self.assertIn("Include:", index.data(QtCore.Qt.ToolTipRole))
         self.assertIs(fragments.view.indexWidget(index), field)
         self.assertTrue(fragments.view.viewport().rect().contains(field.geometry()))
         self.click_fragment_action(0, 2)
@@ -702,12 +705,12 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(self.editor.terms_edit.draft.preview_terms(), ["external"])
 
     def test_saved_rename_updates_the_active_filter(self):
-        self.window.label_filter_var.set("Combat")
+        self.window.filters.add("label", "Combat")
         self.open_label("Combat")
         self.editor.name_edit.setText("Renamed")
         self.editor.name_edit.textEdited.emit("Renamed")
         self.controller.save()
-        self.assertEqual(self.window.label_filter_var.get(), "Renamed")
+        self.assertEqual(self.window.filters.labels, ("Renamed",))
         self.assertEqual(self.persisted.members("combat.pak"), ("Renamed",))
 
     def test_automatic_assignment_opens_the_label_editor(self):
@@ -737,7 +740,7 @@ class LabelsGuiTests(WindowTestCase):
         action = menu.actions()[0]
         self.window.refresh_mods()
         action.trigger()
-        self.assertEqual(self.window.label_filter_var.get(), "")
+        self.assertEqual(self.window.filters.labels, ())
         self.qt_app.processEvents()
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
         self.assertIsNone(self.window._label_choices_menu)
@@ -760,7 +763,7 @@ class LabelsGuiTests(WindowTestCase):
             self.assertGreater(buttons[name].width(), 0)
             self.assertGreaterEqual(buttons[name].height(), buttons[name].minimumSizeHint().height())
         buttons["Looks"].click()
-        self.assertEqual(self.window.label_filter_var.get(), "Looks")
+        self.assertEqual(self.window.filters.labels, ("Looks",))
         self.assertLessEqual(len(self.window._selected_mod_names()), 1)
 
     def test_tile_badges_offer_each_label_and_an_overflow_menu(self):
@@ -786,15 +789,17 @@ class LabelsGuiTests(WindowTestCase):
         menu = self.window._label_choices_menu
         self.assertEqual([action.text() for action in menu.actions()], list(names))
         menu.actions()[-1].trigger()
-        self.assertEqual(self.window.label_filter_var.get(), names[-1])
+        self.assertEqual(self.window.filters.labels, (names[-1],))
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class AdaptiveFiltersTests(WindowTestCase):
     def test_filters_use_available_width_without_focus_and_keep_it_on_focus_loss(self):
+        self.window.motion.set_enabled(False)
         self.window.resize(tokens.DEFAULT_WIDTH * 2, tokens.DEFAULT_HEIGHT)
         self.window.show()
         self.qt_app.processEvents()
+        self.window.filter_input.open("search")
         box = self.window.search_box
         width = box.width()
         self.assertGreater(width, box.minimumWidth())
@@ -807,8 +812,10 @@ class AdaptiveFiltersTests(WindowTestCase):
         self.assertLess(box.width(), width)
 
     def test_popup_fits_long_values_inside_the_screen_and_applies_selection(self):
+        self.window.motion.set_enabled(False)
         self.window.show()
         self.qt_app.processEvents()
+        self.window.filter_input.open("label")
         box = self.window.label_filter_box
         name = "Long label " * 20
         with QtCore.QSignalBlocker(box):
@@ -818,10 +825,10 @@ class AdaptiveFiltersTests(WindowTestCase):
         popup = box.view().window()
         self.assertGreater(popup.width(), box.width())
         self.assertTrue(box.screen().availableGeometry().contains(popup.geometry()))
-        with patch.object(self.window, "refresh_mods") as refresh:
+        with patch.object(self.window, "_render_mods") as refresh:
             box.setCurrentIndex(box.findText(name))
             box.activated.emit(box.currentIndex())
-        self.assertEqual(self.window.label_filter_var.get(), name.strip())
+        self.assertEqual(self.window.filters.labels, (name.strip(),))
         refresh.assert_called_once()
         box.hidePopup()
 

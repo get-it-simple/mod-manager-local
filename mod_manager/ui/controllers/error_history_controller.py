@@ -48,12 +48,6 @@ class ErrorHistoryController(QtCore.QObject):
         self.dialog.setPalette(self.window.palette())
         show_dialog(self.dialog)
 
-    def summarize(self, result: OperationResult) -> None:
-        skipped = sum(item.action in ("missing", "skipped") for item in result.items)
-        failed = sum(not item.success and item.action not in ("missing", "skipped") for item in result.items)
-        success = sum(item.success for item in result.items)
-        self.window.operation_progress.summarize(success, skipped, failed)
-
     def record_import(self, imported, errors, cfg, plans=()) -> None:
         profile = active_game_profile(cfg)
         failures = []
@@ -65,7 +59,6 @@ class ErrorHistoryController(QtCore.QObject):
             failures.append(OperationItem(plan.name if plan else str(message), "imported", False, str(message), (failure,)))
         result = OperationResult(tuple(OperationItem(str(name), "imported", True, str(name)) for name in imported) + tuple(failures))
         self.model.append_result(result, profile.get("name", t('default')) if profile else t('default'))
-        self.summarize(result)
 
     def run(
         self, label: str, worker: Callable, done: Callable, *,
@@ -94,13 +87,11 @@ class ErrorHistoryController(QtCore.QObject):
                 self.model.append_result(result, profile_name)
                 self.window._set_status(t("operation_failed", label=label, error=error))
                 self.window.refresh_all()
-                self.summarize(result)
                 return
             result = value[1] if isinstance(value, tuple) else value
             recorded = retry_outcomes(previous_result, result) if previous_result is not None else result
             self.model.append_result(recorded, profile_name)
             done(value)
-            self.summarize(result)
             if recover_links and needs_copy_recovery(result):
                 self._recover(result, original, value, done, preset_names)
 

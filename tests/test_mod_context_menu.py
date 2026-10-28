@@ -272,7 +272,7 @@ class ModContextMenuOperationTests(ModContextMenuCase):
         self.addCleanup(patcher.stop)
         return result
 
-    def mods_view(self, *args):
+    def mods_view(self, *args, **kwargs):
         for mod in self.mods:
             mod.installed = mod.dest.exists() and mod.dest.read_bytes() == mod.src.read_bytes()
         return self.mods, self.mods, 1, 1, storage.load_labels()

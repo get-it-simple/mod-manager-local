@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 from ...i18n import t
 from ..widgets.filter_summary import FilterSummary
+from ..widgets.segmented_control import SegmentedControl
 from ..widgets.style_utils import apply_margins
 from ... import settings_schema
 
@@ -21,6 +22,9 @@ from ..widgets.workspace import EmptyState
 from ..widgets.detail_view import DetailPanel
 from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
+from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
+from ..widgets.library_status import LibraryStatus
+from ..widgets.filter_input import FilterInput
 from ..view_modes import MOD_ORDER_OPTIONS, order_label_for_key
 from ..localization import system_action_text as _sys_str
 from .toolbar_specs import MODS_ACTION_SECTIONS, MODS_TOOLBAR_SECTIONS, SELECTION_ACTIONS
@@ -35,8 +39,8 @@ def build_mods_toolbar(window) -> IconToolbar:
     set_variant(import_button, "primary")
     import_section.add_action("import_folder", "folder", t('import_a_mod_folder'), window._import_mod_folder)
 
-    window.search_box = window._filter_box(t('search'))
-    window.label_filter_box = window._filter_box(t('label'))
+    window.search_box = window._filter_box(t('search'), "search")
+    window.label_filter_box = window._filter_box(t('label'), "label")
     for box, width in ((window.search_box, tokens.SEARCH_MIN_WIDTH), (window.label_filter_box, tokens.LABEL_FILTER_MIN_WIDTH)):
         box.setMinimumWidth(width)
         box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -44,15 +48,16 @@ def build_mods_toolbar(window) -> IconToolbar:
     window.filter_boxes = (window.search_box, window.label_filter_box)
     filter_section = toolbar.sections["filter"]
     filter_section.setProperty("toolbarStretch", 1)
-    filter_section.add_widget(window.search_box, 2)
-    filter_section.add_widget(window.label_filter_box, 1)
-    window.state_filter_box = select_box()
-    for label, value in (("all_mods", "all"), ("installed_mods", "installed"), ("not_installed_mods", "not_installed")):
-        window.state_filter_box.addItem(t(label), value)
-    window.state_filter_box.currentIndexChanged.connect(window._change_state_filter)
-    filter_section.add_widget(window.state_filter_box)
-    window.favorite_filter_button = toolbar.button("favorite_filter")
-    window.favorite_filter_button.setCheckable(True)
+    window.filter_input = FilterInput(window.search_box, window.label_filter_box, window)
+    filter_section.add_widget(window.filter_input, 1)
+    window.filter_modes = SegmentedControl((
+        ("all", t("all"), "", t("all_mods")),
+        ("installed", t("installed"), "", t("installed_mods")),
+        ("not_installed", t("not_installed"), "", t("not_installed_mods")),
+        ("favorite", "", "favorite", t("show_favorite_mods_only")),
+    ))
+    window.filter_modes.valueChanged.connect(window._change_filter_mode)
+    toolbar.sections["show"].add_widget(window.filter_modes)
 
     window.order_box = select_box()
     window.order_box.setMinimumWidth(tokens.ORDER_MIN_WIDTH)
@@ -75,9 +80,6 @@ def build_mods_toolbar(window) -> IconToolbar:
     window._set_icon_button_checked(window.view_tiles_button, window._is_tile_view())
 
     toolbar.connect({
-        "search": window._mods_search,
-        "clear": window._mods_clear,
-        "favorite_filter": window._toggle_favorite_filter,
         "view_list": lambda: window._set_view_mode("list"),
         "view_tiles": lambda: window._set_view_mode("tiles"),
     })
@@ -140,12 +142,18 @@ def build_mods(window) -> None:
     window.mods_toolbar = window._build_mods_toolbar()
     layout.addWidget(window.mods_toolbar)
     window.filter_summary = FilterSummary(window.mods_tab)
+    window.filter_summary.removeRequested.connect(window._clear_one_filter)
+    window.filter_summary.clearRequested.connect(window._mods_clear)
     layout.addWidget(window.filter_summary)
+    window.library_status = LibraryStatus(window.refresh_mods, window.mods_tab)
+    window.statusBar().addPermanentWidget(window.library_status, 1)
+    window.statusBar().setMinimumHeight(window.library_status.retry.sizeHint().height() + tokens.SPACE_SM)
 
     window.mods_model = ModTableModel(window.theme.palette.accent, window)
     window.mods_stack = QtWidgets.QStackedWidget()
     window.mods_table = QtWidgets.QTableView()
     window.mods_table.setModel(window.mods_model)
+    window.mods_table.setItemDelegate(AnimatedItemDelegate(window.mods_table))
     window.mods_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     window.mods_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     window.mods_table.setMouseTracking(True)
@@ -167,6 +175,8 @@ def build_mods(window) -> None:
     window.tiles_view = ModListView()
     window.tiles_view.setModel(window.mods_model)
     window.tiles_view.setSelectionModel(window.mods_table.selectionModel())
+    ItemFeedback(window.mods_table)
+    ItemFeedback(window.tiles_view)
     window.tiles_view.setItemDelegate(window.tile_delegate)
     window.tiles_view.setViewMode(QtWidgets.QListView.IconMode)
     window.tiles_view.setResizeMode(QtWidgets.QListView.Adjust)
@@ -207,4 +217,3 @@ def build_mods(window) -> None:
     window.mods_tab.body.addWidget(window.mods_actions)
     window.mod_menu = ModContextMenu(window)
     window._show_mod_view()
-

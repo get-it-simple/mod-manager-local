@@ -4,6 +4,7 @@ import ast
 import json
 import importlib.util
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -233,13 +234,14 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             validate_bindings(bindings)
 
     def test_filter_chips_remove_only_the_chosen_filter(self):
-        self.window.search_var.set("combat")
-        self.window.favorite_filter_var.set(True)
+        self.window.filters.add("search", "combat")
+        self.window.filters.mode = "favorite"
         self.window._refresh_library_state()
-        buttons = self.window.filter_summary.findChildren(QtWidgets.QPushButton)
-        next(button for button in buttons if button.text() == "Search: combat").click()
-        self.assertEqual(self.window.search_var.get(), "")
-        self.assertTrue(self.window.favorite_filter_var.get())
+        view = self.window.filter_summary.view
+        view.setCurrentIndex(view.model().index(0, 0))
+        QtTest.QTest.keyClick(view, QtCore.Qt.Key_Delete)
+        self.assertEqual(self.window.filters.queries, ())
+        self.assertEqual(self.window.filters.mode, "favorite")
 
     def test_empty_states_offer_contextual_actions(self):
         self.window.current_mods_shown = []
@@ -249,12 +251,14 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
             source.mkdir()
             game.mkdir()
             self.window.cfg.update(mods_source_dir=str(source), game_mods_dir=str(game))
+            self.window.library.snapshot = replace(self.window.library.snapshot, issues=folder_issues(self.window.cfg))
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "Your mod library is empty")
-            self.window.search_var.set("missing")
+            self.window.filters.add("search", "missing")
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "No matching mods")
             self.window.cfg["mods_source_dir"] = str(root / "absent")
+            self.window.library.snapshot = replace(self.window.library.snapshot, issues=folder_issues(self.window.cfg))
             self.window._refresh_library_state()
             self.assertEqual(self.window.library_empty.labels[0].text(), "Check your mod folders")
             self.assertFalse((root / "absent").exists())
@@ -309,18 +313,21 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.assertEqual(self.window.keyboard.text("refresh"), "")
         self.assertEqual(self.window.cfg["keyboard_shortcuts"]["refresh"]["combo"], "")
 
-    def test_typed_filters_apply_after_pause_and_completions_apply_immediately(self):
+    def test_typed_filters_wait_for_enter_and_completions_add_another_chip(self):
         box = self.window.search_box
         box.lineEdit().setText("comb")
-        with patch.object(self.window, "refresh_mods") as refresh:
+        with patch.object(self.window, "_render_mods") as refresh:
             box.lineEdit().textEdited.emit("comb")
-            self.assertEqual(self.window.search_var.get(), "")
+            self.assertEqual(self.window.filters.queries, ())
             QtTest.QTest.qWait(300)
-            self.assertEqual(self.window.search_var.get(), "comb")
+            self.assertEqual(self.window.filters.queries, ())
+            refresh.assert_not_called()
+            box.lineEdit().returnPressed.emit()
+            self.assertEqual(self.window.filters.queries, ("comb",))
             refresh.assert_called_once()
             refresh.reset_mock()
             box.completer().activated[str].emit("combat.pak")
-            self.assertEqual(self.window.search_var.get(), "combat.pak")
+            self.assertEqual(self.window.filters.queries, ("comb", "combat.pak"))
             refresh.assert_called_once()
 
     def test_save_applies_shortcut_and_updates_tooltips(self):
@@ -330,7 +337,7 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.window.settings.save()
         self.assertEqual(self.window.cfg["keyboard_shortcuts"]["search"]["combo"], "ctrl+g")
         self.assertEqual(self.window.keyboard.text("search"), "Ctrl+G")
-        self.assertIn("Ctrl+G", self.window.mods_toolbar.button("search").toolTip())
+        self.assertIn("Ctrl+G", self.window.search_box.toolTip())
 
     def test_cancelled_preset_preview_has_no_side_effects(self):
         self.window.presets_table.selectRow(1)
@@ -356,18 +363,17 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
 
     def test_profile_context_and_operation_result_remain_visible_across_pages(self):
         self.assertIn("Links", self.window.mods_tab.subtitle.text())
-        self.window.operation_progress.summarize(2, 1, 1)
+        self.window._set_status("Successful: 2 · Skipped: 1 · Failed: 1")
         self.window._open_settings_page()
         self.window.show()
         self.qt_app.processEvents()
-        self.assertTrue(self.window.operation_progress.isVisible())
-        self.assertEqual(self.window.operation_progress.label.text(), "Successful: 2 · Skipped: 1 · Failed: 1")
+        self.assertEqual(self.window.statusBar().currentMessage(), "Successful: 2 · Skipped: 1 · Failed: 1")
+        self.assertIs(self.window.centralWidget(), self.window.workspace)
 
     def test_completed_settings_tasks_do_not_leave_a_preparing_message(self):
-        progress = self.window.operation_progress
-        progress.set_busy(True)
-        self.assertFalse(progress.isHidden())
-        progress.set_busy(False)
-        self.assertTrue(progress.isHidden())
-        progress.summarize(1, 0, 0)
-        self.assertFalse(progress.isHidden())
+        indicator = self.window.activity.indicator
+        self.window._set_busy(True)
+        self.assertFalse(indicator.isHidden())
+        self.window._set_busy(False)
+        self.assertTrue(indicator.isHidden())
+        self.assertFalse(self.window.library.loading)

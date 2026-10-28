@@ -8,6 +8,7 @@ from ..controllers import ACTIONS
 from ..models import BrokenTableModel, PresetTableModel, configure_header
 from ..widgets import IconToolbar, PageControl
 from ..widgets.workspace import EmptyState, WorkspacePage
+from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
 from .toolbar_specs import BROKEN_TOOLBAR_SECTIONS, PRESETS_TOOLBAR_SECTIONS
 
 
@@ -17,6 +18,8 @@ def build_presets(window) -> None:
     window.presets_model = PresetTableModel(window.theme.palette, window)
     window.presets_table = QtWidgets.QTableView()
     window.presets_table.setModel(window.presets_model)
+    window.presets_table.setItemDelegate(AnimatedItemDelegate(window.presets_table))
+    ItemFeedback(window.presets_table)
     window.presets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     window.presets_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     configure_header(window.presets_table, PresetTableModel.COLUMNS)
@@ -76,4 +79,3 @@ def build_broken(window) -> None:
     window.registry.extend(ACTIONS, window.broken_toolbar.buttons.values())
     window.broken_toolbar.add_stretch()
     layout.addWidget(window.broken_toolbar)
-

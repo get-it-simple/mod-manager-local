@@ -121,7 +121,12 @@ class ShortcutSettings(QtWidgets.QWidget):
         self.set_values(values)
 
     def _expand(self, expanded: bool) -> None:
-        self.content.setVisible(expanded)
+        from ..motion import motion_for
+        motion = motion_for(self)
+        if motion:
+            motion.expand(self.content, expanded)
+        else:
+            self.content.setVisible(expanded)
         self.arrow.setArrowType(QtCore.Qt.UpArrow if expanded else QtCore.Qt.DownArrow)
         self.arrow.setAccessibleName(t("collapse_shortcuts") if expanded else t("expand_shortcuts"))
         self.updateGeometry()

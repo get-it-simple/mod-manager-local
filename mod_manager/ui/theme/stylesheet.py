@@ -33,6 +33,10 @@ def build_stylesheet(palette: Palette) -> str:
         QPushButton[variant="navigation"]:checked {{ background: {palette.accent_fill}; border-left-color: {palette.accent}; font-weight: 600; }}
         QPushButton[variant="navigation"]:focus {{ border-color: {palette.accent}; }}
         QPushButton[variant="navigation"][compact="true"] {{ text-align: center; padding: {tokens.SPACE_SM}px; }}
+        QFrame[variant="segmentedControl"] {{ background: {palette.alt_panel}; border: {tokens.BORDER_WIDTH}px solid {palette.border}; border-radius: {tokens.RADIUS_MD}px; }}
+        QPushButton[variant="segment"] {{ background: transparent; border-color: transparent; }}
+        QPushButton[variant="segment"]:hover {{ background: {palette.button_hover}; }}
+        QPushButton[variant="segment"]:checked {{ background: {palette.accent_fill}; border-color: {palette.accent}; }}
         QFrame[variant="toolbarSection"] {{ background: transparent; border: none; }}
         QFrame[variant="formSection"] {{ background: {palette.panel}; border: {tokens.BORDER_WIDTH}px solid {palette.border}; border-radius: {tokens.RADIUS_MD}px; }}
         QPushButton[variant="link"] {{ background: transparent; border-color: transparent; text-align: left; padding-left: 0; }}
@@ -60,6 +64,7 @@ def build_stylesheet(palette: Palette) -> str:
         }}
         QComboBox QLineEdit {{ background: transparent; border: none; padding: 0 {tokens.SPACE_XS}px; }}
         QAbstractItemView {{ background: {palette.panel}; color: {palette.fg}; outline: 0; border: none; }}
+        QListView[variant="transparentList"] {{ background: transparent; border: none; }}
         QTableView::item {{ padding: {tokens.SPACE_SM}px; border: none; }}
         QTableView::item:hover, QListWidget::item:hover {{ background: {palette.button_hover}; }}
         QTableView::item:selected, QListWidget::item:selected {{ background-color: {palette.accent_fill}; color: {palette.fg}; border: none; outline: none; }}

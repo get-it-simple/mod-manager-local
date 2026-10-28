@@ -89,7 +89,8 @@ class WorkspaceGuiTests(WindowTestCase):
                 self.assertEqual(self.window.workspace.current_page, "library")
             self.assertFalse(self.window.workspace.profile_box.isEnabled())
             self.assertFalse(self.window.details_button.isEnabled())
-            self.assertFalse(self.window.detail_frame.isEnabled())
+            self.assertTrue(self.window.detail_frame.isEnabled())
+            self.assertTrue(all(not button.isEnabled() for button in self.window.detail_frame.findChildren(QtWidgets.QAbstractButton)))
             self.window._navigate("settings")
             self.assertEqual(self.window.workspace.current_page, "library")
         finally:
@@ -212,6 +213,7 @@ class WorkspaceGuiTests(WindowTestCase):
         self.assertIs(self.window.presets_stack.currentWidget(), self.window.presets_empty)
         self.assertTrue(self.window.presets_toolbar.button("save").isEnabled())
         with patch("mod_manager.ui.app.list_broken_links", return_value=[]):
+            self.window.refresh_mods()
             self.window._navigate("cleanup")
         self.assertIs(self.window.broken_stack.currentWidget(), self.window.broken_empty)
 

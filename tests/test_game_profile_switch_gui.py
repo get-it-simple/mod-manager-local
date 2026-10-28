@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from mod_manager import storage
+from tests.gui_background import inline_background
 
 try:
     from PySide6 import QtWidgets
@@ -39,6 +40,7 @@ class GameProfileSwitchGuiTests(unittest.TestCase):
         (self.src_b / "b.pak").touch()
 
         self.patches = [
+            patch("mod_manager.ui.task_runner.TaskRunner.background", new=inline_background),
             patch("mod_manager.storage.CONFIG_PATH", self.config_path),
             patch("mod_manager.storage.PRESETS_PATH", self.presets_path),
             patch("mod_manager.storage.LABELS_PATH", self.labels_path),

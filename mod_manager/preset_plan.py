@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from .models import ModItem, OperationItem, OperationResult
 from .mods import change_mods, discover_mods
 from .storage import load_presets, mark_preset_managed
+from .progress import preset_activity
 
 
 @dataclass(frozen=True)
@@ -57,16 +58,16 @@ def execute_preset_plan(plan: PresetPlan, overwrite: bool = False) -> OperationR
     results = []
     for preset, members in plan.definitions:
         changes = [change for change in plan.changes if change.preset == preset]
-        items = []
         work = [change.mod for change in changes if change.mod is not None and change.action in ("install", "uninstall")]
         action = next((change.action for change in changes if change.action in ("install", "uninstall")), "install")
-        for change in changes:
-            if change.action == "missing":
-                items.append(OperationItem(change.name, "missing", False, t('not_in_source')))
-        if work:
-            items.extend(change_mods(work, action=action, overwrite=overwrite).items)
-        results.extend(items)
-        if members is not None and not any(not item.success for item in items):
-            state = "deactivated" if any(change.action == "uninstall" for change in changes) else "applied"
-            mark_preset_managed(preset, state)
+        with preset_activity(preset) as items:
+            for change in changes:
+                if change.action == "missing":
+                    items.append(OperationItem(change.name, "missing", False, t('not_in_source')))
+            if work:
+                items.extend(change_mods(work, action=action, overwrite=overwrite).items)
+            results.extend(items)
+            if members is not None and not any(not item.success for item in items):
+                state = "deactivated" if any(change.action == "uninstall" for change in changes) else "applied"
+                mark_preset_managed(preset, state)
     return OperationResult(tuple(results))

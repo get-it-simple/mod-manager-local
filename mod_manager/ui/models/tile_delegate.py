@@ -5,9 +5,10 @@ from ...i18n import t
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...models import ModItem
-from ...mods import mod_image_path
 from .. import icons
 from ..theme import colors, tokens
+from ..widgets.item_feedback import blend_color
+from ..widgets.operation_feedback import paint_operation
 
 NO_IMAGE_TEXT = t('no_image')
 EMPTY_LABEL = "-"
@@ -28,7 +29,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
     def __init__(self, cfg: dict, palette: colors.Palette | None = None, parent=None):
         super().__init__(parent)
         self.cfg = cfg
-        self._pixmaps: dict[tuple[str, int], QtGui.QPixmap] = {}
+        self.image_cache = getattr(parent, "images", None)
         self.favorites: set[str] = set()
         self.set_palette(palette or colors.build_palette("light"))
 
@@ -45,20 +46,35 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         return QtCore.QSize(*tokens.tile_item_size(self.tile_size()))
 
     def clear_cache(self, mod_name: str | None = None) -> None:
-        if mod_name is None:
-            self._pixmaps.clear()
-            return
-        self._pixmaps = {key: value for key, value in self._pixmaps.items() if key[0] != mod_name}
+        if self.image_cache is not None:
+            if mod_name is None:
+                self.image_cache.reset()
+            else:
+                self.image_cache.invalidate(mod_name)
 
     def set_favorites(self, favorites: set[str]) -> None:
         self.favorites = set(favorites)
 
     def paint(self, painter, option, index) -> None:
+        frame = index.model().operation_frames.get(index.data(QtCore.Qt.UserRole).name)
+        painter.save()
+        if frame is not None:
+            painter.setOpacity(frame.content_opacity)
+        self._paint_content(painter, option, index)
+        painter.restore()
+        if frame is not None:
+            paint_operation(painter, self._content_rect(option), frame, option.palette, self.accent_color)
+
+    def _paint_content(self, painter, option, index) -> None:
         painter.save()
         mod = index.data(QtCore.Qt.UserRole)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
         rect = self._content_rect(option)
-        self._draw_card(painter, rect, selected)
+        feedback = getattr(option.widget, "_item_feedback", None)
+        selection = feedback.value(index, "selection", selected) if feedback else float(selected)
+        hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
+        hover = feedback.value(index, "hover", hovered) if feedback else float(hovered)
+        self._draw_card(painter, rect, selection, hover)
 
         image_rect = self._image_rect(rect)
         pixmap = self._pixmap_for(mod, image_rect.size())
@@ -104,8 +120,10 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         )
         favorite = mod.name in self.favorites
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
-        if favorite or hovered:
+        progress = feedback.value(index, "favorite", 1.0) if feedback else 1.0
+        if favorite or hovered or progress < 1.0:
             favorite_rect = self._favorite_rect(image_rect)
+            painter.setOpacity(painter.opacity() * (progress if favorite else 1.0 - progress if not hovered else 1.0))
             self._draw_badge(painter, favorite_rect, qcolor(self.palette_colors.panel))
             icon = icons.glyph_icon(
                 "favorite_filled" if favorite else "favorite",
@@ -140,10 +158,11 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         QtWidgets.QToolTip.hideText()
         return super().helpEvent(event, view, option, index)
 
-    def _draw_card(self, painter, rect: QtCore.QRect, selected: bool) -> None:
+    def _draw_card(self, painter, rect: QtCore.QRect, selected: float, hover: float = 0.0) -> None:
         theme = self.palette_colors
-        base = qcolor(theme.tile_base_selected if selected else theme.tile_base)
-        border = self.accent_color if selected else qcolor(theme.tile_border)
+        base = blend_color(qcolor(theme.tile_base), qcolor(theme.tile_base_selected), selected)
+        base = blend_color(base, qcolor(theme.combo_hover), hover * (1 - selected))
+        border = blend_color(qcolor(theme.tile_border), self.accent_color, selected)
         painter.setBrush(base)
         painter.setPen(QtGui.QPen(border))
         painter.drawRoundedRect(rect, tokens.TILE_CARD_RADIUS, tokens.TILE_CARD_RADIUS)
@@ -176,6 +195,11 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
     def _content_rect(self, option) -> QtCore.QRect:
         inset = tokens.TILE_CARD_INSET
         return option.rect.adjusted(inset, inset, -inset, -inset)
+
+    def preview_size(self, item_rect: QtCore.QRect) -> QtCore.QSize:
+        option = QtWidgets.QStyleOptionViewItem()
+        option.rect = item_rect
+        return self._image_rect(self._content_rect(option)).size()
 
     def _image_rect(self, rect: QtCore.QRect) -> QtCore.QRect:
         pad = tokens.TILE_CONTENT_PAD
@@ -271,16 +295,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         return badges
 
     def _pixmap_for(self, mod: ModItem, size: QtCore.QSize) -> QtGui.QPixmap:
-        key = (mod.name, max(size.width(), size.height()))
-        if key in self._pixmaps:
-            return self._pixmaps[key]
-        img_path = mod_image_path(self.cfg, mod.name)
-        pixmap = QtGui.QPixmap(str(img_path)) if img_path else QtGui.QPixmap()
-        if not pixmap.isNull():
-            pixmap = pixmap.scaled(size, QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation)
-            if pixmap.width() > size.width() or pixmap.height() > size.height():
-                x = max(0, (pixmap.width() - size.width()) // 2)
-                y = max(0, (pixmap.height() - size.height()) // 2)
-                pixmap = pixmap.copy(x, y, size.width(), size.height())
-        self._pixmaps[key] = pixmap
-        return pixmap
+        if self.image_cache is None:
+            return QtGui.QPixmap()
+        pixmap = self.image_cache.request(self.cfg, mod.name, size, cover=True)
+        return pixmap if pixmap is not None else QtGui.QPixmap()

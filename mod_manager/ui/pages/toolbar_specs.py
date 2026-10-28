@@ -3,11 +3,8 @@ from __future__ import annotations
 from ...i18n import t
 
 MODS_TOOLBAR_SECTIONS = (
-    ("filter", t('search'), (
-        ("search", "filter_apply", t('apply_search_label_and_favorite_filters')),
-        ("clear", "filter_clear", t('clear_search_label_and_favorite_filters')),
-        ("favorite_filter", "favorite", t('show_favorite_mods_only')),
-    )),
+    ("filter", t('search'), ()),
+    ("show", t('show'), ()),
     ("order", t('order'), ()),
     ("view", t('view'), (
         ("view_list", "list", t('show_mods_as_a_list')),

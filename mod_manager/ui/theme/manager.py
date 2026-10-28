@@ -65,6 +65,10 @@ class ThemeManager(QtCore.QObject):
         return QtGui.QFont(self._base_font)
 
     @property
+    def system_accent(self) -> str:
+        return accent_module.system_accent(self.system_palette())
+
+    @property
     def mode(self) -> str:
         return colors.normalize_mode(self.cfg.get("gui_theme"))
 

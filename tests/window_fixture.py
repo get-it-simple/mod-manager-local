@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.qt_support import dispose, qt_app, qt_available
+from tests.gui_background import inline_background, synthetic_snapshot
 
 from app_paths import DEFAULT_CONFIG
 from mod_manager.models import ModItem
@@ -49,6 +50,8 @@ class WindowTestCase(unittest.TestCase):
         self.presets = {"core": ["combat.pak"], "ui": ["ui.pak"]}
         self.broken = [mod_item("missing.pak", installed=True)]
         self.patchers = [
+            patch("mod_manager.ui.task_runner.TaskRunner.background", new=inline_background),
+            patch("mod_manager.ui.controllers.library_controller.load_library_snapshot", side_effect=synthetic_snapshot),
             # storage.save_config is imported lazily inside workers, so it must be patched at
             # its source or a test would overwrite the real config.json next to the app.
             patch("mod_manager.storage.save_config"),

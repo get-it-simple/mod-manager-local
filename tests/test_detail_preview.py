@@ -194,6 +194,7 @@ class DetailPreviewWindowTests(WindowTestCase):
             path = Path(directory) / "preview.png"
             self.assertTrue(artwork(80, 160).save(str(path)))
             with patch("mod_manager.ui.app.mod_image_path", return_value=path):
+                self.window.images.invalidate("combat.pak")
                 self.window.resize(1200, 1100)
                 self.window.show()
                 self.select_mod_rows(0)

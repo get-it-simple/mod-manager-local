@@ -12,7 +12,7 @@ from typing import Dict, List
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
 from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
-from .storage_policy import StorageError, current_policy
+from .storage_policy import StorageError, current_policy, profile_config
 from .labels import LabelDefinition, LabelState, state_from_records, unique_names
 
 FAVORITES_KEY = "__favorites__"
@@ -225,7 +225,9 @@ def delete_game_profile(cfg: Dict, profile_id: str) -> bool:
     return True
 
 def _active_profile_context(base_path: Path) -> tuple[Path, Dict | None, Dict]:
-    raw = load_config()
+    raw = profile_config()
+    if raw is None:
+        raw = load_config()
     profile = active_game_profile(raw)
     if not profile:
         return base_path, None, raw
@@ -420,9 +422,11 @@ def load_label_definitions() -> dict[str, LabelDefinition]:
         if not isinstance(value, dict) or value.get("mode", "manual") not in ("manual", "automatic"):
             raise StorageError(f"Invalid definition for label: {name}")
         terms = value.get("terms", [])
-        if not isinstance(terms, list) or any(not isinstance(term, str) for term in terms):
+        exclusions = value.get("exclusions", [])
+        if any(not isinstance(values, list) or any(not isinstance(term, str) for term in values)
+               for values in (terms, exclusions)):
             raise StorageError(f"Invalid name fragments for label: {name}")
-        result[name] = LabelDefinition(value.get("mode", "manual"), unique_names(terms))
+        result[name] = LabelDefinition(value.get("mode", "manual"), unique_names(terms), unique_names(exclusions))
     return result
 
 
@@ -439,7 +443,7 @@ def save_label_state(state: LabelState) -> None:
         record["labels"] = list(names)
         record["label"] = names[0] if names else ""
     records[LABEL_DEFINITIONS_KEY] = {
-        name: {"mode": definition.mode, "terms": list(definition.terms)}
+        name: {"mode": definition.mode, "terms": list(definition.terms), "exclusions": list(definition.exclusions)}
         for name, definition in state.definitions.items()
     }
     _save_mod_record_data(records)

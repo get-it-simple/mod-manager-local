@@ -11,6 +11,7 @@ from .buttons import text_button
 from .section import muted_label, page_title_label
 from .select import select_box
 from .style_utils import apply_margins, set_variant, repolish
+from .sidebar_labels import SidebarLabels
 
 NAVIGATION = (
     ("library", t('library'), "list"),
@@ -29,8 +30,8 @@ class WorkspacePage(QtWidgets.QWidget):
         self.outer = apply_margins(QtWidgets.QVBoxLayout(self), tokens.PAGE_MARGIN, tokens.SPACE_2XL)
         self.header = apply_margins(QtWidgets.QHBoxLayout())
         headings = apply_margins(QtWidgets.QVBoxLayout(), spacing=tokens.SPACE_SM)
-        self.title = page_title_label(title)
-        self.subtitle = muted_label(subtitle)
+        self.title = page_title_label(title, self)
+        self.subtitle = muted_label(subtitle, self)
         self.subtitle.setWordWrap(True)
         self._subtitle_text = subtitle
         self._elide_subtitle = False
@@ -53,7 +54,7 @@ class WorkspacePage(QtWidgets.QWidget):
 
     def _update_subtitle(self) -> None:
         text = self._subtitle_text
-        if self._elide_subtitle:
+        if self._elide_subtitle and self.isVisible():
             text = self.subtitle.fontMetrics().elidedText(text, QtCore.Qt.ElideMiddle, self.subtitle.width())
         self.subtitle.setText(text)
 
@@ -95,6 +96,7 @@ class EmptyState(QtWidgets.QWidget):
 class Workspace(QtWidgets.QWidget):
     pageRequested = QtCore.Signal(str)
     profileRequested = QtCore.Signal(str)
+    labelRequested = QtCore.Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,9 +119,13 @@ class Workspace(QtWidgets.QWidget):
         self.game_button = text_button(t('game'), t('manage_and_switch_game_profiles'), lambda: self.pageRequested.emit("games"), icon_name="game")
         self.sidebar_layout.addWidget(self.game_button)
         self.navigation: dict[str, QtWidgets.QPushButton] = {}
+        self.labels_heading = muted_label(t('labels'))
+        self.labels_list = SidebarLabels()
+        self.labels_list.labelRequested.connect(self.labelRequested)
         for key, title, icon in NAVIGATION:
             if key == "settings":
-                self.sidebar_layout.addStretch()
+                self.sidebar_layout.addWidget(self.labels_heading)
+                self.sidebar_layout.addWidget(self.labels_list, 1)
             button = text_button(title, title, lambda page=key: self.pageRequested.emit(page), icon_name=icon)
             button.setCheckable(True)
             button.setMinimumHeight(tokens.NAVIGATION_HEIGHT)
@@ -152,9 +158,14 @@ class Workspace(QtWidgets.QWidget):
         self.stack.addWidget(page)
 
     def show_page(self, key: str) -> None:
+        changed = self.stack.currentWidget() is not self.pages[key]
         self.stack.setCurrentWidget(self.pages[key])
         for name, button in self.navigation.items():
             button.setChecked(name == key)
+        from ..motion import motion_for
+        motion = motion_for(self)
+        if changed and motion:
+            motion.fade_in(self.pages[key].title)
 
     @property
     def current_page(self) -> str:
@@ -169,6 +180,9 @@ class Workspace(QtWidgets.QWidget):
         self.profile_box.setToolTip(self.profile_box.currentText() or t('choose_a_game_profile'))
         self.profile_box.setEnabled(bool(profiles) and not busy)
         self.game_button.setEnabled(not busy)
+        self.labels_list.setEnabled(bool(active_id) and not busy)
+        self.labels_list.setVisible(bool(active_id))
+        self.labels_heading.setVisible(bool(active_id) and not self.compact)
         for key, button in self.navigation.items():
             button.setEnabled(not busy and (bool(active_id) or key not in PROFILE_PAGES))
 
@@ -202,6 +216,8 @@ class Workspace(QtWidgets.QWidget):
             widget.setVisible(not compact)
         self.game_button.setVisible(compact)
         self.game_button.setText("")
+        self.labels_heading.setVisible(not compact and self.labels_list.isEnabled())
+        self.labels_list.set_compact(compact)
         for key, title, _icon in NAVIGATION:
             self.navigation[key].setText(("" if compact else title) + (" •" if key in self.dirty_pages else ""))
             self.navigation[key].setProperty("compact", compact)

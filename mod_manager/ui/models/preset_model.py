@@ -5,6 +5,7 @@ from PySide6 import QtCore
 from .. import icons
 from ..theme import colors, tokens
 from . import columns
+from .mod_model import OPERATION_ROLE
 
 COLUMNS = tokens.PRESET_COLUMNS
 HEADERS = columns.titles(COLUMNS)
@@ -16,6 +17,7 @@ INACTIVE = "inactive"
 class PresetTableModel(QtCore.QAbstractTableModel):
     HEADERS = HEADERS
     COLUMNS = COLUMNS
+    operation_column = 0
 
     def __init__(self, palette: colors.Palette | None = None, parent=None):
         super().__init__(parent)
@@ -23,9 +25,11 @@ class PresetTableModel(QtCore.QAbstractTableModel):
         self.keys: list[str] = []
         self.records: dict[str, dict] = {}
         self.installed: set[str] = set()
+        self.operation_frames = {}
         self.set_palette(palette or colors.build_palette("light"))
 
     def set_palette(self, palette: colors.Palette) -> None:
+        self.activity_color = palette.accent
         self._active_icon = icons.state_icon(True, palette)
         self._inactive_icon = icons.state_icon(False, palette)
 
@@ -33,6 +37,7 @@ class PresetTableModel(QtCore.QAbstractTableModel):
         self.beginResetModel()
         self.presets = dict(presets or {})
         self.keys = list(keys or [])
+        self.operation_frames = {name: frame for name, frame in self.operation_frames.items() if name in self.keys}
         self.records = dict(records or {})
         self.installed = set(installed or set())
         self.endResetModel()
@@ -56,6 +61,8 @@ class PresetTableModel(QtCore.QAbstractTableModel):
         if not index.isValid():
             return None
         name = self.keys[index.row()]
+        if role == OPERATION_ROLE:
+            return self.operation_frames.get(name)
         column = index.column()
         active = self.is_active(name)
         if column == 1:
