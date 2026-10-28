@@ -8,6 +8,7 @@ from ..controllers import ACTIONS
 from ..models import BrokenTableModel, PresetTableModel, configure_header
 from ..widgets import IconToolbar, PageControl
 from ..widgets.workspace import EmptyState, WorkspacePage
+from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
 from .toolbar_specs import BROKEN_TOOLBAR_SECTIONS, PRESETS_TOOLBAR_SECTIONS
 
 
@@ -17,6 +18,8 @@ def build_presets(window) -> None:
     window.presets_model = PresetTableModel(window.theme.palette, window)
     window.presets_table = QtWidgets.QTableView()
     window.presets_table.setModel(window.presets_model)
+    window.presets_table.setItemDelegate(AnimatedItemDelegate(window.presets_table))
+    ItemFeedback(window.presets_table)
     window.presets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     window.presets_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     configure_header(window.presets_table, PresetTableModel.COLUMNS)
@@ -35,8 +38,6 @@ def build_presets(window) -> None:
     window.preset_page_control.pageRequested.connect(window._set_preset_page)
     window.preset_page_label = window.preset_page_control
     page_section.add_action("next_page", "forward", t('next_presets_page'), lambda: window._change_preset_page(1))
-    for key in ("prev_page", "next_page"):
-        window.presets_toolbar.button(key).setProperty("pagePulse", True)
 
     window.preset_name = QtWidgets.QLineEdit()
     window.preset_name.setPlaceholderText(t('preset_name'))

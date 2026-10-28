@@ -17,6 +17,9 @@ class Progress:
     mod_names: tuple[str, ...] = ()
     mod_state: str = ""
     mod_results: tuple[OperationItem, ...] = ()
+    preset_name: str = ""
+    preset_state: str = ""
+    preset_success: bool | None = None
 
 
 _reporter: ContextVar[Callable[[Progress], None] | None] = ContextVar("operation_reporter", default=None)
@@ -24,10 +27,12 @@ _reporter: ContextVar[Callable[[Progress], None] | None] = ContextVar("operation
 
 def report(stage: str, name: str = "", completed: int = 0, total: int = 0, *,
            mod_names: tuple[str, ...] = (), mod_state: str = "",
-           mod_results: tuple[OperationItem, ...] = ()) -> None:
+           mod_results: tuple[OperationItem, ...] = (), preset_name: str = "",
+           preset_state: str = "", preset_success: bool | None = None) -> None:
     callback = _reporter.get()
     if callback is not None:
-        callback(Progress(stage, name, completed, total, mod_names, mod_state, mod_results))
+        callback(Progress(stage, name, completed, total, mod_names, mod_state, mod_results,
+                          preset_name, preset_state, preset_success))
 
 
 @contextmanager
@@ -38,6 +43,18 @@ def mod_activity(stage: str, names: tuple[str, ...]) -> Iterator[list[OperationI
         yield results
     finally:
         report(stage, mod_names=names, mod_state="finished", mod_results=tuple(results))
+
+
+@contextmanager
+def preset_activity(name: str) -> Iterator[list[OperationItem]]:
+    report("toggling_presets", preset_name=name, preset_state="started")
+    results: list[OperationItem] = []
+    success = False
+    try:
+        yield results
+        success = all(item.success for item in results)
+    finally:
+        report("toggling_presets", preset_name=name, preset_state="finished", preset_success=success)
 
 
 @contextmanager

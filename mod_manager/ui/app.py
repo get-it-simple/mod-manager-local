@@ -79,6 +79,7 @@ from .task_runner import TaskRunner
 from .motion import MotionController
 from .image_cache import ImageCache
 from .controllers.library_controller import LibraryController
+from .controllers.image_prefetch_controller import ImagePrefetchController
 from .widgets.completer import replace_filter_options
 from .theme.manager import ThemeManager
 from .widgets import (
@@ -151,6 +152,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.library = LibraryController(self)
         self.library.changed.connect(self._library_state_changed)
         self._detail_preview = None
+        self._detail_selection_identity = ()
         self.errors = ErrorHistoryController(self)
         self.registry = WidgetRegistry()
         self.resize(
@@ -180,6 +182,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         self._build()
         self.activity = ActivityController(self)
+        self.activity.changed.connect(self._operation_state_changed)
+        self.image_prefetch = ImagePrefetchController(self)
         self.runner.actionFinished.connect(self.library.ensure_refresh)
         self._setup_com_drop_targets()
         self._bind_navigation_events()
@@ -211,6 +215,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         self.keyboard.shutdown()
         self.activity.shutdown()
+        self.image_prefetch.shutdown()
         self.library.shutdown()
         self.images.shutdown()
         self.motion.shutdown()
@@ -650,6 +655,18 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return self.runner.busy
 
     @property
+    def operation_blocked(self) -> bool:
+        activity = getattr(self, "activity", None)
+        return self.busy or not self.library.ready or bool(activity and activity.visual_busy)
+
+    def _operation_state_changed(self) -> None:
+        self._update_mod_selection_actions()
+        self._update_detail_actions()
+        self.presets_toolbar.button("toggle").setEnabled(not self.operation_blocked)
+        activity = getattr(self, "activity", None)
+        self.motion.set_operation_blocked(self.busy or self.library.loading or bool(activity and activity.visual_busy))
+
+    @property
     def action_widgets(self) -> list:
         return self.registry.widgets(ACTIONS)
 
@@ -675,8 +692,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.filter_summary.view.setEnabled(not busy)
         self._update_mod_selection_actions()
 
-        if not busy and not self.library.loading:
-            self.motion.set_operation_blocked(False)
+        self._operation_state_changed()
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self.runner.set_busy(busy, text)
@@ -791,6 +807,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg["tile_size"] = tokens.clamp_tile_size(current + step)
         self.tile_delegate.clear_cache()
         self.tiles_view.reset()
+        self.image_prefetch.schedule()
         save_config(self.cfg)
         return "break"
 
@@ -811,7 +828,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return bool(self._selected_rows(self.tiles_view if self._is_tile_view() else self.mods_table))
 
     def _update_mod_selection_actions(self) -> None:
-        enabled = (not self.busy) and self.library.ready and self._has_mod_selection()
+        enabled = not self.operation_blocked and self._has_mod_selection()
         for widget in self.mod_selection_widgets:
             widget.setEnabled(enabled)
         if not hasattr(self, "mods_actions"):
@@ -823,7 +840,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             count = sum(mod.installed == installed for mod in mods)
             button = self.mods_actions.button(key)
             button.setText(t(key, count=count))
-            button.setEnabled(not self.busy and self.library.ready and count > 0)
+            button.setEnabled(not self.operation_blocked and count > 0)
 
     def _on_mod_selection_changed(self) -> None:
         self._update_mod_selection_actions()
@@ -901,6 +918,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             menu.close()
 
     def _refresh_selected_detail(self) -> None:
+        identity = tuple(self._selected_mod_names())
+        changed = identity != self._detail_selection_identity
+        self._detail_selection_identity = identity
+        scroll = self.detail_scroll.verticalScrollBar().value()
         rows = self._selected_rows(self._current_mod_view())
         if len(rows) == 1 and rows[0] < len(self.current_mods_shown):
             self._refresh_mod_detail(self.current_mods_shown[rows[0]])
@@ -909,13 +930,18 @@ class ModManagerGui(QtWidgets.QMainWindow):
         else:
             self._refresh_mod_detail(None)
         self._update_detail_actions()
-        if self.detail_scroll.isVisible():
+        if not changed:
+            self.detail_scroll.verticalScrollBar().setValue(scroll)
+        if hasattr(self, "activity"):
+            self.activity.selection_changed()
+        if changed and self.detail_scroll.isVisible() and not self.operation_blocked:
             self.motion.fade_in(self.detail_frame)
 
     def _update_detail_actions(self) -> None:
-        enabled = not self.busy and self.library.ready
+        enabled = not self.operation_blocked
         for button in self.detail_frame.findChildren(QtWidgets.QAbstractButton):
-            button.setEnabled(enabled)
+            available = button.property("actionAvailable")
+            button.setEnabled(enabled and available is not False)
 
     def _clear_detail(self) -> None:
         self._detail_preview = None
@@ -1033,7 +1059,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return [row + 1 for row in rows if row < len(self.current_mods_shown) and self.current_mods_shown[row].installed == installed]
 
     def _toggle_selected_indexes(self, indexes: list[int]) -> None:
-        if not indexes or self.busy or not self.library.ready:
+        if not indexes or self.operation_blocked:
             return
         selected = mods_by_indexes(self.current_mods_shown, indexes)
         if not self._confirm_overwrite([m for m in selected if not m.installed]):
@@ -1068,12 +1094,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
         install_button.setIcon(self._icon("install"))
         install_button.setToolTip(t('install_selected_mods_that_are_not_installed'))
         install_button.setEnabled(not_installed > 0)
+        install_button.setProperty("actionAvailable", not_installed > 0)
         install_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         install_button.clicked.connect(self._install_selected_mods)
         uninstall_button = QtWidgets.QPushButton(t('uninstall_value0', value0=f'{installed}'))
         uninstall_button.setIcon(self._icon("uninstall"))
         uninstall_button.setToolTip(t('uninstall_selected_mods_that_are_installed'))
         uninstall_button.setEnabled(installed > 0)
+        uninstall_button.setProperty("actionAvailable", installed > 0)
         uninstall_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         uninstall_button.clicked.connect(self._uninstall_selected_mods)
         self.detail_scroll.add_actions([install_button, uninstall_button])
@@ -1117,7 +1145,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
                 image.show()
                 self._detail_preview = (name, image, size)
             self.detail_scroll.rescale_images()
-            self.motion.fade_in(image)
+            if hasattr(self, "activity") and self.activity.detail_cover.frame is not None:
+                self.activity.detail_cover.refresh_content()
+            else:
+                self.motion.fade_in(image)
 
     def _detail_image_target_size(self, image: DetailImageLabel | None = None) -> QtCore.QSize:
         return self.detail_scroll.image_target_size(image)
@@ -1201,8 +1232,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.statusBar().showMessage(t("updating_library" if self.library.snapshot else "loading_library"))
         elif not self.busy:
             self.statusBar().showMessage(self.runner.status_text or t("ready"))
-        if not self.busy and not self.library.loading:
-            self.motion.set_operation_blocked(False)
+        self._operation_state_changed()
 
     def _render_mods(self, selected_names: List[str] | None = None) -> None:
         if self.library.snapshot is None:
@@ -1373,7 +1403,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.refresh_presets()
 
     def _install_page(self) -> None:
-        if self.busy or not self.library.ready:
+        if self.operation_blocked:
             return
         page, label_filter, search, order = self._view_args()
         if not self._confirm_overwrite([m for m in self.current_mods_shown if not m.installed]):
@@ -1392,7 +1422,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=state_filter), done)
 
     def _uninstall_page(self) -> None:
-        if self.busy or not self.library.ready:
+        if self.operation_blocked:
             return
         page, label_filter, search, order = self._view_args()
 
@@ -1474,7 +1504,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._run_action(t('saving_preset'), lambda: save_preset_from_installed(self.cfg, name), done)
 
     def _toggle_selected_presets(self, names: list[str] | None = None) -> None:
-        if self.busy or not self.library.ready:
+        if self.operation_blocked:
             return
         names = self._selected_preset_names() if names is None else names
         if not names:

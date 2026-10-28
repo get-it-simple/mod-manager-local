@@ -104,8 +104,6 @@ def build_mods_actions(window) -> IconToolbar:
     window.page_control.pageRequested.connect(window._set_mod_page)
     window.page_label = window.page_control
     page_section.add_action("next_page", "forward", t('next_mods_page'), lambda: window._change_mod_page(1))
-    for key in ("prev_page", "next_page"):
-        toolbar.button(key).setProperty("pagePulse", True)
 
     toolbar.button("install_page").setAccessibleName(_sys_str("install"))
     toolbar.button("uninstall_page").setAccessibleName(_sys_str("uninstall"))

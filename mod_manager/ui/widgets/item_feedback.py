@@ -5,6 +5,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..motion import motion_for
 from ..theme import tokens
 from .operation_feedback import paint_operation
+from ..models.mod_model import OPERATION_ROLE
 
 
 def blend_color(first, second, progress):
@@ -91,13 +92,13 @@ class ItemFeedback(QtCore.QObject):
 
 class AnimatedItemDelegate(QtWidgets.QStyledItemDelegate):
     def paint(self, painter, option, index):
-        frame = index.model().operation_frames.get(index.data(QtCore.Qt.UserRole).name)
+        frame = index.data(OPERATION_ROLE)
         painter.save()
         if frame is not None:
             painter.setOpacity(frame.content_opacity)
         self._paint_content(painter, option, index)
         painter.restore()
-        if frame is not None and index.column() == 1:
+        if frame is not None and index.column() == getattr(index.model(), "operation_column", 1):
             paint_operation(painter, option.rect, frame, option.palette, index.model().activity_color)
 
     def _paint_content(self, painter, option, index):

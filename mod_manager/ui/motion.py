@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from weakref import WeakSet
-from math import sin, pi
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from shiboken6 import isValid
@@ -101,6 +100,12 @@ class MotionController(QtCore.QObject):
         cover.raise_()
         self.animate(widget, "fade", 0.0, 1.0, cover.reveal, tokens.MOTION_CONTENT_MS, cover.hide)
 
+    def stop_fade(self, widget) -> None:
+        self.stop(widget, "fade")
+        cover = getattr(widget, "_motion_cover", None)
+        if cover is not None and isValid(cover):
+            cover.hide()
+
     def expand(self, widget, expanded: bool) -> None:
         self.stop(widget, "expand")
         if not self.enabled or not widget.parentWidget().isVisible():
@@ -131,7 +136,9 @@ class MotionController(QtCore.QObject):
         self.operation_blocked = blocked
         for feedback in tuple(self._feedback):
             if isValid(feedback.button):
-                feedback.frozen_image = feedback.button.grab() if blocked and feedback.button.isVisible() else QtGui.QPixmap()
+                feedback.frozen_image = (feedback.button.grab()
+                                         if blocked and feedback.button.isVisible() and feedback.click_progress >= 1.0
+                                         else QtGui.QPixmap())
                 self.stop(feedback.button, "feedback")
                 feedback.frozen_surface = feedback.surface if blocked else None
                 feedback.refresh()
@@ -191,9 +198,12 @@ class ButtonFeedback(QtCore.QObject):
         self.focused = button.hasFocus()
         super().__init__(button)
         self.surface = self.target()
-        self.frozen_surface = self.surface if motion.operation_blocked else None
+        self.frozen_surface = None
         self.frozen_image = QtGui.QPixmap()
         self.click_progress = 1.0
+        self.click_origin = QtCore.QPointF(button.rect().center())
+        self._press_origin = None
+        self._activation_origin = None
         button.installEventFilter(self)
         button.pressed.connect(self._press)
         button.released.connect(self._release)
@@ -210,6 +220,9 @@ class ButtonFeedback(QtCore.QObject):
 
     def _press(self):
         self.pressed = True
+        self._activation_origin = (self._press_origin if self._press_origin is not None
+                                   else QtCore.QPointF(self.button.rect().center()))
+        self._press_origin = None
         self.refresh()
 
     def _release(self):
@@ -217,12 +230,17 @@ class ButtonFeedback(QtCore.QObject):
         self.refresh()
 
     def _click(self, *_args):
-        if not self.button.property("pagePulse"):
-            return
+        self.click_origin = (self._activation_origin if self._activation_origin is not None
+                             else QtCore.QPointF(self.button.rect().center()))
+        self._activation_origin = None
+        self.frozen_image = QtGui.QPixmap()
+
         def apply(progress):
             self.click_progress = progress
             self.button.update()
-        self.motion.animate(self.button, "page-pulse", 0.0, 1.0, apply, tokens.PAGE_PULSE_MS)
+        animation = self.motion.animate(self.button, "button-ripple", 0.0, 1.0, apply, tokens.BUTTON_RIPPLE_MS)
+        if animation is not None:
+            animation.setEasingCurve(QtCore.QEasingCurve.Type.Linear)
 
     def refresh(self, *_args):
         start, target = self.surface, self.target()
@@ -235,12 +253,16 @@ class ButtonFeedback(QtCore.QObject):
                                  for old, new in zip(start, target))
             self.button.update()
 
-        self.motion.animate(self.button, "feedback", 0.0, 1.0, apply,
-                            tokens.MOTION_PRESS_MS if self.pressed else tokens.MOTION_HOVER_MS)
+        animation = self.motion.animate(self.button, "feedback", 0.0, 1.0, apply,
+                                        tokens.MOTION_PRESS_MS if self.pressed else tokens.MOTION_HOVER_MS)
+        if animation is not None and not self.pressed:
+            animation.setEasingCurve(QtCore.QEasingCurve.Type.InOutCubic)
 
     def eventFilter(self, obj, event):
         kind = event.type()
-        if kind in (QtCore.QEvent.Enter, QtCore.QEvent.Leave):
+        if kind in (QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonDblClick) and event.button() == QtCore.Qt.LeftButton:
+            self._press_origin = event.position()
+        elif kind in (QtCore.QEvent.Enter, QtCore.QEvent.Leave):
             self.hovered = kind == QtCore.QEvent.Enter
             self.refresh()
         elif kind in (QtCore.QEvent.FocusIn, QtCore.QEvent.FocusOut):
@@ -254,7 +276,10 @@ class ButtonFeedback(QtCore.QObject):
             self.refresh()
         elif kind == QtCore.QEvent.Hide:
             self.hovered = self.pressed = False
+            self._press_origin = self._activation_origin = None
             self.motion.stop(obj, "feedback")
+            self.motion.stop(obj, "button-ripple")
+            self.click_progress = 1.0
             self.surface = self.target()
         elif kind == QtCore.QEvent.Paint:
             self.paint()
@@ -269,19 +294,24 @@ class ButtonFeedback(QtCore.QObject):
             painter.end()
             return
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        pulse = sin(self.click_progress * pi) if self.click_progress < 1.0 else 0.0
-        scale = 1.0 - (1.0 - tokens.PAGE_PULSE_SCALE) * pulse
-        center = QtCore.QRectF(button.rect()).center()
-        painter.translate(center)
-        painter.scale(scale, scale)
-        painter.translate(-center)
         background, border, foreground = (QtGui.QColor(*value) for value in self.surface)
-        background = background.lighter(round(100 * (1 + tokens.PAGE_PULSE_LIGHTEN * pulse)))
         inset = tokens.BORDER_WIDTH / 2
         rect = QtCore.QRectF(button.rect()).adjusted(inset, inset, -inset, -inset)
         painter.setBrush(background)
         painter.setPen(QtGui.QPen(border, tokens.BORDER_WIDTH))
         painter.drawRoundedRect(rect, tokens.RADIUS_MD, tokens.RADIUS_MD)
+        if self.click_progress < 1.0:
+            painter.save()
+            clip = QtGui.QPainterPath()
+            clip.addRoundedRect(rect, tokens.RADIUS_MD, tokens.RADIUS_MD)
+            painter.setClipPath(clip)
+            radius = max(button.width(), button.height()) * tokens.BUTTON_RIPPLE_SCALE / 2
+            color = QtGui.QColor(colors.button_ripple_color(self.motion.window.theme.palette, self.surface[0]))
+            color.setAlphaF(tokens.BUTTON_RIPPLE_ALPHA * (1.0 - self.click_progress))
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(color)
+            painter.drawEllipse(self.click_origin, radius * self.click_progress, radius * self.click_progress)
+            painter.restore()
         if button.property("variant") == "navigation" and button.isChecked():
             painter.setPen(QtGui.QPen(QtGui.QColor(self.motion.window.theme.palette.accent), tokens.BORDER_WIDTH))
             painter.drawLine(rect.topLeft(), rect.bottomLeft())

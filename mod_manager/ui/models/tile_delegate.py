@@ -196,6 +196,11 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         inset = tokens.TILE_CARD_INSET
         return option.rect.adjusted(inset, inset, -inset, -inset)
 
+    def preview_size(self, item_rect: QtCore.QRect) -> QtCore.QSize:
+        option = QtWidgets.QStyleOptionViewItem()
+        option.rect = item_rect
+        return self._image_rect(self._content_rect(option)).size()
+
     def _image_rect(self, rect: QtCore.QRect) -> QtCore.QRect:
         pad = tokens.TILE_CONTENT_PAD
         return QtCore.QRect(

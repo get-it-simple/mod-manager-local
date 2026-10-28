@@ -53,6 +53,8 @@ class ImageCache(QtCore.QObject):
         self._pending = OrderedDict()
         self._priority = set()
         self._active = {}
+        self._tiles = OrderedDict()
+        self._tile_done = set()
         self._generation = 0
         self._revisions = {}
         self._bytes = 0
@@ -62,10 +64,29 @@ class ImageCache(QtCore.QObject):
     def byte_count(self) -> int:
         return self._bytes
 
+    def _key(self, cfg, name, size, cover):
+        return ImageKey(self._generation, self._revisions.get(name, 0),
+                        str(cfg.get("active_game_profile_id") or ""), str(cfg.get("mods_source_dir") or ""),
+                        name, max(1, size.width()), max(1, size.height()), cover)
+
+    def set_tile_window(self, cfg, requests):
+        snapshot = deepcopy(cfg)
+        self._tiles = OrderedDict((self._key(cfg, name, size, True), snapshot) for name, size in requests)
+        self._tile_done.intersection_update(self._tiles)
+        for key in list(self._pending):
+            if key.cover and key not in self._priority:
+                self._pending.pop(key)
+        self._dispatch()
+
+    def _fill_tiles(self):
+        for key, cfg in self._tiles.items():
+            if len(self._pending) >= tokens.IMAGE_PENDING_LIMIT:
+                break
+            if key not in self._cache and key not in self._active and key not in self._tile_done:
+                self._pending.setdefault(key, cfg)
+
     def request(self, cfg, name: str, size: QtCore.QSize, *, cover=False, priority=False):
-        key = ImageKey(self._generation, self._revisions.get(name, 0),
-                       str(cfg.get("active_game_profile_id") or ""), str(cfg.get("mods_source_dir") or ""),
-                       name, max(1, size.width()), max(1, size.height()), cover)
+        key = self._key(cfg, name, size, cover)
         if key in self._cache:
             pixmap, _cost = self._cache[key]
             self._cache.move_to_end(key)
@@ -88,6 +109,7 @@ class ImageCache(QtCore.QObject):
         return self._cache.get(key, (None, 0))[0]
 
     def _dispatch(self) -> None:
+        self._fill_tiles()
         while self._pending and len(self._active) < tokens.IMAGE_WORKERS and not self._closed:
             key, cfg = self._pending.popitem(last=False)
             self._priority.discard(key)
@@ -102,6 +124,8 @@ class ImageCache(QtCore.QObject):
         if self._closed:
             return
         if key.generation == self._generation and key.revision == self._revisions.get(key.name, 0):
+            if key in self._tiles:
+                self._tile_done.add(key)
             pixmap = QtGui.QPixmap.fromImage(image) if error is None else QtGui.QPixmap()
             cost = max(1, pixmap.width() * pixmap.height() * max(1, pixmap.depth() // 8))
             if cost <= tokens.IMAGE_CACHE_BYTES:
@@ -123,12 +147,20 @@ class ImageCache(QtCore.QObject):
             if key.name == name:
                 self._pending.pop(key)
                 self._priority.discard(key)
+        self._tiles = OrderedDict((self._key_for_revision(key), cfg) for key, cfg in self._tiles.items())
+        self._tile_done = {key for key in self._tile_done if key.name != name}
+
+    def _key_for_revision(self, key):
+        return ImageKey(key.generation, self._revisions.get(key.name, 0), key.profile, key.source,
+                        key.name, key.width, key.height, key.cover)
 
     def reset(self) -> None:
         self._generation += 1
         self._cache.clear()
         self._pending.clear()
         self._priority.clear()
+        self._tiles.clear()
+        self._tile_done.clear()
         self._revisions.clear()
         self._bytes = 0
 

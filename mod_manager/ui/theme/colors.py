@@ -161,6 +161,12 @@ def readable_on(value: str) -> str:
     return "#000000" if luminance(value) > READABLE_THRESHOLD else "#ffffff"
 
 
+def button_ripple_color(palette, surface: tuple[int, int, int, int]) -> str:
+    red, green, blue, alpha = surface
+    background = blend(rgb_to_hex(red, green, blue), palette.panel, alpha / 255.0)
+    return readable_on(background)
+
+
 def color_channels(value: str) -> tuple[int, int, int, int]:
     if value == "transparent":
         return (0, 0, 0, 0)
