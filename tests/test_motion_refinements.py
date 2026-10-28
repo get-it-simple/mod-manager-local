@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import product
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -11,7 +12,7 @@ from mod_manager.models import OperationItem
 from mod_manager.preset_plan import PresetChange, PresetPlan, execute_preset_plan
 from mod_manager.progress import Progress, reporting
 from mod_manager.ui.image_cache import ImageCache
-from mod_manager.ui.theme import tokens
+from mod_manager.ui.theme import colors, tokens
 from tests.test_motion_and_loading import DeferredRunner
 from tests.window_fixture import WindowTestCase, mod_item
 
@@ -116,12 +117,16 @@ class MotionRefinementTests(WindowTestCase):
 
     def test_ripple_contrast_and_fade_adapt_to_light_dark_and_primary_buttons(self):
         button = self.button()
-        for theme in ("light", "dark"):
+        self.window.cfg["gui_accent_color_mode"] = "custom"
+        accents = (colors.FALLBACK_ACCENT, colors.LIGHT_BASE["panel"], colors.DARK_BASE["bg"])
+        for theme, accent in product(("light", "dark"), accents):
             self.window.cfg["gui_theme"] = theme
+            self.window.cfg["gui_accent_color"] = accent
             self.window._refresh_theme()
-            for variant in (None, "primary"):
-                with self.subTest(theme=theme, variant=variant):
+            for variant, hovered in product((None, "primary"), (False, True)):
+                with self.subTest(theme=theme, accent=accent, variant=variant, hovered=hovered):
                     button.setProperty("variant", variant)
+                    self.qt_app.sendEvent(button, QtCore.QEvent(QtCore.QEvent.Enter if hovered else QtCore.QEvent.Leave))
                     button._motion_feedback.refresh()
                     self.window.motion.finish_all()
                     before = button.grab().toImage().pixelColor(25, 8)
@@ -137,13 +142,16 @@ class MotionRefinementTests(WindowTestCase):
                     middle = button.grab().toImage().pixelColor(25, 8)
                     animation.setCurrentTime(450)
                     late = button.grab().toImage().pixelColor(25, 8)
-                    if base.lightness() >= 128:
-                        self.assertLess(early.lightness(), base.lightness())
+                    base_luma, early_luma, middle_luma, late_luma = (
+                        255 * colors.luminance(pixel.name()) for pixel in (base, early, middle, late)
+                    )
+                    if base_luma > 255 * colors.READABLE_THRESHOLD:
+                        self.assertLess(early_luma, base_luma)
                     else:
-                        self.assertGreater(early.lightness(), base.lightness())
-                    self.assertGreater(abs(early.lightness() - base.lightness()), 60)
-                    self.assertAlmostEqual(abs(middle.lightness() - base.lightness()),
-                                           2 * abs(late.lightness() - base.lightness()), delta=3)
+                        self.assertGreater(early_luma, base_luma)
+                    self.assertGreater(abs(early_luma - base_luma), 60)
+                    self.assertAlmostEqual(abs(middle_luma - base_luma),
+                                           2 * abs(late_luma - base_luma), delta=3)
                     animation.setCurrentTime(600)
                     self.assertEqual(base, button.grab().toImage().pixelColor(25, 8))
                     self.assertEqual(before, base)
