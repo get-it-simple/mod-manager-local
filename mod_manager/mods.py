@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .models import ModFile, ModItem, OperationFailure, OperationItem, OperationResult
+from .mod_modes import directory_mode, internal_mod_icon
 from .labels import ResolvedLabels, label_names, state_from_records
 from .links import (
     UNSUPPORTED_LINK_MESSAGE, UNSUPPORTED_LINKS,
@@ -85,6 +86,8 @@ def parse_extensions(cfg: Dict) -> Tuple[bool, List[str], bool]:
     return False, exts, include_folders
 
 def is_mod_file(path: Path, cfg: Dict) -> bool:
+    if directory_mode(cfg):
+        return path.is_dir() and path.name.casefold() != "images" and not path.name.startswith(".mod-import-")
     show_all, exts, include_folders = parse_extensions(cfg)
     if path.is_dir():
         return include_folders and path.name != "images"
@@ -143,6 +146,9 @@ def discover_mods(cfg: Dict) -> List[ModItem]:
     show_all, exts, include_folders = parse_extensions(cfg)
     group_exts = parse_group_extensions(cfg)
     recursive = bool(cfg.get("mod_recursive_scan"))
+    if directory_mode(cfg):
+        include_folders = True
+        recursive = False
     link_prefix = (cfg.get("link_prefix") or "").strip()
     copy_install = is_copy_install(cfg)
 
@@ -154,6 +160,8 @@ def discover_mods(cfg: Dict) -> List[ModItem]:
     from .import_registry import directory_mods
 
     for p, is_dir in _iter_mod_sources(src_dir, recursive, include_folders, directory_mods(cfg)):
+        if directory_mode(cfg) and not is_dir:
+            continue
         if not is_dir and not (show_all or p.suffix.lower() in exts):
             continue
         key = p
@@ -191,6 +199,9 @@ def apply_mod(mod: ModItem, overwrite: bool = False) -> Tuple[bool, str]:
 def import_mod_file(cfg: Dict, src: Path, replace: bool = False, target_name: str = "") -> Tuple[bool, str]:
     from .imports import PlannedMod, ignored_file, publish_plan
 
+    if directory_mode(cfg) and not src.is_dir():
+        return False, t("directory_mode_import_folders")
+
     dst_dir = Path(cfg.get("mods_source_dir") or "").expanduser()
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / (target_name or src.name)
@@ -222,9 +233,9 @@ def mod_image_path(cfg: Dict, mod_name: str) -> Path | None:
     images_dir = Path(cfg.get("mods_source_dir") or "").expanduser() / "images"
     for ext in IMAGE_EXTENSIONS:
         candidate = images_dir / f"{mod_name}{ext}"
-        if candidate.exists():
+        if candidate.is_file():
             return candidate
-    return None
+    return internal_mod_icon(cfg, images_dir.parent / mod_name)
 
 def import_mod_image(cfg: Dict, mod_name: str, src: Path) -> Tuple[bool, str]:
     from .image import save_as_png

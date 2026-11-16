@@ -16,6 +16,18 @@ class InlineRunner:
     background = inline_background
 
 
+class DeferredRunner:
+    def __init__(self):
+        self.jobs = []
+
+    def background(self, worker, callback, file_key="global"):
+        self.jobs.append((worker, callback))
+
+    def complete(self, index=0, error=None):
+        worker, callback = self.jobs.pop(index)
+        callback(worker() if error is None else None, error)
+
+
 def synthetic_snapshot(cfg):
     from mod_manager.ui import app
 

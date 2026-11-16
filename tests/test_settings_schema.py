@@ -72,8 +72,15 @@ class SchemaShapeTest(unittest.TestCase):
         self.assertEqual(schema.spec_for("install_mode").choices, ("link", "copy"))
 
     def test_the_install_method_and_grouping_are_per_game_settings(self):
-        for key in ("install_mode", "mod_group_extensions"):
+        for key in ("install_mode", "mod_group_extensions", "mod_mode", "mod_icon_path"):
             self.assertIn(key, schema.PROFILE_KEYS, key)
+
+    def test_directory_settings_have_compatible_defaults_and_readable_choices(self):
+        self.assertEqual(DEFAULT_CONFIG["mod_mode"], "standard")
+        self.assertEqual(DEFAULT_CONFIG["mod_icon_path"], "")
+        self.assertEqual(schema.spec_for("mod_mode").choices, ("standard", "directories"))
+        self.assertEqual(schema.spec_for("mod_mode").choice_labels, ("Standard", "Directories"))
+        self.assertTrue(schema.spec_for("mod_icon_path").tooltip)
 
     def test_label_for_falls_back_for_unknown_keys(self):
         self.assertEqual(schema.label_for("page_size"), "Mods per page")

@@ -62,7 +62,12 @@ def build_field(spec: FieldSpec, value, parent=None) -> QtWidgets.QWidget:
         return widget
     if spec.kind == CHOICE:
         widget = select_box(parent)
-        if spec.key == "gui_language":
+        if spec.choice_labels:
+            widget.setProperty("usesChoiceData", True)
+            for choice, label in zip(spec.choices, spec.choice_labels):
+                widget.addItem(label, choice)
+            widget.setCurrentIndex(widget.findData(value or spec.choices[0]))
+        elif spec.key == "gui_language":
             widget.setProperty("usesChoiceData", True)
             for language in spec.choices:
                 widget.addItem(t("english_language") if language == "en" else language, language)

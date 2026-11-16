@@ -36,10 +36,11 @@ class LibraryController(QtCore.QObject):
         self._needs_refresh = False
         cfg = deepcopy(self.window.cfg)
         identity = tuple(str(cfg.get(key, "")) for key in ("active_game_profile_id", "mods_source_dir", "game_mods_dir",
-                                                          "mod_extensions", "mod_group_extensions", "mod_recursive_scan", "install_mode", "link_prefix"))
+                                                          "mod_extensions", "mod_group_extensions", "mod_recursive_scan", "install_mode", "link_prefix",
+                                                          "mod_mode", "mod_icon_path"))
         if self._identity is not None and self._identity != identity:
             self.snapshot = None
-            if self._identity[:2] != identity[:2]:
+            if self._identity[:2] != identity[:2] or self._identity[-2:] != identity[-2:]:
                 self.window.images.reset()
             self.window._clear_library_models()
         self._identity = identity

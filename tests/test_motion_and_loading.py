@@ -15,18 +15,7 @@ from mod_manager.ui.motion import ButtonFeedback
 from mod_manager.ui.theme import tokens
 from tests.qt_support import dispose, qt_app
 from tests.window_fixture import WindowTestCase
-
-
-class DeferredRunner:
-    def __init__(self):
-        self.jobs = []
-
-    def background(self, worker, callback, file_key="global"):
-        self.jobs.append((worker, callback))
-
-    def complete(self, index=0, error=None):
-        worker, callback = self.jobs.pop(index)
-        callback(worker() if error is None else None, error)
+from tests.gui_background import DeferredRunner
 
 
 def advance_motion(window, fraction=1.0):

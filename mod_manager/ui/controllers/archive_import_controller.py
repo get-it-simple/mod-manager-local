@@ -218,7 +218,8 @@ class ArchiveImportController(QtCore.QObject):
     def commit(self) -> None:
         if self.publishing or self.scans or self.closed:
             return
-        if any(self.cfg.get(key) != self.window.cfg.get(key) for key in ("active_game_profile_id", "mods_source_dir", "game_mods_dir")):
+        if any(self.cfg.get(key) != self.window.cfg.get(key) for key in
+               ("active_game_profile_id", "mods_source_dir", "game_mods_dir", "mod_mode", "mod_icon_path")):
             prompts.show_warning(self.window, t('archive_import'), t('the_game_profile_or_mod_directories_changed_close_this_import_and_add_th'))
             return
         choose = lambda name: prompts.choose_import_conflict(self.dialog or self.window, name)

@@ -4,7 +4,7 @@ from ...i18n import t
 
 from PySide6 import QtWidgets
 
-from ...settings_schema import GAME_PROFILE_FIELDS
+from ...settings_schema import GAME_PROFILE_FIELDS, coerce_game_profile
 from ..theme import tokens
 from ..widgets.form import FormBuilder
 from . import prompts
@@ -36,12 +36,18 @@ class GameProfileDialog(QtWidgets.QDialog):
         if path:
             self.form.fields[key].setText(path)
 
+    def accept(self) -> None:
+        try:
+            values = coerce_game_profile(self.form.values())
+        except ValueError as error:
+            prompts.show_error(self, TITLE, str(error))
+            return
+        if not values.get("name"):
+            prompts.show_error(self, TITLE, MISSING_NAME)
+            return
+        super().accept()
+
     def values(self) -> dict | None:
         if self.exec() != QtWidgets.QDialog.Accepted:
             return None
-        values = self.form.values()
-        values = {key: value.strip() if isinstance(value, str) else value for key, value in values.items()}
-        if not values.get("name"):
-            prompts.show_error(self, TITLE, MISSING_NAME)
-            return None
-        return values
+        return coerce_game_profile(self.form.values())

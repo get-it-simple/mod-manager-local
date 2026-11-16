@@ -1,7 +1,7 @@
 # Mod Manager
 
 A symlink-based mod manager for Unreal Engine games and most other engines, supports both copy or symlink-based mods.
-- Manages mods as symbolic links (files) and junctions (folders) in the game directory — no file copying.
+- Manages mods as symbolic links (files) and junctions (folders), or copies them when a game profile requires it.
 - Supports copy based installation so the games that rejects symlink based mods will work without issues.
 
 ---
@@ -151,6 +151,10 @@ Choose **Use image** to apply it, **Choose file...** to select another image, or
 If no single usable image is available, the file chooser opens directly.
 Applying to multiple mods always requires confirmation; accepting the clipboard offer also confirms that batch.
 Preview files are stored locally in the source folder's `images` directory. Original image files are preserved.
+For folder mods, a game profile can also specify **Icon path inside mod**, for example `assets/icon.png`.
+The path is relative to each mod folder; absolute paths and `..` are not allowed.
+A manually assigned preview takes priority. Missing or unreadable internal images use the usual placeholder and never prevent mod operations.
+Leave the path empty to disable internal icons. After replacing an internal image outside the app, use Refresh to reload artwork.
 In the details panel, previews automatically fit the space below the mod information, including enlarging small images, while preserving their proportions and showing the whole image.
 
 </details>
@@ -347,6 +351,8 @@ operate on the entire selected page; `toggle` acts only on the given indexes.
 --mod-recursive-scan / --no-mod-recursive-scan  Scan subfolders of the source directory
 --link-prefix <text>
 --install-mode link|copy                      How mods reach the game folder
+--mod-mode standard|directories               Discover files/folders or whole folder mods
+--mod-icon-path <relative-path>                Optional icon inside each mod folder
 ```
 
 `games add --help` prints the same descriptions shown as tooltips in the GUI's Game profile fields.
@@ -358,6 +364,17 @@ operate on the entire selected page; `toggle` acts only on the given indexes.
 `--mod-group-extensions` joins several file types into a single mod. With `.pak,.utoc,.ucas`, the files `Weapon.pak`, `Weapon.utoc` and `Weapon.ucas` become one mod listed as `Weapon.pak` — named after the first extension in the list that is actually present — and installing, uninstalling, or applying a preset covers every member at once. A grouped mod counts as installed only when all of its files are in the game folder; a half-installed group completes on the next install. Grouped extensions are always treated as mod files even when `--mod-extensions` does not list them, and files are only grouped with siblings in the same folder, so a recursive scan never merges two same-named mods from different subfolders.
 
 `--install-mode` selects how mods reach the game folder. `link` (the default) creates symlinks and junctions as before. `copy` physically copies the mod files, for games that refuse to load linked content; uninstalling then deletes those copies from the game folder and never touches your source mods. In copy mode an install that would replace an existing file asks for confirmation first — the GUI shows a dialog listing the affected files, and the CLI prints them and stops unless `--overwrite` is given.
+
+`--mod-mode directories` treats each immediate subfolder of the source as one complete mod, installed under its own folder name.
+The reserved `images` folder and temporary import folders are excluded. Loose files are not listed, and extension filters and recursive scanning do not split folder contents into separate mods.
+`standard` is the default and preserves the existing file, grouping and folder behavior.
+
+In Directories mode, import existing mod folders or archives. Individual mod files must first be placed in a folder.
+Archive import retains **Add files together**, individual selection and **Preserve archive folder structure**; every imported result is a folder.
+Together uses the archive name; separate results use the primary mod filename without its extension.
+Internal artwork is retained alongside the payload, with the same flattening or structure preservation selected for the archive.
+In separate mode, artwork is taken from the selected file group's containing folder and its subfolders.
+Set the profile's icon path to match the resulting layout, for example `icon.png` after flattening or `assets/icon.png` when that structure is preserved.
 
 When the destination file system reports no link support, the GUI and interactive text menus offer to save `copy` in the current game profile and retry only the failed installations. Declining keeps the profile unchanged. Existing successful links and installations stay in place; replacing a conflicting file requires separate confirmation. Failed attempts remain in the GUI session error history. One-shot CLI commands never prompt or change the install method automatically: use `games edit <profile-id> --install-mode copy`, then retry the failed installations.
 
@@ -471,7 +488,7 @@ python mod-manager.py presets delete 2,3
 
 `settings set --help` prints the descriptions shown as tooltips in the GUI, and the same validation applies to both.
 
-Game-specific paths, extension, grouping and install settings (`mods_source_dir`, `game_mods_dir`, `mod_extensions`, `mod_group_extensions`, `mod_recursive_scan`, `link_prefix`, `install_mode`) are not application settings. They are edited only through `games add` / `games edit` and the GUI "Game profile" dialog, and a settings update never changes them. `settings show` still prints the values of the active profile.
+Game-specific paths, discovery mode, internal icon, extension, grouping and install settings (`mods_source_dir`, `game_mods_dir`, `mod_mode`, `mod_icon_path`, `mod_extensions`, `mod_group_extensions`, `mod_recursive_scan`, `link_prefix`, `install_mode`) are not application settings. They are edited only through `games add` / `games edit` and the GUI "Game profile" dialog, and a settings update never changes them. `settings show` still prints the values of the active profile.
 
 In the GUI, the "Game profile" dialog (Games > Add/Edit) shows every per-game field, including "Grouped extensions", a "Scan subfolders" checkbox and the "Install method" selector — see the `games` command reference above for details on the `folders` token, recursive scanning, grouping and the copy install mode.
 

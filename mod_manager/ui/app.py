@@ -12,6 +12,7 @@ from ..folder_actions import ensure_paths, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
+from ..mod_modes import directory_mode
 from ..i18n import t
 from ..library_state import folder_issues
 from ..library_filters import LibraryFilters
@@ -478,6 +479,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.workspace.set_profiles(self.cfg.get("game_profiles", []), profile.get("id", "") if profile else "", self.busy)
         self._update_sidebar_labels()
         count = t("showing_mods", count=len(self.current_mod_items), total=len(self.current_mod_names))
+        self._update_label_controls()
         self.mods_tab.set_subtitle(t("profile_summary", game=profile.get("name", t('game')),
                                    mode=t("copies_mode" if is_copy_install(self.cfg) else "links_mode"), count=count) if profile else "", elide=True)
 
@@ -1032,7 +1034,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.refresh_mods()
 
     def _sidebar_label_requested(self, label: str) -> None:
-        if not self.busy:
+        if not self.busy and self.library.ready:
             self._navigate("library")
             self._toggle_label_filter(label)
 
@@ -1045,6 +1047,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         entries = [(name, mode, count, name.casefold() in active)
                    for name, mode, count in sorted(catalog, key=lambda entry: (-entry[2], entry[0].casefold()))]
         self.workspace.labels_list.update_labels(entries, self.theme.system_accent)
+
+    def _update_label_controls(self) -> None:
+        enabled = bool(active_game_profile(self.cfg)) and not self.busy and self.library.ready
+        self.workspace.labels_list.setEnabled(enabled)
+        self.label_filter_box.setEnabled(enabled)
 
     def _confirm_overwrite(self, mods: list) -> bool:
         """Ask before a copy install replaces files that are already in the game mods folder."""
@@ -1200,6 +1207,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.current_mod_names = []
         self.current_mods_shown = []
         self.current_mod_labels = {}
+        self._update_sidebar_labels()
+        for box in (self.label_filter_box, self.search_box):
+            text = "" if box is self.label_filter_box else box.currentText()
+            with QtCore.QSignalBlocker(box), QtCore.QSignalBlocker(box.lineEdit()):
+                replace_filter_options(box, [])
+                box.setCurrentText(text)
         self.current_mod_records = {}
         self.current_mod_favorites = set()
         self.mods_model.set_data([], {}, {})
@@ -1233,6 +1246,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         elif not self.busy:
             self.statusBar().showMessage(self.runner.status_text or t("ready"))
         self._operation_state_changed()
+
+        self._update_label_controls()
 
     def _render_mods(self, selected_names: List[str] | None = None) -> None:
         if self.library.snapshot is None:
@@ -1676,6 +1691,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not ensure_paths(self.cfg):
             return
         existing = {m.name for m in self.current_mod_items}
+        if directory_mode(self.cfg) and any(path.is_file() and not is_image_file(path) for path in paths):
+            self._set_status(t("directory_mode_import_folders"))
         mod_paths = [path for path in paths if is_mod_file(path, self.cfg) and not ignored_file(path, self.cfg)]
         tasks = regular_import_tasks(self.cfg, mod_paths, existing, lambda name: prompts.choose_import_conflict(self, name))
         image_mods = []

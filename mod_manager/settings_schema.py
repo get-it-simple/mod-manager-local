@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from app_paths import DEFAULT_CONFIG
 from .i18n import available_languages, t
 from .keyboard import validate_bindings
+from .mod_modes import MOD_MODES, normalize_icon_path
 
 from .ui.theme.colors import normalize_hex
 
@@ -41,6 +42,7 @@ class FieldSpec:
     maximum: int | None = None
     depends_on: tuple | None = None
     browse: bool = False
+    choice_labels: tuple[str, ...] = ()
 
     @property
     def range_text(self) -> str:
@@ -67,6 +69,20 @@ LABEL_MEMBERS_FIELD = FieldSpec(
 )
 
 MODS_FIELDS = (
+    FieldSpec(
+        key="mod_mode",
+        label=t("mod_mode"),
+        tooltip=t("mod_mode_help"),
+        kind=CHOICE,
+        choices=MOD_MODES,
+        choice_labels=(t("mod_mode_standard"), t("mod_mode_directories")),
+    ),
+    FieldSpec(
+        key="mod_icon_path",
+        label=t("mod_icon_path"),
+        tooltip=t("mod_icon_path_help"),
+        kind=TEXT,
+    ),
     FieldSpec(
         key="mods_source_dir",
         label=t('mods_source_folder'),
@@ -337,6 +353,8 @@ def default_settings() -> dict:
 
 
 def coerce_value(spec: FieldSpec, value):
+    if spec.key == "mod_icon_path":
+        return normalize_icon_path(value)
     if spec.kind == SHORTCUTS:
         if isinstance(value, str):
             import json

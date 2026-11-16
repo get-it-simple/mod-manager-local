@@ -13,6 +13,7 @@ from threading import Event
 
 from .archive_backend import ARCHIVE_EXTENSIONS, ArchiveError, extract_archive, safe_relative_path
 from .import_registry import register_directory_mod
+from .mod_modes import directory_mode
 from .import_io import check_cancelled, copy_import_file
 from .log import logger
 from .progress import report
@@ -47,6 +48,8 @@ class PreparedArchive:
     selected: set[int] = field(default_factory=set)
     images: dict[int, Path] = field(default_factory=dict)
     source_name: str = ""
+    directory_mode: bool = False
+    artwork: tuple[Path, ...] = ()
 
     def close(self) -> None:
         if self.owner is not None:
@@ -77,7 +80,7 @@ def scan_units(root: Path, cfg: dict) -> list[ImportUnit]:
             raise ArchiveError(t('linked_import_paths_are_unsupported_value0', value0=f'{source.name}'))
         if not source.is_file() or ignored_file(source, cfg) or source.suffix.lower() in IMAGE_EXTENSIONS:
             continue
-        if not show_all and extensions and source.suffix.lower() not in extensions:
+        if not directory_mode(cfg) and not show_all and extensions and source.suffix.lower() not in extensions:
             continue
         if source.suffix.lower() in ARCHIVE_EXTENSIONS:
             continue
@@ -126,6 +129,12 @@ def prepare_archive(source: Path, cfg: dict, cancelled: Event | None = None) -> 
             bool(cfg.get("archive_preserve_structure", False)), set(range(len(units))),
         )
         prepared.source_name = source.name
+        prepared.directory_mode = directory_mode(cfg)
+        if prepared.directory_mode:
+            prepared.artwork = tuple(
+                path.relative_to(root) for path in sorted(root.rglob("*"))
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS and not ignored_file(path, cfg)
+            )
         return prepared
     except Exception:
         owner.cleanup()
@@ -136,9 +145,11 @@ def _rename_files(files: tuple[tuple[Path, Path], ...], number: int) -> tuple[tu
     return tuple((source, relative.with_name(f"{relative.stem} ({number}){relative.suffix}")) for source, relative in files)
 
 
-def _container_files(archive: PreparedArchive, choose: ConflictResolver) -> tuple[tuple[Path, Path], ...]:
+def _container_files(
+    archive: PreparedArchive, choose: ConflictResolver, units: list[ImportUnit] | None = None,
+) -> tuple[tuple[Path, Path], ...]:
     groups = []
-    for unit in archive.units:
+    for unit in (archive.units if units is None else units):
         files = tuple((archive.root / member, member if archive.preserve_structure else Path(member.name)) for member in unit.members)
         names = {relative.as_posix().casefold() for _source, relative in files}
         collisions = [group for group in groups if names & {relative.as_posix().casefold() for _source, relative in group}]
@@ -158,11 +169,16 @@ def _container_files(archive: PreparedArchive, choose: ConflictResolver) -> tupl
     return tuple(member for group in groups for member in group)
 
 
+def _artwork_units(archive: PreparedArchive, parent: Path | None = None) -> list[ImportUnit]:
+    return [ImportUnit(path.name, (path,)) for path in archive.artwork
+            if parent is None or path.is_relative_to(parent)]
+
+
 def create_plans(archives: list[PreparedArchive], choose: ConflictResolver) -> list[PlannedMod]:
     plans = []
     for archive in archives:
         if archive.mode == "together":
-            files = _container_files(archive, choose)
+            files = _container_files(archive, choose, [*archive.units, *_artwork_units(archive)])
             if files:
                 plans.append(PlannedMod(archive.name, files, True))
         else:
@@ -170,9 +186,10 @@ def create_plans(archives: list[PreparedArchive], choose: ConflictResolver) -> l
                 if index not in archive.selected:
                     continue
                 preserve = archive.preserve_structure
-                name = Path(unit.name).stem if preserve else unit.name
-                files = tuple((archive.root / member, member if preserve else Path(member.name)) for member in unit.members)
-                plans.append(PlannedMod(name, files, preserve, archive.images.get(index)))
+                name = Path(unit.name).stem if preserve or archive.directory_mode else unit.name
+                units = [unit, *_artwork_units(archive, unit.members[0].parent)]
+                files = _container_files(archive, choose, units)
+                plans.append(PlannedMod(name, files, preserve or archive.directory_mode, archive.images.get(index)))
     return plans
 
 
@@ -210,6 +227,8 @@ def resolve_plans(cfg: dict, plans: list[PlannedMod], choose: ConflictResolver, 
 
 
 def regular_import_tasks(cfg: dict, paths: list[Path], existing: set[str], choose: ConflictResolver) -> list[tuple]:
+    if directory_mode(cfg) and any(not path.is_dir() for path in paths):
+        raise ValueError(t("directory_mode_import_folders"))
     units = group_members(paths, parse_group_extensions(cfg), {path for path in paths if path.is_dir()})
     plans = [PlannedMod(unit.name, tuple((path, Path(path.name)) for path in unit.members), unit.members[0].is_dir()) for unit in units]
     plans = resolve_plans(cfg, plans, choose, existing)
@@ -303,6 +322,8 @@ def _publish_files(cfg: dict, plan: PlannedMod, cancelled: Event | None) -> tupl
 
 
 def publish_plan(cfg: dict, plan: PlannedMod, cancelled: Event | None = None) -> tuple[bool, str]:
+    if directory_mode(cfg) and not plan.is_directory:
+        return False, t("directory_mode_import_folders")
     ok, message = _publish_files(cfg, plan, cancelled)
     if not ok:
         return ok, message

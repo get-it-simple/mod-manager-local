@@ -86,6 +86,8 @@ def _validate_config(cfg: Dict) -> None:
                 raise StorageError(f"{spec.label} must be text. Repair config.json.")
             elif spec.kind == settings_schema.CHOICE and value and value not in spec.choices:
                 raise StorageError(f"{spec.label} must be one of: {', '.join(spec.choices)}. Repair config.json.")
+            elif spec.key == "mod_icon_path":
+                settings_schema.coerce_value(spec, value)
 
 def save_config(cfg: Dict) -> None:
     save_json(CONFIG_PATH, normalize_game_profiles(dict(cfg)))
@@ -125,7 +127,7 @@ def _profile_from_legacy(cfg: Dict) -> Dict | None:
         "created_at": created_at,
     }
     for key in GAME_PROFILE_KEYS:
-        profile[key] = cfg.get(key, "")
+        profile[key] = cfg.get(key, DEFAULT_CONFIG.get(key, ""))
     return profile
 
 def normalize_game_profiles(cfg: Dict) -> Dict:
@@ -142,7 +144,7 @@ def normalize_game_profiles(cfg: Dict) -> Dict:
         item = {"id": profile_id, "name": name, "created_at": created_at}
         for key in GAME_PROFILE_KEYS:
             value = profile.get(key, DEFAULT_CONFIG.get(key, ""))
-            item[key] = DEFAULT_CONFIG[key] if value == "" and isinstance(DEFAULT_CONFIG[key], bool) else value
+            item[key] = DEFAULT_CONFIG[key] if value == "" and (isinstance(DEFAULT_CONFIG[key], bool) or key == "mod_mode") else value
         normalized.append(item)
 
     if not normalized:

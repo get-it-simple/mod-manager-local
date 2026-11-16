@@ -1,4 +1,12 @@
 {
+  "mod_mode": "Mod mode",
+  "mod_mode_help": "Standard lists mod files and folders using the configured filters. Directories treats each top-level folder as one complete mod.",
+  "mod_mode_standard": "Standard",
+  "mod_mode_directories": "Directories",
+  "mod_icon_path": "Icon path inside mod",
+  "mod_icon_path_help": "Optional path relative to each mod folder, such as assets/icon.png. A manually assigned preview takes priority. Leave empty to disable internal icons.",
+  "mod_icon_path_invalid": "The icon path must be relative to the mod folder, such as assets/icon.png, without a drive, an absolute path or '..'.",
+  "directory_mode_import_folders": "Directories mode accepts mod folders and archives. Put individual mod files into a folder before importing them.",
   "install_selected": "Install selected ({count})",
   "uninstall_selected": "Uninstall selected ({count})",
   "install_page": "Install page ({count})",

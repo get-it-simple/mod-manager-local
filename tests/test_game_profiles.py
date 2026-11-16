@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from mod_manager import storage
 from mod_manager.cli import run_cli
+from mod_manager.settings_schema import coerce_game_profile
 
 
 class GameProfileStorageTests(unittest.TestCase):
@@ -50,6 +51,8 @@ class GameProfileStorageTests(unittest.TestCase):
         self.assertEqual(profile["mods_source_dir"], "D:/mods/source")
         self.assertEqual(profile["game_mods_dir"], "D:/game/mods")
         self.assertEqual(profile["mod_extensions"], ".pak")
+        self.assertEqual(profile["mod_mode"], "standard")
+        self.assertEqual(profile["mod_icon_path"], "")
         self.assertEqual(cfg["active_game_profile_id"], profile["id"])
         self.assertEqual(cfg["mods_source_dir"], "D:/mods/source")
 
@@ -74,6 +77,39 @@ class GameProfileStorageTests(unittest.TestCase):
 
         storage.set_active_game_profile(cfg, second["id"])
         self.assertFalse(cfg["mod_recursive_scan"])
+
+    def test_directory_mode_and_icon_path_persist_only_in_their_profile(self):
+        cfg = storage.load_config()
+        first = storage.create_game_profile("Directories", {
+            "mods_source_dir": "synthetic/source", "game_mods_dir": "synthetic/game",
+            **coerce_game_profile({"mod_mode": "directories", "mod_icon_path": "assets/icon.png"}),
+        }, cfg)
+        second = storage.create_game_profile("Standard", {
+            "mods_source_dir": "synthetic/other-source", "game_mods_dir": "synthetic/other-game",
+        }, cfg)
+        storage.save_config(cfg)
+        cfg = storage.load_config()
+        self.assertEqual(cfg["mod_mode"], "standard")
+        self.assertEqual(cfg["mod_icon_path"], "")
+        storage.set_active_game_profile(cfg, first["id"])
+        storage.save_config(cfg)
+        cfg = storage.load_config()
+        self.assertEqual(cfg["mod_mode"], "directories")
+        self.assertEqual(cfg["mod_icon_path"], "assets/icon.png")
+        self.assertEqual(second["mod_icon_path"], "")
+
+    def test_cli_add_and_edit_round_trip_directory_settings(self):
+        self.assertEqual(run_cli(["games", "add", "Synthetic", "--mods-source-dir", "synthetic/source",
+                                  "--game-mods-dir", "synthetic/game", "--mod-mode", "directories",
+                                  "--mod-icon-path", "assets/icon.png"]), 0)
+        cfg = storage.load_config()
+        identifier = cfg["active_game_profile_id"]
+        self.assertEqual(cfg["mod_mode"], "directories")
+        self.assertEqual(cfg["mod_icon_path"], "assets/icon.png")
+        self.assertEqual(run_cli(["games", "edit", identifier, "--mod-icon-path", "icon.png"]), 0)
+        self.assertEqual(storage.load_config()["mod_icon_path"], "icon.png")
+        self.assertEqual(run_cli(["games", "edit", identifier, "--mod-icon-path", "../outside.png"]), 1)
+        self.assertEqual(storage.load_config()["mod_icon_path"], "icon.png")
 
     def test_legacy_presets_are_migrated_into_default_profile(self):
         storage.save_json(

@@ -7,7 +7,7 @@ from mod_manager.keyboard import default_bindings
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.34"
+APP_VERSION = "1.2.35"
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -30,6 +30,8 @@ DEFAULT_CONFIG = {
     "mods_source_dir": "",
     "game_mods_dir": "",
     "mod_extensions": "",
+    "mod_mode": "standard",
+    "mod_icon_path": "",
     "mod_group_extensions": "",
     "mod_recursive_scan": False,
     "link_prefix": "",
