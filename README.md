@@ -194,7 +194,7 @@ Archives inside other archives are not unpacked recursively.
 <summary>Requirements</summary>
 
 - Python 3.10+
-- [PySide6](https://pypi.org/project/PySide6/) >= 6.7 — Qt 6 bindings for the GUI (LGPL v3)
+- [PySide6](https://pypi.org/project/PySide6/) >= 6.12 — Qt 6 bindings for the GUI (LGPL v3)
 - [prompt_toolkit](https://pypi.org/project/prompt_toolkit/) — for interactive CLI tab-completion
 - [PyInstaller](https://pypi.org/project/pyinstaller/) — only needed to build a standalone executable
 
