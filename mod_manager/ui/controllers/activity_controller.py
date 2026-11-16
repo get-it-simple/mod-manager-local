@@ -132,7 +132,7 @@ class ActivityController(QtCore.QObject):
                 if frame is not None:
                     frame.finished_at = frame.elapsed
                     frame.success = results.get(name, False)
-        model.set_active_mods(names)
+        model.set_active_mods(names | self.window.runner.pending_mods)
 
     def sync(self, *_args) -> None:
         if self._closed:

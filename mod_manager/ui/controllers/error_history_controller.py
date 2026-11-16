@@ -15,6 +15,7 @@ from ...link_recovery import (
 from ...models import OperationItem, OperationResult
 from ...mods import existing_targets
 from ...storage import active_game_profile
+from ...storage_policy import storage_policy
 from pathlib import Path
 from ...models import OperationFailure
 from ..dialogs.base import show_dialog
@@ -32,6 +33,7 @@ class ErrorHistoryController(QtCore.QObject):
         self.model = ErrorHistoryModel(self)
         self.dialog = None
         self.recovering = False
+        self._recovering_names = set()
         self.button = text_button(t('errors_0'), t('show_errors_from_this_session'), self.open, window)
         set_variant(self.button, LINK)
         self.button.setEnabled(False)
@@ -64,8 +66,12 @@ class ErrorHistoryController(QtCore.QObject):
         self, label: str, worker: Callable, done: Callable, *,
         preset_names: tuple[str, ...] = (), recover_links: bool = True,
         previous_result: OperationResult | None = None,
+        mod_names: tuple[str, ...] = (),
+        prepare: Callable | None = None,
+        reserved_presets: tuple[str, ...] | None = None,
     ) -> None:
-        if self.window.context.busy or (self.recovering and recover_links):
+        if self.window.context.busy or (self.recovering and recover_links
+                                       and (not mod_names or self._recovering_names.intersection(mod_names))):
             return
         original = deepcopy(self.window.cfg)
         profile = active_game_profile(self.window.cfg)
@@ -95,7 +101,9 @@ class ErrorHistoryController(QtCore.QObject):
             if recover_links and needs_copy_recovery(result):
                 self._recover(result, original, value, done, preset_names)
 
-        self.window._run_action(label, work, completed)
+        self.window._run_action(label, work, completed, mod_names=mod_names,
+                                preset_names=preset_names if reserved_presets is None else reserved_presets, prepare=prepare,
+                                front=previous_result is not None)
 
     def _recover(
         self, result: OperationResult, original: dict, value, done: Callable,
@@ -104,6 +112,7 @@ class ErrorHistoryController(QtCore.QObject):
         if self.recovering:
             return
         self.recovering = True
+        self._recovering_names = {mod.name for mod in copy_retry_mods(result)}
         retry_ready = False
         try:
             validate_recovery_profile(self.window.cfg, original)
@@ -113,7 +122,7 @@ class ErrorHistoryController(QtCore.QObject):
             overwrite = bool(existing_targets(retry_mods))
             if not self.window._confirm_overwrite(retry_mods):
                 return
-            save_copy_profile(self.window.cfg, original)
+            validate_recovery_profile(self.window.cfg, original)
             retry_ready = True
         except (OSError, ValueError) as error:
             prompts.show_error(self.window, COPY_RECOVERY_TITLE, str(error))
@@ -124,12 +133,27 @@ class ErrorHistoryController(QtCore.QObject):
                 self.recovering = False
 
         cfg = deepcopy(self.window.cfg)
+        save_error = []
 
         def work():
-            return retry_copy_installations(cfg, result, overwrite, preset_names)
+            try:
+                save_copy_profile(cfg, original)
+            except (OSError, ValueError) as error:
+                save_error.append(str(error))
+                return result
+            with storage_policy(config=cfg):
+                return retry_copy_installations(cfg, result, overwrite, preset_names)
 
         def completed(recovered):
             try:
+                if save_error:
+                    prompts.show_error(self.window, COPY_RECOVERY_TITLE, save_error[0])
+                    self.window._set_status(t("copy_retry_cancelled_value0", value0=save_error[0]))
+                    return
+                self.window.cfg = self.window.context.replace_config(cfg)
+                self.window.tile_delegate.cfg = cfg
+                self.window.library.invalidate()
+                self.window.refresh_mods()
                 if isinstance(value, tuple):
                     prefix = recovered.summary() if isinstance(value[0], str) else value[0]
                     done((prefix, recovered))
@@ -137,5 +161,7 @@ class ErrorHistoryController(QtCore.QObject):
                     done(recovered)
             finally:
                 self.recovering = False
+                self._recovering_names.clear()
 
-        self.run(t('copying_failed_installations'), work, completed, recover_links=False, previous_result=result)
+        self.run(t('copying_failed_installations'), work, completed, recover_links=False, previous_result=result,
+                 mod_names=tuple(self._recovering_names), preset_names=preset_names)

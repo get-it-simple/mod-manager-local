@@ -86,6 +86,8 @@ class GameProfileSwitchGuiTests(unittest.TestCase):
 
         win = ModManagerGui()
         try:
+            self.assertEqual(win.cfg["mods_source_dir"], str(self.src_a))
+            self.assertEqual({mod.name for mod in win.library.snapshot.items}, {"a.pak", "shared.pak"})
             self.assertEqual(self.sidebar_entries(win), [("Common", "manual", 2), ("Only first", "manual", 1)])
             win.filters.add("label", "Common")
             win.filters.add("label", "Only first")
@@ -113,6 +115,9 @@ class GameProfileSwitchGuiTests(unittest.TestCase):
             win.runner.background = deferred.background
             win.refresh_mods()
             win._select_game_profile(second["id"])
+            self.assertNotEqual(win.cfg["active_game_profile_id"], second["id"])
+            self.assertTrue(win.runner.barrier_pending)
+            deferred.complete(1)
             win._sync_workspace()
             self.assertEqual(self.sidebar_entries(win), [])
             self.assertEqual(win.label_filter_box.model().stringList(), [])

@@ -109,6 +109,9 @@ class KeyboardController(QtCore.QObject):
 
     def refresh_page(self) -> None:
         window = self.window
+        if window.workspace.current_page == "trash":
+            window.trash.refresh()
+            return
         {"library": lambda: window.refresh_all(reload_artwork=True), "presets": window.refresh_all, "cleanup": window.refresh_all,
          "games": window.games.refresh_lists, "labels": window.labels_controller.activate,
          "settings": window.settings.update_dirty}[window.workspace.current_page]()

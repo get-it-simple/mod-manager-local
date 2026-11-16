@@ -117,9 +117,18 @@ class OverwritePromptTest(WindowTestCase):
         apply_mods.assert_called_once()
 
     def test_a_preset_toggle_asks_for_the_mods_it_would_install(self):
+        from PySide6 import QtCore
+
         pending = [self._mod("weapon.pak", copy_install=True)]
 
-        self.window.presets_table.selectRow(1)
+        selection = self.window.presets_table.selectionModel()
+        selection.select(self.window.presets_model.index(1, 0),
+                         QtCore.QItemSelectionModel.ClearAndSelect | QtCore.QItemSelectionModel.Rows)
+        self.assertEqual(self.window.presets_model.keys, ["core", "ui"])
+        self.assertEqual(self.window.presets_model.rowCount(), 2)
+        self.assertEqual(self.window.cfg["page_size"], 10)
+        self.assertEqual(self.window._selected_preset_names(), ["ui"])
+        self.assertFalse(self.window.operation_blocked)
         with patch("mod_manager.preset_plan.load_presets", return_value={"ui": [pending[0].name]}), patch("mod_manager.preset_plan.discover_mods", return_value=pending), patch(
             "mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False
         ) as question, patch("mod_manager.ui.app.execute_preset_plan") as toggle:

@@ -185,11 +185,12 @@ class OperationActivityGuiTests(WindowTestCase):
         self.window.runner.poll()
         self.assertTrue(self.window.activity.indicator.isHidden())
 
-    def test_action_refreshes_once_after_done_and_also_after_failure(self):
+    def test_action_returns_one_fresh_snapshot_for_success_and_failure(self):
         pool = self.use_controlled_pool()
+        self.window.runner.background = BACKGROUND_ACTION.__get__(self.window.runner)
         with patch("mod_manager.ui.controllers.library_controller.load_library_snapshot", side_effect=lambda _cfg: self.window.library.snapshot) as scan:
             def done(_result):
-                self.assertEqual(scan.call_count, 0)
+                self.assertEqual(scan.call_count, 1)
                 self.window.refresh_mods()
 
             self.window._run_action("Synthetic operation", lambda: OperationResult(), done)
@@ -312,23 +313,25 @@ class OperationActivityGuiTests(WindowTestCase):
 
             self.assertEqual(text_bounds(animated), text_bounds(native), button.text())
 
-    def test_action_waits_for_stale_scan_and_then_loads_one_fresh_snapshot(self):
-        pool = self.use_controlled_pool()
+    def test_operation_snapshot_supersedes_an_older_inflight_scan(self):
+        from dataclasses import replace
+
         deferred = DeferredRunner()
         self.window.runner.background = deferred.background
+        original = self.window.library.snapshot
         self.window.refresh_mods()
+        stale_worker, stale_completed = deferred.jobs.pop()
         self.window._run_action("Synthetic operation", lambda: None)
-        pool.complete(1)
-        self.window.runner.poll()
-        self.assertEqual(len(deferred.jobs), 1)
-        self.assertTrue(self.window.library.loading)
+        self.mods[1] = replace(self.mods[1], installed=True)
         deferred.complete()
-        self.assertTrue(self.window.library.loading)
-        self.assertEqual(len(deferred.jobs), 1)
-        deferred.complete()
+        current = self.window.library.snapshot
+        self.assertIsNot(current, original)
         self.assertTrue(self.window.library.ready)
+        self.assertTrue(next(mod for mod in current.items if mod.name == "ui.pak").installed)
+        stale_completed(original, None)
+        self.assertIs(self.window.library.snapshot, current)
         self.assertEqual(deferred.jobs, [])
-        self.assertTrue(self.window.activity.indicator.isHidden())
+        self.assertFalse(self.window.library.loading)
 
     def test_domain_progress_brackets_real_copy_install_and_failed_removal(self):
         temporary = tempfile.TemporaryDirectory()

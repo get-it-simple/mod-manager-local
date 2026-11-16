@@ -427,7 +427,7 @@ class PreviewAssignmentTests(WindowTestCase):
         self.select_mod_rows(0)
         self.clipboard_image = self.image
         pending = []
-        self.window._run_action = lambda label, worker, done: pending.append((worker, done))
+        self.window._run_action = lambda label, worker, done, **options: pending.append((worker, done))
         self.window._handle_paste()
         self.assertTrue(self.image.exists())
         self.assert_no_previews()

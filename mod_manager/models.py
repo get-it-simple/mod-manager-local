@@ -54,7 +54,7 @@ class OperationResult:
 
     def summary(self) -> str:
         parts = []
-        for action in ("installed", "uninstalled"):
+        for action in ("installed", "uninstalled", "trashed", "restored", "deleted"):
             selected = [item for item in self.items if item.action == action]
             if selected:
                 success = sum(item.success for item in selected)

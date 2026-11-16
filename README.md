@@ -107,8 +107,11 @@ python build-gui-exe.py --pyz
 - Background operations display their stage and available item progress, followed by success, skipped and failure counts. Import failures join the session error history.
 - Empty library results explain whether to import mods, clear filters or correct a game profile's folder paths. Narrow library layouts can scroll while keeping the active game and installation method visible.
 - Broken link detection and cleanup
+- Operations execute in request order while other mods stay available. Queued and active mods show their status. Profile changes wait for earlier operations. Closing waits for accepted work; **Cancel closing** keeps the window open.
+- Clicking a sidebar label replaces the other filters and selects **All**. **Shift-click** adds or removes that label while preserving other filters. The hover-only **+** overlay performs the same action without taking extra space.
+- **Move selected mods to trash** deactivates them and keeps source files, artwork and metadata for 14 days. **Trash** restores mods inactive or permanently deletes selections; **Settings → Empty all trash now** clears every known library's trash after confirmation. Expired entries are removed at startup and hourly while the application is running; closed applications clean up on their next launch. Restore requires the original profile and library path, offers a new name for conflicts, and preserves current edits to existing presets. Missing files removed manually are reconciled when Trash refreshes.
 - GUI (PySide6/Qt) and CLI interfaces
-- The GUI sidebar opens Library, Labels, Presets, Game profiles, Cleanup, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
+- The GUI sidebar opens Library, Labels, Presets, Game profiles, Cleanup, Trash, and Settings in the main window. Use the game selector to switch profiles; in narrow windows the sidebar uses icons with hover tooltips.
 - **Labels** lists the active game's labels, their modes and matching mod counts. Narrowing the list shows only a mode icon and mod count; hover for the full label details. Select a label to rename it, choose **Manual** or **Automatic**, and inspect matching mods. Manual mode uses checked mods. Switching modes retains both sets of choices.
 - **Automatic** matches any name fragment, ignoring letter case. Numbered fragment chips wrap to the available width and scroll after four rows. Click a chip or its pencil to edit; click the pencil again or press Enter to confirm, and use its trash icon to remove it. Add fragments beside **Name fragments** and press Enter to start another. Chips display up to 32 characters; hover for the full text, which remains saved and editable. The matching table shows every matching fragment number; numbers update after deletion. New matching mods join automatically when the library refreshes.
 - Labels, fragments and manual assignments save automatically after a 600 ms pause, including input entered without pressing Enter. Duplicate or empty label names and invalid fragments remain editable without overwriting saved values. Automatic labels need at least one fragment. Pending valid changes save before switching profiles or closing; invalid drafts remain separate for each profile during the session. Write errors offer retry, and conflicting edits can be resolved by reloading saved labels. Existing single-label data remains supported.
@@ -119,7 +122,7 @@ python build-gui-exe.py --pyz
 - Right-click a mod in the list or tile view for an icon menu with install/uninstall, favorites, labels, preview image, Explorer locations, and details actions. Right-clicking a selected mod targets the whole selection; right-clicking another mod targets only that mod. Opening or dismissing the menu preserves selection. **Show details** is always available, including when the details panel is hidden. Close the panel with its close button or the **Details** header button.
 - Settings keep unsaved edits while you move between pages. **Save** applies them; **Reset changes** restores the saved values. Closing the application discards unsaved edits.
 - **Settings → Interface animations** enables smooth hover transitions, Material-style waves from the click point within button borders, and transitions for navigation, details, progress and application dialogs. Click waves adapt to the button background in both themes. Save applies the choice immediately; disabling it settles running transitions.
-- Library scans and preview decoding run in the background. Tile previews load three rows above and below the visible area. Search, filters, sorting and pagination reuse the loaded library; applying mods also reuses loaded artwork. **F5** in Library reloads files and artwork. Applying or removing mods animates their rows or tiles and the selected details into a circular indicator, then shows a check for success or a cross for failure before restoring the content. Preset rows use the same feedback. Installation actions remain unavailable until the operation, library refresh and feedback finish. A short moving line below the status bar indicates background work without shifting the page. Results and errors appear in the status bar; failed refreshes keep the previous results and offer **Retry loading the library** there. The animation setting also controls filter transitions and pagination feedback.
+- Library scans and preview decoding run in the background. Tile previews load three rows above and below the visible area. Search, filters, sorting and pagination reuse the loaded library; applying mods also reuses loaded artwork. **F5** in Library reloads files and artwork. Applying or removing mods animates their rows or tiles and the selected details into a circular indicator, then shows a check for success or a cross for failure before restoring the content. Preset rows use the same feedback. Only mods already queued or running are unavailable; other mods remain actionable during work and result feedback. A short moving line below the status bar indicates background work without shifting the page. Results and errors appear in the status bar; failed refreshes keep the previous results and offer **Retry loading the library** there. The animation setting also controls filter transitions and pagination feedback.
 - Settings and Labels indicate unsaved drafts in navigation. Label drafts remain separate for each game profile.
 - **Settings → Keyboard shortcuts** is collapsed initially; use the centered arrow to expand it. Each field contains its command and recorded combination. Enable or disable bindings, or clear them with the field's clear button, Backspace or Delete. **Restore defaults** edits the draft; **Save** validates conflicts and applies it. Shortcuts respect text editing and modal dialogs.
 - Default shortcuts include **Ctrl+F** for library search, **F5** for refreshing the current page, **Ctrl+S** for saving Settings or Labels, and **F1** for keyboard help. The help button and tooltips show the saved assignments. Existing paste, navigation and tile zoom shortcuts remain available.
@@ -166,11 +169,11 @@ Drop or paste archive files into the application, or select them with **Import m
 On Windows, files and nested folders copied or dragged from an archive opened in Explorer are also supported.
 ZIP, 7z and RAR files can contain mods at any folder depth; a separate 7-Zip installation is unnecessary on Windows x64.
 
-One archive with one mod imports automatically using your defaults. Multiple mods or archives open the import manager:
+One archive with one mod imports automatically using your defaults, except when adding files together with structure preservation: that combination always opens the manager so you can choose a root. Multiple mods or archives also open the manager:
 
 - With multiple archives, use the compact, full-width row of filename buttons. The mouse wheel over the row switches archives; **←/→** does the same while the row has focus. Overflowing buttons scroll into view. Names stay centered on hover and show up to 32 characters, with the full name available in a tooltip. For a single archive, the row is hidden and its filename appears above the import options.
 - **Add files together** creates one mod folder named after the archive. Turn it off to choose individual mods with checkboxes. Configured related file types stay together as one option.
-- **Preserve archive folder structure** keeps the original paths. Without it, files are flattened. Separate mode with preserved structure creates a folder for each selected mod.
+- **Preserve archive folder structure** keeps relative paths. Together with **Add files together**, select a folder in the archive tree and click **Use as root** to import only its descendants, retaining their structure under the archive's name. **Use archive root** resets the choice. For example, `Pack.zip/wrapper/data/sub/mod.pak` with root `wrapper/data` becomes `Pack/sub/mod.pak`. Each archive remembers its own root during the import session. Without structure preservation, files are flattened; separate mode keeps its existing per-mod structure.
 - In separate mode, select a mod and paste an image, or drop an image onto its row. Dropping an image elsewhere in the import window assigns it to the selected mod.
 - **Add** imports the choices across all archives. **Cancel** discards the prepared import. Existing names offer **Replace**, **Keep both** with numbered names, or **Skip**.
 
@@ -216,6 +219,7 @@ pip install -r requirements.txt
 - `config.json` stores application settings and game profile definitions.
 - `profiles/<profile-id>-presets.json` stores named mod sets for each game profile.
 - `profiles/<profile-id>-labels.json` stores labels plus last-managed metadata for each game profile.
+- Each library keeps deleted payloads and recovery metadata under its hidden `.mod-trash` folder; `profiles/trash-roots.json` remembers their locations across profile edits or deletion.
 - `profiles/<profile-id>-imports.json` records explicitly imported folder mods, scoped to their source directory (`default-imports.json` when no profile is active).
 - `labels.json` also stores the reserved `__favorites__` map, keyed by game profile ID; existing flat label records remain supported.
 - Existing global `presets.json` and label records remain supported when no game profile exists.
@@ -400,6 +404,7 @@ python mod-manager.py games select <profile-id>
 | `install` | Install all mods on page |
 | `uninstall` | Uninstall all mods on page |
 | `toggle <indexes>` | Toggle mods by index (comma-separated) |
+| `delete <indexes> --yes` | Deactivate selected mods and move their source files to the application trash for 14 days |
 | `label-add <label> <indexes>` | Assign label to selected mods |
 | `label-remove <label> <indexes>` | Remove label from selected mods |
 | `favorite-add <indexes>` | Add visible mods to favorites by index |
@@ -545,6 +550,21 @@ python mod-manager.py broken remove --all
 Cleanup checks links in the destination folder, including links whose source
 mod has disappeared. Regular files, copied mods and live links are preserved.
 Choose indexes or `--all`; invoking `remove` without either is an error.
+
+---
+
+### `trash` — Recover deleted mods
+
+```bash
+python mod-manager.py mods delete 1,3 --yes
+python mod-manager.py trash list
+python mod-manager.py trash restore <entry-id>
+python mod-manager.py trash restore <entry-id> --name recovered.pak
+python mod-manager.py trash delete <entry-id> --yes
+python mod-manager.py trash empty --yes
+```
+
+Entry IDs come from `trash list`. Permanent deletion requires `--yes`; restoration never activates a mod or overwrites an occupied path.
 
 ---
 

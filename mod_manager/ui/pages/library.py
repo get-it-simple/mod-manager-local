@@ -114,6 +114,7 @@ def build_mods_actions(window) -> IconToolbar:
         "install_selected": window._install_selected_mods,
         "uninstall_selected": window._uninstall_selected_mods,
         "set_image": window._set_mod_image,
+        "delete_mods": window._delete_selected_mods,
     })
     window.registry.extend(ACTIONS, toolbar.buttons.values())
     for key in SELECTION_ACTIONS:

@@ -83,8 +83,7 @@ class WorkerPool:
             if callback is not None:
                 self._callbacks[task_id] = callback
             self._pending.setdefault(file_key, []).append((task_id, fn, args))
-            thread = self._running.get(file_key)
-            if thread is None or not thread.is_alive():
+            if file_key not in self._running:
                 self._dispatch(file_key)
         return task_id
 
@@ -108,6 +107,7 @@ class WorkerPool:
                 task_id, file_key, result, error = self._result_queue.get_nowait()
                 out.append((task_id, result, error))
                 with self._lock:
+                    self._running.pop(file_key, None)
                     self._dispatch(file_key)
         except _queue.Empty:
             pass

@@ -76,6 +76,7 @@ class WindowTestCase(unittest.TestCase):
         ]
         for patcher in self.patchers:
             patcher.start()
+            self.addCleanup(patcher.stop)
         from mod_manager.ui.app import ModManagerGui
 
         self.window = ModManagerGui()
@@ -84,10 +85,11 @@ class WindowTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         dispose(self.window)
-        for patcher in reversed(self.patchers):
-            patcher.stop()
 
-    def run_action_inline(self, label, worker, done=None, file_key="global") -> None:
+    def run_action_inline(self, label, worker, done=None, file_key="global", **options) -> None:
+        prepare = options.get("prepare")
+        if prepare is not None and prepare() is False:
+            return
         result = worker()
         if done:
             done(result)

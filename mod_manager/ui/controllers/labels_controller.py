@@ -34,6 +34,7 @@ class LabelsController(QtCore.QObject):
         self._loading = False
         self._rebuilding = False
         self._save_failed = False
+        self._saving = False
         self.save_timer = QtCore.QTimer(self)
         self.save_timer.setSingleShot(True)
         self.save_timer.setInterval(tokens.LABEL_SAVE_DELAY_MS)
@@ -192,6 +193,10 @@ class LabelsController(QtCore.QObject):
         self._preview()
 
     def _check(self, mod: str, checked: bool) -> None:
+        if mod in self.window.runner.pending_mods:
+            members = {name for name in self.window.current_mod_names if self.selected in self.state.members(name)}
+            self.editor.manual_model.set_choices(self.window.current_mod_names, members)
+            return
         self.state.assign(self.selected, [mod], checked)
         self._preview()
 
@@ -237,12 +242,14 @@ class LabelsController(QtCore.QObject):
             self.editor.status.setText(t('unsaved_changes'))
             self.save_timer.start()
 
-    def save(self) -> None:
+    def save(self, *, reconcile: bool = True) -> None:
         self.save_timer.stop()
         if self.profile_id not in self.drafts or self.profile_id != str(self.window.cfg.get("active_game_profile_id") or ""):
             return
         if self.window.busy:
             self.save_timer.start()
+            return
+        if self._saving:
             return
         was_failed = self._save_failed
         self._save_failed = False
@@ -262,18 +269,44 @@ class LabelsController(QtCore.QObject):
         except ValueError as error:
             self.editor.status.setText(str(error))
             return
-        try:
-            latest = load_label_state()
-            merged = merge_label_states(self.saved[self.profile_id], candidate, latest, self.renames[self.profile_id])
-            if merged != latest:
-                save_label_state(merged)
-        except (OSError, ValueError) as error:
-            self._save_failed = True
-            self.editor.status.setText(str(error))
-            self.window._set_status(t("operation_failed", label=t("labels"), error=str(error)))
-            self.editor.retry.show()
-            self.editor.reload.show()
+        if candidate == self.saved[self.profile_id] and not was_failed and not reconcile:
             return
+        profile_id = self.profile_id
+        saved = deepcopy(self.saved[profile_id])
+        renames = deepcopy(self.renames[profile_id])
+        original = deepcopy((self.state, self.fragments[profile_id], self.name_inputs[profile_id]))
+        self._saving = True
+
+        def worker():
+            try:
+                latest = load_label_state()
+                merged = merge_label_states(saved, candidate, latest, renames)
+                if merged != latest:
+                    save_label_state(merged)
+                return latest, merged, None
+            except (OSError, ValueError) as error:
+                return None, None, str(error)
+
+        def done(result):
+            self._saving = False
+            latest, merged, error = result
+            if error is not None:
+                self._save_failed = True
+                self.editor.status.setText(error)
+                self.window._set_status(t("operation_failed", label=t("labels"), error=error))
+                self.editor.retry.show()
+                self.editor.reload.show()
+                return
+            current = (self.state, self.fragments[profile_id], self.name_inputs[profile_id])
+            if current != original:
+                self.saved[profile_id] = deepcopy(merged)
+                self.save_timer.start()
+                return
+            self._complete_save(candidate, latest, merged, was_failed)
+
+        self.window._run_action(t("labels"), worker, done)
+
+    def _complete_save(self, candidate, latest, merged, was_failed) -> None:
         for name, draft in tuple(self.fragments[self.profile_id].items()):
             if name not in merged.definitions:
                 del self.fragments[self.profile_id][name]
@@ -312,7 +345,8 @@ class LabelsController(QtCore.QObject):
         return not self._save_failed
 
     def shutdown(self) -> bool:
-        saved = self.flush()
+        self.save(reconcile=False)
+        saved = not self._save_failed
         self.save_timer.stop()
         return saved
 

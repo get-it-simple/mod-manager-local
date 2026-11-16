@@ -5,6 +5,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from .i18n import t
 
 MOD_MODES = ("standard", "directories")
+TRASH_DIRECTORY = ".mod-trash"
+RESERVED_MOD_DIRECTORIES = frozenset(("images", TRASH_DIRECTORY))
 
 
 def directory_mode(cfg: dict) -> bool:

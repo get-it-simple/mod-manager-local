@@ -19,6 +19,7 @@ NAVIGATION = (
     ("presets", t('presets'), "presets"),
     ("games", t('game_profiles'), "game"),
     ("cleanup", t('cleanup'), "broken"),
+    ("trash", t("trash"), "delete"),
     ("settings", t('settings'), "settings"),
 )
 PROFILE_PAGES = ("library", "labels", "presets", "cleanup")
@@ -97,6 +98,7 @@ class Workspace(QtWidgets.QWidget):
     pageRequested = QtCore.Signal(str)
     profileRequested = QtCore.Signal(str)
     labelRequested = QtCore.Signal(str)
+    labelToggleRequested = QtCore.Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -122,6 +124,7 @@ class Workspace(QtWidgets.QWidget):
         self.labels_heading = muted_label(t('labels'))
         self.labels_list = SidebarLabels()
         self.labels_list.labelRequested.connect(self.labelRequested)
+        self.labels_list.labelToggleRequested.connect(self.labelToggleRequested)
         for key, title, icon in NAVIGATION:
             if key == "settings":
                 self.sidebar_layout.addWidget(self.labels_heading)

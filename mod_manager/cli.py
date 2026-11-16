@@ -26,6 +26,7 @@ from .storage import (
     active_game_profile, load_config, save_config, set_active_game_profile, update_game_profile,
 )
 from .storage_policy import storage_policy
+from .trash import list_entries, purge_entries, restore_entry, trash_mods
 
 
 def report_error(message: str) -> int:
@@ -135,6 +136,14 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
             print(f"{item.name}: {'OK' if item.success else 'ERR'} — {item.message}", file=sys.stdout if item.success else sys.stderr)
         return int(bool(result.errors))
     names = [mod.name for mod in targets]
+    if args.mods_cmd == "delete":
+        if not args.yes:
+            return report_error("Use --yes to move these mods to the application trash for 14 days.")
+        result = trash_mods(cfg, targets)
+        print(result.summary())
+        for item in result.items:
+            print(item.name + ": " + item.message, file=sys.stdout if item.success else sys.stderr)
+        return int(bool(result.errors))
     if args.mods_cmd == "label-add":
         print(add_label_to_mods(args.label, names))
     elif args.mods_cmd == "label-remove":
@@ -151,6 +160,40 @@ def _preset_selection(args, cfg):
     if args.page > pages:
         raise argparse.ArgumentTypeError(f"Page {args.page} does not exist. There are {pages} pages.")
     return selected_items(names, args.indexes)
+
+
+def _run_trash(args: argparse.Namespace, cfg: dict) -> int:
+    if args.trash_cmd is None:
+        args._help_parser.print_help()
+        return 0
+    entries = list_entries(cfg)
+    if args.trash_cmd == "list":
+        for entry in entries:
+            print(f"{entry.identifier} | {entry.name} | {entry.data['profile_name']} | {entry.data['expires_at']}"
+                  + (" | incomplete" if entry.missing else ""))
+        if not entries:
+            print("The trash is empty.")
+        return 0
+    if args.trash_cmd == "empty":
+        if not args.yes:
+            return report_error("Use --yes to permanently delete all trashed mods.")
+        result = purge_entries(cfg)
+    else:
+        entry = next((value for value in entries if value.identifier == args.identifier), None)
+        if entry is None:
+            return report_error("Trash entry not found. Use trash list.")
+        if args.trash_cmd == "restore":
+            restore_entry(cfg, entry, args.name)
+            print("Restored inactive.")
+            return 0
+        if not args.yes:
+            return report_error("Use --yes to permanently delete this trashed mod.")
+        result = purge_entries(cfg, {entry.identifier})
+    print(result.summary())
+    for item in result.items:
+        if not item.success:
+            print(item.name + ": " + item.message, file=sys.stderr)
+    return int(bool(result.errors))
 
 
 def _run_presets(args: argparse.Namespace, cfg: Dict) -> int:
@@ -322,7 +365,7 @@ def run_cli(
                 messages, errors = diagnose(cfg)
                 print("\n".join(messages))
                 return int(errors)
-            handlers = {"mods": _run_mods, "presets": _run_presets, "games": _run_games, "settings": _run_settings, "open": _run_open, "broken": _run_broken}
+            handlers = {"mods": _run_mods, "presets": _run_presets, "games": _run_games, "settings": _run_settings, "open": _run_open, "broken": _run_broken, "trash": _run_trash}
             return handlers[args.cmd](args, cfg)
     except argparse.ArgumentTypeError as error:
         report_error(str(error))

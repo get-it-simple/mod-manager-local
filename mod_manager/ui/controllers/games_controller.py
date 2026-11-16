@@ -106,12 +106,32 @@ class GamesController(QtCore.QObject):
         self.stack.setCurrentWidget(self.page_list if self.page_list.count() else self.empty)
         self.window._sync_workspace()
 
-    def _reload(self) -> dict:
-        save_config(self.cfg)
-        self.window.cfg = self.window.context.replace_config(load_config())
-        self.window.tile_delegate.cfg = self.window.cfg
-        self.refresh_lists()
-        return self.window.cfg
+    def _enqueue(self, label: str, mutation) -> None:
+        if self.window.runner.barrier_pending or self.window._closing_after_queue:
+            return
+        cfg = {}
+
+        def prepare():
+            from copy import deepcopy
+
+            if self.window.labels_controller._save_failed:
+                return False
+            cfg.update(deepcopy(self.cfg))
+            return True
+
+        def worker():
+            mutation(cfg)
+            save_config(cfg)
+            return cfg
+
+        def done(result):
+            self.window.cfg = self.window.context.replace_config(result)
+            self.window.tile_delegate.cfg = result
+            self.refresh_lists()
+            self.window._show_start_page()
+            self.window.refresh_all()
+
+        self.window._run_action(label, worker, done, barrier=True, prepare=prepare)
 
     def select(self, profile_id: str) -> None:
         if not profile_id:
@@ -123,41 +143,42 @@ class GamesController(QtCore.QObject):
             return
         if not self.window.labels_controller.flush():
             return
-        if profile_id and set_active_game_profile(self.cfg, profile_id):
-            self._reload()
-            self.window._set_main_page(self.window.mods_tab)
-            self.window.refresh_all()
+
+        def change(cfg):
+            if not set_active_game_profile(cfg, profile_id):
+                raise ValueError(t("trash_profile_unavailable"))
+
+        self._enqueue(t("choose_game"), change)
 
     def delete(self, profile_id: str) -> None:
         if not profile_id or not prompts.ask_yes_no(self.window, DELETE_TITLE, DELETE_QUESTION):
             return
         if not self.window.labels_controller.flush():
             return
-        if delete_game_profile(self.cfg, profile_id):
-            self._reload()
-            self.window._show_start_page()
-            self.window.refresh_all()
+
+        def change(cfg):
+            if not delete_game_profile(cfg, profile_id):
+                raise ValueError(t("trash_profile_unavailable"))
+
+        self._enqueue(DELETE_TITLE, change)
 
     def add(self) -> None:
         values = GameProfileDialog(self.window).values()
-        if not values:
+        if not values or not self.window.labels_controller.flush():
             return
-        if not self.window.labels_controller.flush():
-            return
-        create_game_profile(values.pop("name"), values, self.cfg)
-        self._reload()
-        self.window._set_main_page(self.window.mods_tab)
-        self.window.refresh_all()
+        name = values.pop("name")
+        self._enqueue(t("add_profile"), lambda cfg: create_game_profile(name, values, cfg))
 
     def edit(self, profile_id: str) -> None:
         profile = next((p for p in self.cfg.get("game_profiles", []) if p.get("id") == profile_id), None)
         if not profile:
             return
         values = GameProfileDialog(self.window, profile).values()
-        if not values:
+        if not values or not self.window.labels_controller.flush():
             return
-        if not self.window.labels_controller.flush():
-            return
-        update_game_profile(self.cfg, profile_id, values)
-        self._reload()
-        self.window.refresh_all()
+
+        def change(cfg):
+            if not update_game_profile(cfg, profile_id, values):
+                raise ValueError(t("trash_profile_unavailable"))
+
+        self._enqueue(t("edit_the_highlighted_game_profile"), change)

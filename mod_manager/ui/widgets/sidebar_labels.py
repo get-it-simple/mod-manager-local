@@ -11,11 +11,16 @@ from .style_utils import set_variant
 class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
     def __init__(self, view):
         super().__init__(view)
+        self.view = view
         self.accent = view.palette().highlight().color()
         self.compact = False
 
     def sizeHint(self, option, index):
         return QtCore.QSize(0, max(tokens.NAVIGATION_HEIGHT, option.fontMetrics.height() + tokens.SPACE_LG * 2))
+
+    def add_rect(self, rect):
+        size = tokens.ICON_SIZE + tokens.SPACE_XS
+        return QtCore.QRect(rect.right() - size - tokens.SPACE_SM, rect.center().y() - size // 2, size, size)
 
     def paint(self, painter, option, index):
         painter.save()
@@ -39,17 +44,24 @@ class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
         if not self.compact:
             content.adjust(0, 0, -count_width - tokens.SPACE_SM, 0)
             painter.drawText(content, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(name, QtCore.Qt.ElideRight, content.width()))
+        if ((option.state & QtWidgets.QStyle.State_MouseOver or index == self.view._hovered)
+                and option.state & QtWidgets.QStyle.State_Enabled):
+            overlay = self.add_rect(option.rect)
+            painter.fillRect(overlay, option.palette.alternateBase())
+            icons.standard_icon("add").paint(painter, overlay)
         painter.restore()
 
 
 class SidebarLabels(QtWidgets.QListView):
     labelRequested = QtCore.Signal(str)
+    labelToggleRequested = QtCore.Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         set_variant(self, "transparentList")
         self.viewport().setAutoFillBackground(False)
         self.label_model = QtGui.QStandardItemModel(self)
+        self._hovered = QtCore.QPersistentModelIndex()
         self.setModel(self.label_model)
         self.delegate = SidebarLabelDelegate(self)
         self.setItemDelegate(self.delegate)
@@ -59,8 +71,40 @@ class SidebarLabels(QtWidgets.QListView):
         self.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.setUniformItemSizes(True)
         self.setAccessibleName(t("labels"))
-        self.clicked.connect(lambda index: self.labelRequested.emit(index.data()))
+        self.setMouseTracking(True)
+        self.clicked.connect(lambda index: self._activate(index, QtWidgets.QApplication.keyboardModifiers()))
         self._entries = []
+
+    def _activate(self, index, modifiers=QtCore.Qt.NoModifier) -> None:
+        signal = self.labelToggleRequested if modifiers & QtCore.Qt.ShiftModifier else self.labelRequested
+        signal.emit(index.data())
+
+    def mouseReleaseEvent(self, event) -> None:
+        index = self.indexAt(event.position().toPoint())
+        if (event.button() == QtCore.Qt.LeftButton and index.isValid()
+                and self.delegate.add_rect(self.visualRect(index)).contains(event.position().toPoint())):
+            self.labelToggleRequested.emit(index.data())
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        self._hovered = QtCore.QPersistentModelIndex(self.indexAt(event.position().toPoint()))
+        self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = QtCore.QPersistentModelIndex()
+        self.viewport().update()
+        super().leaveEvent(event)
+
+    def viewportEvent(self, event):
+        if event.type() == QtCore.QEvent.ToolTip:
+            index = self.indexAt(event.pos())
+            if index.isValid() and self.delegate.add_rect(self.visualRect(index)).contains(event.pos()):
+                QtWidgets.QToolTip.showText(event.globalPos(), t("label_quick_add"), self)
+                return True
+        return super().viewportEvent(event)
 
     def update_labels(self, entries, accent: str) -> None:
         self.delegate.accent = QtGui.QColor(accent)
@@ -82,7 +126,7 @@ class SidebarLabels(QtWidgets.QListView):
 
     def keyPressEvent(self, event):
         if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter, QtCore.Qt.Key_Space) and self.currentIndex().isValid():
-            self.labelRequested.emit(self.currentIndex().data())
+            self._activate(self.currentIndex(), event.modifiers())
             event.accept()
             return
         super().keyPressEvent(event)

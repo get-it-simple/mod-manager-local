@@ -80,11 +80,11 @@ class ArchiveImportGuiTests(WindowTestCase):
         original = self.window._run_action
         pending = []
 
-        def hold_publication(label, worker, done=None, file_key="global"):
+        def hold_publication(label, worker, done=None, file_key="global", **options):
             if label == "Importing archives...":
                 pending.append((worker, done))
             else:
-                original(label, worker, done, file_key)
+                original(label, worker, done, file_key, **options)
 
         self.window._run_action = hold_publication
         self.window._import_paths([first])

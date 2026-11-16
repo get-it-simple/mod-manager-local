@@ -72,6 +72,8 @@ class ModContextMenu(QtCore.QObject):
             return
         selected = index.row() in window._selected_rows(view)
         names = tuple(window._selected_mod_names()) if selected else (window.current_mods_shown[index.row()].name,)
+        if not window._mods_available(names):
+            return
         self.menu = menu = QtWidgets.QMenu(window)
         menu.setToolTipsVisible(True)
         menu.aboutToHide.connect(lambda: self._hidden(menu))
@@ -95,6 +97,8 @@ class ModContextMenu(QtCore.QObject):
         if revision != self._revision or window.busy or not window._is_mods_tab_active():
             return
         if not set(names).issubset(mod.name for mod in window.current_mods_shown):
+            return
+        if not window._mods_available(names):
             return
         self.close()
         window._select_mod_names(list(names))
@@ -122,6 +126,7 @@ class ModContextMenu(QtCore.QObject):
             self._action(menu, names, "destination", t('show_game_location_in_explorer'), "folder_forward", lambda: select_in_explorer(mod.dest))
         menu.addSeparator()
         self._action(menu, names, "show_details", t('show_details'), "details_show", lambda: window._set_details_visible(True))
+        self._action(menu, names, "delete", t("trash_delete_mods"), "delete", window._delete_selected_mods)
 
     def _assign_label(self) -> None:
         label, accepted = prompts.choose_text(self.window, t('text_bb1f28b586be'), t('label'))

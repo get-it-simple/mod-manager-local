@@ -167,6 +167,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--search", default="")
     p.add_argument("--favorite", action="store_true")
     mods_sub.choices["toggle"].add_argument("indexes", type=_indexes)
+    remove = mods_sub.add_parser("delete")
+    _add_view_args(remove)
+    remove.add_argument("indexes", type=_indexes)
+    remove.add_argument("--yes", action="store_true", help="Confirm moving selected mods to the application trash for 14 days.")
     for name in ["label-add", "label-remove"]:
         p = mods_sub.add_parser(name)
         p.add_argument("label")
@@ -240,6 +244,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("gui")
     sub.add_parser("doctor")
+    trash = sub.add_parser("trash")
+    trash_sub = trash.add_subparsers(dest="trash_cmd")
+    trash_sub.add_parser("list")
+    restore = trash_sub.add_parser("restore")
+    restore.add_argument("identifier")
+    restore.add_argument("--name", help="Restore under an unused name.")
+    permanent = trash_sub.add_parser("delete")
+    permanent.add_argument("identifier")
+    permanent.add_argument("--yes", action="store_true", help="Confirm permanent deletion.")
+    empty = trash_sub.add_parser("empty")
+    empty.add_argument("--yes", action="store_true", help="Confirm permanent deletion of all trash.")
 
     help_p = sub.add_parser("help", help="Show help for a command")
     help_p.add_argument("topic", nargs="*", metavar="command", help="Command and optional subcommand (e.g. mods toggle)")

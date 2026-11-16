@@ -111,12 +111,16 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             painter.drawText(badge.adjusted(inset, 0, -inset, 0), QtCore.Qt.AlignCenter, text)
 
         name_badge = self._name_badge_rect(rect, image_rect)
+        state = index.model().operation_states.get(mod.name)
+        if state:
+            self._draw_badge(painter, name_badge, qcolor(self.palette_colors.panel))
         painter.setPen(qcolor(self.palette_colors.fg))
         inset = tokens.TILE_NAME_TEXT_INSET
         painter.drawText(
             name_badge.adjusted(inset, 0, -inset, 0),
             QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
-            self._elided_mod_name(painter.fontMetrics(), mod.name, name_badge.width() - inset * 2),
+            self._elided_mod_name(painter.fontMetrics(), t(state) + ": " + mod.name if state else mod.name,
+                                 name_badge.width() - inset * 2),
         )
         favorite = mod.name in self.favorites
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)

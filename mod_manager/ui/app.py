@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, List
 
@@ -21,7 +23,7 @@ from .widgets.buttons import text_button
 from .controllers.activity_controller import ActivityController
 from ..labels import AUTOMATIC, ResolvedLabels, label_names
 from ..link_recovery import preset_install_names
-from ..preset_plan import plan_presets, execute_preset_plan
+from ..preset_plan import plan_presets, execute_preset_plan, validate_preset_plan
 from ..mods import (
     add_favorites_to_mods,
     add_label_to_mods,
@@ -70,6 +72,7 @@ from .controllers.labels_controller import LabelsController
 from .controllers.settings_controller import SettingsController
 from .controllers.archive_import_controller import ArchiveImportController
 from .controllers.preview_controller import PreviewController
+from .controllers.trash_controller import TrashController
 from .controllers.error_history_controller import ErrorHistoryController
 from .dialogs import prompts
 from .dialogs.game_profile import GameProfileDialog
@@ -140,6 +143,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg = normalize_game_profiles(load_config())
         self._applying_theme = False
         self.runner = TaskRunner(self)
+        self._closing_after_queue = False
         self.runner.statusChanged.connect(self.statusBar().showMessage)
         self.runner.failed.connect(lambda message: show_error(self, t('error'), message))
         self.runner.busyChanged.connect(self._on_busy_changed)
@@ -190,6 +194,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._bind_navigation_events()
         self.keyboard = KeyboardController(self)
         self.refresh_all()
+        self.runner.queueChanged.connect(self._queue_changed)
+        self.runner.activityChanged.connect(self._close_when_idle)
 
     def _setup_com_drop_targets(self) -> None:
         from ..platform_utils import is_windows
@@ -211,7 +217,18 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        if self.runner.commands or self.runner.active:
+            self._closing_after_queue = True
+            self._set_status(t("queue_closing"))
+            self.cancel_close_button.show()
+            event.ignore()
+            return
         if not self.labels_controller.shutdown():
+            event.ignore()
+            return
+        if self.runner.commands:
+            self._closing_after_queue = True
+            self.cancel_close_button.show()
             event.ignore()
             return
         self.keyboard.shutdown()
@@ -227,6 +244,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._save_tile_splitter_sizes()
         save_config(self.cfg)
         self.archive_import.shutdown()
+        self.trash.shutdown()
         if self.errors.dialog is not None:
             self.errors.dialog.close()
         self.runner.shutdown()
@@ -413,6 +431,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.setCentralWidget(self.workspace)
         self.workspace.pageRequested.connect(self._navigate)
         self.workspace.labelRequested.connect(self._sidebar_label_requested)
+        self.workspace.labelToggleRequested.connect(lambda label: self._sidebar_label_requested(label, True))
         self.workspace.profileRequested.connect(self._select_game_profile)
         self.game_button = self.workspace.game_button
         self.games_page = WorkspacePage(t('game_profiles'), t('choose_a_game_or_add_a_profile_to_get_started'))
@@ -420,6 +439,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.statusBar().showMessage(t('ready'))
         self.selection_status = QtWidgets.QLabel("0 selected")
         self.statusBar().addPermanentWidget(self.selection_status)
+        self.queue_status = QtWidgets.QLabel(self)
+        self.statusBar().addPermanentWidget(self.queue_status)
+        self.cancel_close_button = text_button(t("queue_cancel_close"), t("queue_cancel_close"),
+                                               self._cancel_queued_close)
+        self.statusBar().addPermanentWidget(self.cancel_close_button)
+        self.cancel_close_button.hide()
         self.keyboard_help_button = text_button("?", t("keyboard_shortcuts"), lambda: self.keyboard.show_help(), icon_name="details")
         self.statusBar().addPermanentWidget(self.keyboard_help_button)
         self._apply_button_style()
@@ -429,6 +454,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._build_settings()
         self._build_broken()
         self.labels_controller = LabelsController(self)
+        self.trash = TrashController(self)
+        self.workspace.add_page("trash", self.trash.page)
         for key, page in (("library", self.mods_tab), ("labels", self.labels_controller.page), ("games", self.games_page), ("presets", self.presets_page), ("settings", self.settings.page), ("cleanup", self.broken_page)):
             self.workspace.add_page(key, page)
         self.registry.extend(ACTIONS, self.workspace.navigation.values())
@@ -472,6 +499,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_broken()
         elif key == "games":
             self._refresh_games_lists()
+        elif key == "trash":
+            self.trash.refresh()
         self.workspace.show_page(key)
 
     def _sync_workspace(self) -> None:
@@ -626,7 +655,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg["mod_details_visible"] = visible
         self.setting_widgets["mod_details_visible"].setChecked(visible)
         self._apply_details_visibility()
-        save_config(self.cfg)
+        self._queue_config_save(("mod_details_visible",))
 
     def _apply_details_visibility(self) -> None:
         visible = bool(self.cfg.get("mod_details_visible", True))
@@ -658,15 +687,86 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     @property
     def operation_blocked(self) -> bool:
-        activity = getattr(self, "activity", None)
-        return self.busy or not self.library.ready or bool(activity and activity.visual_busy)
+        return self.busy or not self.library.ready or self.runner.barrier_pending or self._closing_after_queue
+
+    def _mods_available(self, names) -> bool:
+        return not self.operation_blocked and not set(names).intersection(self.runner.pending_mods)
+
+    def _queue_config_save(self, keys) -> None:
+        values = {key: deepcopy(self.cfg[key]) for key in keys}
+        base = {}
+
+        def before():
+            base.update(deepcopy(self.cfg))
+            base.update(values)
+            return True
+
+        def done(_result):
+            changed = any(self.cfg.get(key) != value for key, value in values.items())
+            self.cfg.update(values)
+            if not changed:
+                return
+            if "mod_view_mode" in values:
+                self.mod_view_mode.set(normalize_view_mode(values["mod_view_mode"]))
+                self._show_mod_view()
+            if "mod_details_visible" in values:
+                self._apply_details_visibility()
+            if "mod_sort_key" in values:
+                self.mod_sort_key = normalize_sort_key(values["mod_sort_key"])
+                self.mod_sort_reverse = bool(values["mod_sort_reverse"])
+                self.order_var.set(values["order_var"])
+                self.order_box.setCurrentText(values["order_var"])
+                self._update_mod_order_direction_button()
+                self._render_mods()
+            if "tile_size" in values:
+                self.tiles_view.viewport().update()
+
+        self.runner.run(t("saving_settings"), lambda: save_config(base), done, blocking=False, prepare=before)
+
+    def _queue_changed(self) -> None:
+        self.mods_model.set_active_mods(self.runner.pending_mods)
+        states = {name: "queue_running" if index == 0 else "queue_waiting"
+                  for index, command in enumerate(self.runner.commands) for name in command.mod_names}
+        self.mods_model.set_operation_states(states)
+        self.queue_status.setText(t("queue_count", count=len(self.runner.commands)) if self.runner.commands else "")
+        self.queue_status.setToolTip("\n".join(command.label for command in self.runner.commands))
+        self._operation_state_changed()
+        self._update_detail_actions()
+        self.workspace.profile_box.setEnabled(bool(self.cfg.get("game_profiles")) and not self.runner.barrier_pending)
+        self.activity.sync()
+        self.games.page_toolbar.setEnabled(not self.runner.barrier_pending)
+        self.labels_controller.editor.setEnabled(not self.runner.barrier_pending)
+        for key in ("import_files", "import_folder"):
+            self.mods_toolbar.button(key).setEnabled(not self.operation_blocked)
+        if self._closing_after_queue and not self.runner.commands and self.labels_controller._save_failed:
+            self._cancel_queued_close()
+
+    def _cancel_queued_close(self) -> None:
+        self._closing_after_queue = False
+        self.cancel_close_button.hide()
+        self._queue_changed()
+
+    def _close_when_idle(self, active: bool) -> None:
+        if self._closing_after_queue and not active and not self.runner.commands:
+            QtCore.QTimer.singleShot(tokens.IMMEDIATE_MS, self._finish_queued_close)
+
+    def _finish_queued_close(self) -> None:
+        if self._closing_after_queue and not self.runner.active and not self.runner.commands:
+            self.close()
 
     def _operation_state_changed(self) -> None:
         self._update_mod_selection_actions()
         self._update_detail_actions()
-        self.presets_toolbar.button("toggle").setEnabled(not self.operation_blocked)
-        activity = getattr(self, "activity", None)
-        self.motion.set_operation_blocked(self.busy or self.library.loading or bool(activity and activity.visual_busy))
+        selected = self._selected_preset_names()
+        reserved = self.runner.pending_presets
+        members = set()
+        if self.library.snapshot is not None:
+            members = {name for preset in selected for name in self.library.snapshot.presets.get(preset, [])}
+        available = (not self.operation_blocked and not set(selected).intersection(reserved)
+                     and not members.intersection(self.runner.pending_mods))
+        self.presets_toolbar.button("toggle").setEnabled(available)
+        self.presets_toolbar.button("delete").setEnabled(available)
+        self.motion.set_operation_blocked(self.busy or self.library.loading or self.runner.barrier_pending)
 
     @property
     def action_widgets(self) -> list:
@@ -701,8 +801,60 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not busy:
             self.library.ensure_refresh()
 
-    def _run_action(self, label: str, worker: Callable, done: Callable | None = None, file_key: str = "global") -> None:
-        self.runner.run(label, worker, done, file_key)
+    def _run_action(self, label: str, worker: Callable, done: Callable | None = None, file_key: str = "global",
+                    *, mod_names=(), preset_names=(), barrier=False, prepare=None, config=None, front=False) -> None:
+        pinned = deepcopy(self.cfg if config is None else config)
+
+        def work():
+            from .controllers.library_controller import load_library_snapshot
+
+            result, error, snapshot, snapshot_error = None, None, None, None
+            try:
+                result = worker()
+            except Exception as failure:
+                error = failure
+            try:
+                if not barrier:
+                    snapshot = load_library_snapshot(pinned)
+            except (OSError, ValueError) as failure:
+                snapshot_error = failure
+            return result, error, snapshot, snapshot_error
+
+        def completed(outcome):
+            result, error, snapshot, snapshot_error = outcome
+            selected = self._selected_mod_names()
+            applicable = snapshot is not None and all(pinned.get(key) == self.cfg.get(key)
+                                                      for key in ("active_game_profile_id", "mods_source_dir", "game_mods_dir"))
+            if applicable:
+                self.library.accept_operation(snapshot, selected, render=False)
+            elif snapshot_error is not None:
+                self.library.error = t("library_refresh_failed", error=str(snapshot_error))
+                self.library.changed.emit()
+            self._applying_operation_result = applicable
+            self._operation_selected_names = selected
+            try:
+                if error is not None:
+                    self.runner.failed.emit(str(error))
+                elif done is not None:
+                    done(result)
+            finally:
+                self._applying_operation_result = False
+                if applicable:
+                    self._apply_library_snapshot(self._operation_selected_names)
+                    self.library.changed.emit()
+
+        def before():
+            if (mod_names and pinned.get("active_game_profile_id") == self.cfg.get("active_game_profile_id")
+                    and all(pinned.get(key) == self.cfg.get(key) for key in ("mods_source_dir", "game_mods_dir"))):
+                pinned["install_mode"] = self.cfg.get("install_mode", "link")
+                self.runner.pin_current_config(pinned)
+            accepted = prepare is None or prepare() is not False
+            if accepted:
+                self.library.begin_operation()
+            return accepted
+
+        self.runner.run(label, work, completed, file_key, config=pinned, mod_names=mod_names,
+                        preset_names=preset_names, blocking=False, barrier=barrier, prepare=before, front=front)
 
     def _poll_workers(self) -> None:
         self.runner.poll()
@@ -722,7 +874,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         mode = normalize_view_mode(mode)
         self.mod_view_mode.set(mode)
         self.cfg["mod_view_mode"] = mode
-        save_config(self.cfg)
+        self._queue_config_save(("mod_view_mode",))
         self._show_mod_view()
 
     def _set_mod_order(self, text: str) -> None:
@@ -739,7 +891,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg["mod_sort_key"] = self.mod_sort_key
         self.cfg["mod_sort_reverse"] = self.mod_sort_reverse
         self.mod_page.set(1)
-        save_config(self.cfg)
+        self._queue_config_save(("order_var", "mod_sort_key", "mod_sort_reverse"))
         self._update_mod_order_direction_button()
         self._render_mods()
 
@@ -772,7 +924,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg["mod_sort_reverse"] = self.mod_sort_reverse
         self.cfg["order_var"] = self.order_var.get()
         self.mod_page.set(1)
-        save_config(self.cfg)
+        self._queue_config_save(("order_var", "mod_sort_key", "mod_sort_reverse"))
         self._update_mod_order_direction_button()
         self._render_mods()
 
@@ -786,7 +938,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg["mod_sort_key"] = self.mod_sort_key
         self.cfg["mod_sort_reverse"] = self.mod_sort_reverse
         self.cfg["order_var"] = self._mod_order_label_for_key(self.mod_sort_key)
-        save_config(self.cfg)
+        self._queue_config_save(("order_var", "mod_sort_key", "mod_sort_reverse"))
         self._update_mod_order_direction_button()
         self.mod_page.set(1)
         self._render_mods()
@@ -810,7 +962,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.tile_delegate.clear_cache()
         self.tiles_view.reset()
         self.image_prefetch.schedule()
-        save_config(self.cfg)
+        self._queue_config_save(("tile_size",))
         return "break"
 
     def _selected_rows(self, view) -> list[int]:
@@ -830,7 +982,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return bool(self._selected_rows(self.tiles_view if self._is_tile_view() else self.mods_table))
 
     def _update_mod_selection_actions(self) -> None:
-        enabled = not self.operation_blocked and self._has_mod_selection()
+        enabled = self._has_mod_selection() and self._mods_available(self._selected_mod_names())
         for widget in self.mod_selection_widgets:
             widget.setEnabled(enabled)
         if not hasattr(self, "mods_actions"):
@@ -839,7 +991,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
                     if row < len(self.current_mods_shown)]
         for key, mods, installed in (("install_selected", selected, False), ("uninstall_selected", selected, True),
                                      ("install_page", self.current_mods_shown, False), ("uninstall_page", self.current_mods_shown, True)):
-            count = sum(mod.installed == installed for mod in mods)
+            count = sum(mod.installed == installed and mod.name not in self.runner.pending_mods for mod in mods)
             button = self.mods_actions.button(key)
             button.setText(t(key, count=count))
             button.setEnabled(not self.operation_blocked and count > 0)
@@ -940,7 +1092,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.motion.fade_in(self.detail_frame)
 
     def _update_detail_actions(self) -> None:
-        enabled = not self.operation_blocked
+        enabled = self._mods_available(self._selected_mod_names())
         for button in self.detail_frame.findChildren(QtWidgets.QAbstractButton):
             available = button.property("actionAvailable")
             button.setEnabled(enabled and available is not False)
@@ -1033,10 +1185,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(1)
         self.refresh_mods()
 
-    def _sidebar_label_requested(self, label: str) -> None:
+    def _sidebar_label_requested(self, label: str, additive: bool = False) -> None:
         if not self.busy and self.library.ready:
+            self.filters.activate_label(label, additive)
+            if not additive:
+                self.search_box.setCurrentText("")
+                self.label_filter_box.setCurrentText("")
+            self.mod_page.set(1)
             self._navigate("library")
-            self._toggle_label_filter(label)
+            self._render_mods()
 
     def _update_sidebar_labels(self) -> None:
         labels = self.current_mod_labels
@@ -1061,17 +1218,28 @@ class ModManagerGui(QtWidgets.QMainWindow):
         question = OVERWRITE_QUESTION.format(message=overwrite_message(names))
         return prompts.ask_yes_no(self, OVERWRITE_TITLE, question)
 
+    def _overwrite_preflight(self, mods, approved):
+        current = [replace(mod, copy_install=is_copy_install(self.cfg)) for mod in mods]
+        return not (set(existing_targets(current)) - approved) or self._confirm_overwrite(current)
+
     def _selected_mod_rows_for_state(self, installed: bool) -> list[int]:
         rows = self._selected_rows(self._current_mod_view())
-        return [row + 1 for row in rows if row < len(self.current_mods_shown) and self.current_mods_shown[row].installed == installed]
+        return [row + 1 for row in rows if row < len(self.current_mods_shown)
+                and self.current_mods_shown[row].installed == installed
+                and self.current_mods_shown[row].name not in self.runner.pending_mods]
 
     def _toggle_selected_indexes(self, indexes: list[int]) -> None:
         if not indexes or self.operation_blocked:
             return
         selected = mods_by_indexes(self.current_mods_shown, indexes)
+        selected = [mod for mod in selected if mod.name not in self.runner.pending_mods]
+        if not selected:
+            return
         if not self._confirm_overwrite([m for m in selected if not m.installed]):
             return
         names = [m.name for m in selected]
+        pending = [mod for mod in selected if not mod.installed]
+        approved = set(existing_targets(pending))
 
         def done(result):
             self._set_status(result.summary())
@@ -1082,6 +1250,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
             t('updating_selected_mods'),
             lambda: change_mods(selected, overwrite=True),
             done,
+            mod_names=tuple(names),
+            prepare=lambda: self._overwrite_preflight(pending, approved),
         )
 
     def _install_selected_mods(self) -> None:
@@ -1111,7 +1281,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         uninstall_button.setProperty("actionAvailable", installed > 0)
         uninstall_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         uninstall_button.clicked.connect(self._uninstall_selected_mods)
-        self.detail_scroll.add_actions([install_button, uninstall_button])
+        self.detail_scroll.add_actions([install_button, uninstall_button,
+                                       icon_button("delete", t("trash_help"), self._delete_selected_mods,
+                                                   accessible_name=t("trash_delete_mods"))])
         self.detail_scroll.add_actions([text_button(t('favorite'), t('add_or_remove_selected_mods_from_favorites'), self._toggle_favorite_selected, icon_name="favorite")])
         self._detail_label_row()
 
@@ -1175,6 +1347,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.detail_scroll.add_flow_row([
             QtWidgets.QLabel(t('installed_mods') if mod.installed else t('not_installed_mods')),
             self._detail_favorite_button(mod), self._detail_state_button(mod),
+            icon_button("delete", t("trash_help"), self._delete_selected_mods,
+                        accessible_name=t("trash_delete_mods")),
         ])
         self._detail_label_row()
         self._detail_dates_row(mod)
@@ -1200,7 +1374,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.refresh_mods()
 
     def refresh_mods(self, selected_names: List[str] | None = None) -> None:
-        self.library.refresh(selected_names)
+        if getattr(self, "_applying_operation_result", False):
+            if selected_names is not None:
+                self._operation_selected_names = selected_names
+        else:
+            self.library.refresh(selected_names)
 
     def _clear_library_models(self) -> None:
         self.current_mod_items = []
@@ -1374,15 +1552,16 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._render_mods()
 
     def _set_favorite_names(self, names: list[str], favorite: bool) -> None:
-        if not names or self.busy or not self.library.ready:
+        if not names or not self._mods_available(names):
             return
-        message = (
-            add_favorites_to_mods(self.cfg, names)
-            if favorite
-            else remove_favorites_from_mods(self.cfg, names)
-        )
-        self._set_status(message)
-        self.refresh_mods(names)
+        cfg = deepcopy(self.cfg)
+        action = add_favorites_to_mods if favorite else remove_favorites_from_mods
+        def done(message):
+            self._set_status(message)
+            self.refresh_mods(names)
+
+        self._run_action(t("favorite"), lambda: action(cfg, names),
+                         done, mod_names=names)
 
     def _toggle_favorite_name(self, name: str) -> None:
         self._set_favorite_names([name], name not in self.current_mod_favorites)
@@ -1421,8 +1600,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if self.operation_blocked:
             return
         page, label_filter, search, order = self._view_args()
-        if not self._confirm_overwrite([m for m in self.current_mods_shown if not m.installed]):
+        targets = tuple(mod for mod in self.current_mods_shown
+                        if not mod.installed and mod.name not in self.runner.pending_mods)
+        if not targets or not self._confirm_overwrite(list(targets)):
             return
+        approved = set(existing_targets(list(targets)))
 
         def done(result):
             target_page, operation = result
@@ -1432,14 +1614,20 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_presets()
 
         favorite_only = self.filters.mode == "favorite"
-        view_args = (self.cfg, page, label_filter, search, order, favorite_only, True)
+        view_args = (deepcopy(self.cfg), page, label_filter, search, order, favorite_only, True)
         state_filter = self.filters.state
-        self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=state_filter), done)
+        self.errors.run(t('installing_mods'), lambda: change_mods_page(*view_args, state_filter=state_filter, targets=targets),
+                        done, mod_names=tuple(mod.name for mod in targets),
+                        prepare=lambda: self._overwrite_preflight(list(targets), approved))
 
     def _uninstall_page(self) -> None:
         if self.operation_blocked:
             return
         page, label_filter, search, order = self._view_args()
+        targets = tuple(mod for mod in self.current_mods_shown
+                        if mod.installed and mod.name not in self.runner.pending_mods)
+        if not targets:
+            return
 
         def done(result):
             target_page, operation = result
@@ -1448,13 +1636,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods()
             self.refresh_presets()
 
-        view_args = (self.cfg, page, label_filter, search, order)
+        view_args = (deepcopy(self.cfg), page, label_filter, search, order)
         favorite_only = self.filters.mode == "favorite"
         state_filter = self.filters.state
         self.errors.run(
             t('uninstalling_mods'),
-            lambda: change_mods_page(*view_args, favorite_only, action="uninstall", state_filter=state_filter),
+            lambda: change_mods_page(*view_args, favorite_only, action="uninstall", state_filter=state_filter, targets=targets),
             done,
+            mod_names=tuple(mod.name for mod in targets),
         )
 
     def _toggle_selected_mods(self) -> None:
@@ -1496,13 +1685,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
                 self.labels_controller._rebuild(canonical)
                 return
         targets = self._selected_mod_names()
+        if not self._mods_available(targets):
+            return
 
         def done(message):
             self._set_status(message)
             self.refresh_mods(targets)
 
         action = remove_label_from_mods if remove else add_label_to_mods
-        self._run_action(t('removing_label') if remove else t('adding_label'), lambda: action(label, targets), done)
+        self._run_action(t('removing_label') if remove else t('adding_label'), lambda: action(label, targets), done, mod_names=targets)
 
     def _save_preset(self) -> None:
         name = self.preset_name.text().strip()
@@ -1510,13 +1701,17 @@ class ModManagerGui(QtWidgets.QMainWindow):
             prompts.show_error(self, t('preset'), t('enter_preset_name'))
             return
 
+        if self.operation_blocked or name in self.runner.pending_presets:
+            return
+        cfg = deepcopy(self.cfg)
+
         def done(result):
             ok, message = result
             self._set_status(message)
             if ok:
                 self.refresh_presets()
 
-        self._run_action(t('saving_preset'), lambda: save_preset_from_installed(self.cfg, name), done)
+        self._run_action(t('saving_preset'), lambda: save_preset_from_installed(cfg, name), done, preset_names=(name,))
 
     def _toggle_selected_presets(self, names: list[str] | None = None) -> None:
         if self.operation_blocked:
@@ -1525,6 +1720,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not names:
             return
         plan = plan_presets(self.cfg, names)
+        affected = tuple(dict.fromkeys(change.name for change in plan.changes if change.mod is not None))
+        if not self._mods_available(affected) or set(names).intersection(self.runner.pending_presets):
+            return
         while True:
             if not prompts.review_preset_plan(self, plan):
                 return
@@ -1535,6 +1733,15 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._set_status(t("preset_changed"))
         if not self._confirm_overwrite([change.mod for change in plan.changes if change.action == "install"]):
             return
+        installing = [change.mod for change in plan.changes if change.action == "install"]
+        approved = set(existing_targets(installing))
+
+        def prepare():
+            return self._overwrite_preflight(installing, approved)
+
+        def work():
+            validate_preset_plan(plan)
+            return "", execute_preset_plan(plan, True)
 
         def done(result):
             message, _operation = result
@@ -1544,9 +1751,12 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         self.errors.run(
             t('toggling_presets'),
-            lambda: ("", execute_preset_plan(plan, True)),
+            work,
             done,
             preset_names=tuple(dict.fromkeys(change.preset for change in plan.changes if change.action == "install")),
+            mod_names=affected,
+            reserved_presets=tuple(names),
+            prepare=prepare,
         )
 
     @QtCore.Slot(QtCore.QModelIndex)
@@ -1563,6 +1773,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _delete_selected_presets(self) -> None:
         names = self._selected_preset_names()
+        if self.operation_blocked or set(names).intersection(self.runner.pending_presets):
+            return
 
         def done(result):
             removed, missing = result
@@ -1570,7 +1782,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self._set_status(message)
             self.refresh_presets()
 
-        self._run_action(t('deleting_presets'), lambda: delete_presets_by_names(names), done)
+        self._run_action(t('deleting_presets'), lambda: delete_presets_by_names(names), done, preset_names=names)
 
     def _selected_preset_names(self) -> list[str]:
         return [
@@ -1618,6 +1830,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._remove_broken(list(self.current_broken))
 
     def _remove_broken(self, mods: list[ModItem]) -> None:
+        mods = [mod for mod in mods if mod.name not in self.runner.pending_mods]
+        if not mods or self.operation_blocked:
+            return
         if self.busy or not self.library.ready:
             return
         def done(result):
@@ -1629,6 +1844,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             t('removing_broken_links'),
             lambda: OperationResult(tuple(deactivate_mod_result(mod) for mod in mods)),
             done,
+            mod_names=tuple(mod.name for mod in mods),
         )
 
     def dragEnterEvent(self, event) -> None:
@@ -1683,6 +1899,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return names[0] if len(names) == 1 else ""
 
     def _import_paths(self, paths: List[Path], image_target_name: str = "") -> None:
+        if self.runner.barrier_pending or self._closing_after_queue:
+            release = getattr(paths, "close", None)
+            if release:
+                release()
+            return
         if self.archive_import.handle_paths(paths, image_target_name):
             return
         self._import_regular_paths(paths, image_target_name)
@@ -1741,7 +1962,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
                 if release:
                     release()
 
-        self._run_action(t('importing'), worker, done)
+        affected = [source.name if kind == "group" else name or source.name for kind, source, name, _replace in tasks]
+        self._run_action(t('importing'), worker, done, mod_names=affected)
 
     def _import_mod_files(self) -> None:
         files = prompts.choose_files(self, t('import_mod_files'))
@@ -1764,6 +1986,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         if not self.busy and self.library.ready:
             self.previews.choose()
 
+    def _delete_selected_mods(self) -> None:
+        self.trash.remove_mods()
+
 
 def _app_icon() -> QtGui.QIcon | None:
     icon_path = Path(__file__).resolve().parent.parent.parent / "assets" / "icon.png"
@@ -1781,4 +2006,5 @@ def start() -> int:
     if icon is not None:
         window.setWindowIcon(icon)
     window.show()
+    window.trash.cleanup()
     return app.exec()

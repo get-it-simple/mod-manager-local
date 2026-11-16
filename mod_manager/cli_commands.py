@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 COMMAND_HELP = {
+    "trash": "List, restore or permanently remove mods from the application trash.",
     "mods": "Browse mods and manage installation, labels and favorites for the active game.",
     "presets": "Save and manage named sets of installed mods for the active game.",
     "settings": "Show settings or change application preferences. Edit game paths through games.",
@@ -27,7 +28,7 @@ ACTION_HELP = {
     "favorite-add": "Mark selected mods as favorites for the active game.",
     "favorite-remove": "Remove selected mods from the active game's favorites.",
     "save": "Save the currently installed mods as a named preset. An existing name is updated.",
-    "delete": "Delete selected presets or a game profile; source mod files are preserved.",
+    "delete": "Move selected mods to trash, delete presets or profiles, or permanently delete a trash entry.",
     "show": "Display application settings and the active game's values without saving.",
     "set": "Validate and save the supplied application settings. Omitted values are preserved.",
     "select": "Make a game profile active for future CLI and GUI operations.",

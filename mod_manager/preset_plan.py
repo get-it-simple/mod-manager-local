@@ -54,6 +54,12 @@ def plan_presets(cfg: dict, names: list[str]) -> PresetPlan:
                       tuple((name, tuple(definitions[name]) if name in definitions else None) for name in names), tuple(changes))
 
 
+def validate_preset_plan(plan: PresetPlan) -> None:
+    current = load_presets()
+    if any((tuple(current[name]) if name in current else None) != members for name, members in plan.definitions):
+        raise ValueError(t("preset_changed"))
+
+
 def execute_preset_plan(plan: PresetPlan, overwrite: bool = False) -> OperationResult:
     results = []
     for preset, members in plan.definitions:

@@ -13,7 +13,7 @@ from threading import Event
 
 from .archive_backend import ARCHIVE_EXTENSIONS, ArchiveError, extract_archive, safe_relative_path
 from .import_registry import register_directory_mod
-from .mod_modes import directory_mode
+from .mod_modes import RESERVED_MOD_DIRECTORIES, directory_mode
 from .import_io import check_cancelled, copy_import_file
 from .log import logger
 from .progress import report
@@ -50,6 +50,7 @@ class PreparedArchive:
     source_name: str = ""
     directory_mode: bool = False
     artwork: tuple[Path, ...] = ()
+    import_root: Path = Path(".")
 
     def close(self) -> None:
         if self.owner is not None:
@@ -150,7 +151,8 @@ def _container_files(
 ) -> tuple[tuple[Path, Path], ...]:
     groups = []
     for unit in (archive.units if units is None else units):
-        files = tuple((archive.root / member, member if archive.preserve_structure else Path(member.name)) for member in unit.members)
+        base = archive.import_root if archive.mode == "together" and archive.preserve_structure else Path(".")
+        files = tuple((archive.root / member, member.relative_to(base) if archive.preserve_structure else Path(member.name)) for member in unit.members)
         names = {relative.as_posix().casefold() for _source, relative in files}
         collisions = [group for group in groups if names & {relative.as_posix().casefold() for _source, relative in group}]
         if collisions:
@@ -178,7 +180,12 @@ def create_plans(archives: list[PreparedArchive], choose: ConflictResolver) -> l
     plans = []
     for archive in archives:
         if archive.mode == "together":
-            files = _container_files(archive, choose, [*archive.units, *_artwork_units(archive)])
+            base = archive.import_root if archive.preserve_structure else Path(".")
+            if archive.preserve_structure:
+                set_archive_root(archive, base)
+            units = [unit for unit in [*archive.units, *_artwork_units(archive)]
+                     if all(member.is_relative_to(base) for member in unit.members)]
+            files = _container_files(archive, choose, units)
             if files:
                 plans.append(PlannedMod(archive.name, files, True))
         else:
@@ -193,6 +200,16 @@ def create_plans(archives: list[PreparedArchive], choose: ConflictResolver) -> l
     return plans
 
 
+def set_archive_root(archive: PreparedArchive, relative: Path) -> None:
+    relative = Path(relative)
+    if relative != Path("."):
+        safe_relative_path(relative.as_posix())
+    target = archive.root / relative
+    if not target.resolve().is_relative_to(archive.root.resolve()) or not target.is_dir():
+        raise ValueError(t("archive_root_invalid"))
+    archive.import_root = relative
+
+
 def resolve_plans(cfg: dict, plans: list[PlannedMod], choose: ConflictResolver, existing_names: set[str] | None = None) -> list[PlannedMod]:
     root = Path(cfg["mods_source_dir"]).expanduser()
     existing = {path.name.casefold() for path in root.iterdir()} if root.exists() else set()
@@ -201,10 +218,10 @@ def resolve_plans(cfg: dict, plans: list[PlannedMod], choose: ConflictResolver, 
     for index, plan in enumerate(plans):
         report("progress_importing_archives", plan.name, index, len(plans))
         safe_relative_path(plan.name)
-        taken = existing | {name.casefold() for accepted_plan in accepted for name in accepted_plan.targets} | {"images"}
+        taken = existing | {name.casefold() for accepted_plan in accepted for name in accepted_plan.targets} | RESERVED_MOD_DIRECTORIES
         names = {name.casefold() for name in plan.targets}
         collision = bool(names & taken)
-        decision = choose(plan.name) if collision and "images" not in names else "keep_both"
+        decision = choose(plan.name) if collision and not names.intersection(RESERVED_MOD_DIRECTORIES) else "keep_both"
         if collision:
             if decision == "skip":
                 continue
@@ -270,7 +287,7 @@ def _publish_files(cfg: dict, plan: PlannedMod, cancelled: Event | None) -> tupl
         payload = workspace / "payload"
         payload.mkdir()
         check_cancelled(cancelled)
-        if safe_relative_path(plan.name).name != plan.name or plan.name.casefold() == "images":
+        if safe_relative_path(plan.name).name != plan.name or plan.name.casefold() in RESERVED_MOD_DIRECTORIES:
             raise ValueError(t('invalid_mod_name_value0', value0=f'{plan.name}'))
         for relative in plan.directories:
             (payload / safe_relative_path(relative.as_posix())).mkdir(parents=True, exist_ok=True)

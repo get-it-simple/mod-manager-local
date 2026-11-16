@@ -43,3 +43,14 @@ def register_directory_mod(cfg: dict, name: str) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def unregister_directory_mod(cfg: dict, name: str) -> None:
+    path = _registry_path(cfg)
+    if not path.exists():
+        return
+    data = storage.load_json(path, {})
+    sources = data.get("sources", {})
+    key = _source_key(cfg)
+    sources[key] = [value for value in sources.get(key, []) if value.casefold() != name.casefold()]
+    storage.save_json(path, data)

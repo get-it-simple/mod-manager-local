@@ -116,6 +116,12 @@ class SettingsController(QtCore.QObject):
         layout.addWidget(self.toolbar)
         self.draft_status = QtWidgets.QLabel(t("all_saved"))
         layout.addWidget(self.draft_status)
+        trash_actions = IconToolbar(self.page)
+        self.trash_toolbar = trash_actions
+        trash_section = trash_actions.add_section("trash", t("trash"))
+        trash_section.add_text_action("empty", t("trash_empty_all"), "delete", t("trash_empty_help"),
+                                      lambda: self.window.trash.empty())
+        layout.addWidget(trash_actions)
         for field in self.fields.values():
             signal = next((getattr(field, name) for name in ("changed", "toggled", "currentTextChanged", "textChanged")
                            if hasattr(field, name)), None)
@@ -246,7 +252,14 @@ class SettingsController(QtCore.QObject):
         def done(new_cfg):
             self.window.apply_saved_settings(new_cfg, old_theme != self.theme_settings(new_cfg))
 
-        self.window._run_action(t('saving_settings'), lambda: _run_save_settings(self.cfg, values), done)
+        base = {}
+
+        def prepare():
+            from copy import deepcopy
+            base.update(deepcopy(self.cfg))
+            return True
+
+        self.window._run_action(t('saving_settings'), lambda: _run_save_settings(base, values), done, prepare=prepare)
 
     def reset(self) -> None:
         for key, value in settings_schema.read_settings(self.cfg).items():

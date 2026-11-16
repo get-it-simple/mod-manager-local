@@ -29,6 +29,21 @@ class LibraryController(QtCore.QObject):
     def ready(self) -> bool:
         return self.snapshot is not None and not self.loading and not self.error
 
+    def begin_operation(self) -> None:
+        self._generation += 1
+        self._pending = None
+
+    def accept_operation(self, snapshot, selected_names=None, *, render=True) -> None:
+        self._generation += 1
+        self._pending = None
+        self._needs_refresh = False
+        self.snapshot = snapshot
+        self.loading = False
+        self.error = ""
+        if render:
+            self.window._apply_library_snapshot(selected_names)
+            self.changed.emit()
+
     def refresh(self, selected_names=None) -> None:
         if self._closed:
             return

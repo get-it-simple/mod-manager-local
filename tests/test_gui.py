@@ -88,7 +88,10 @@ class GuiTests(unittest.TestCase):
     def mod_item(self, name: str, installed: bool = False, is_dir: bool = False) -> ModItem:
         return ModItem(name=name, src=_FAKE_SRC / name, dest=_FAKE_DEST / name, is_dir=is_dir, installed=installed)
 
-    def run_action_inline(self, label, worker, done=None, file_key="global") -> None:
+    def run_action_inline(self, label, worker, done=None, file_key="global", **options) -> None:
+        prepare = options.get("prepare")
+        if prepare is not None and prepare() is False:
+            return
         result = worker()
         if done:
             done(result)
@@ -553,7 +556,8 @@ class GuiTests(unittest.TestCase):
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
 
-        apply_mods.assert_called_once_with(self.window.cfg, 2, ("combat",), ("pak",), "default", False, True, state_filter="all")
+        apply_mods.assert_called_once_with(self.window.cfg, 2, ("combat",), ("pak",), "default", False, True,
+                                          state_filter="all", targets=(self.mods[1],))
         self.assertEqual(self.window.context.status_text, "Installed 2/3 on page 2. Errors: 1.")
         refresh_mods.assert_called_once_with()
         refresh_presets.assert_called_once_with()

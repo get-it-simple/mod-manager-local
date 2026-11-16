@@ -11,6 +11,7 @@ from ..models.archive_model import ArchiveModModel
 from ..models.columns import configure_header
 from ..theme import tokens
 from .archive_selector import ArchiveSelector
+from .archive_root import ArchiveRootPicker
 from .style_utils import apply_margins
 from .toolbar import IconToolbar
 
@@ -19,10 +20,13 @@ class ArchiveBrowser(QtWidgets.QWidget):
     archiveChanged = QtCore.Signal(int)
     imageRequested = QtCore.Signal(object, int)
     pathsDropped = QtCore.Signal(object)
+    dropViewportChanging = QtCore.Signal()
+    dropViewportChanged = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.archives: list[PreparedArchive] = []
+        self._root_mode = None
         self.selector = ArchiveSelector(self)
         self.selector_model = self.selector.model()
         self.selector.selectionModel().currentChanged.connect(self._switch_archive)
@@ -64,9 +68,12 @@ class ArchiveBrowser(QtWidgets.QWidget):
         options.addWidget(self.together)
         options.addWidget(self.preserve)
         options.addStretch()
+        self.root_picker = ArchiveRootPicker(self)
+        self.root_picker.rootChanged.connect(self._root_changed)
         content = apply_margins(QtWidgets.QHBoxLayout(), spacing=tokens.SPACE_LG)
         content.addWidget(self.table, 1)
         content.addWidget(self.preview)
+        content.addWidget(self.root_picker, 1)
         layout = apply_margins(QtWidgets.QVBoxLayout(self), spacing=tokens.SPACE_LG)
         layout.addWidget(self.selector)
         layout.addWidget(self.filename)
@@ -130,8 +137,23 @@ class ArchiveBrowser(QtWidgets.QWidget):
 
     def _update_actions(self) -> None:
         separate = self.archive is not None and self.archive.mode == "separate"
+        root_mode = bool(self.archive and not separate and self.archive.preserve_structure)
+        changed = root_mode != self._root_mode
+        if changed:
+            self.dropViewportChanging.emit()
+        self._root_mode = root_mode
+        self.root_picker.set_archive(self.archive)
+        self.table.setVisible(not root_mode)
+        self.preview.setVisible(separate)
+        self.toolbar.setVisible(separate)
+        if changed:
+            self.dropViewportChanged.emit()
         for key in ("select_all", "select_none", "clear_image"):
             self.toolbar.set_enabled(key, separate)
+
+    @property
+    def drop_viewport(self):
+        return self.root_picker.tree.viewport() if self._root_mode else self.table.viewport()
 
     def _mode_changed(self, together: bool) -> None:
         if self.archive is not None:
@@ -143,7 +165,12 @@ class ArchiveBrowser(QtWidgets.QWidget):
     def _preserve_changed(self, preserve: bool) -> None:
         if self.archive is not None:
             self.archive.preserve_structure = preserve
+            self._update_actions()
             self.update_destination_preview()
+
+    def _root_changed(self) -> None:
+        self.update_destination_preview()
+        self.model.modelReset.emit()
 
     def update_preview(self, *_args) -> None:
         archive = self.archive

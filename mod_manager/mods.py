@@ -8,11 +8,12 @@ from .i18n import t
 import shutil
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .models import ModFile, ModItem, OperationFailure, OperationItem, OperationResult
-from .mod_modes import directory_mode, internal_mod_icon
+from .mod_modes import RESERVED_MOD_DIRECTORIES, directory_mode, internal_mod_icon
 from .labels import ResolvedLabels, label_names, state_from_records
 from .links import (
     UNSUPPORTED_LINK_MESSAGE, UNSUPPORTED_LINKS,
@@ -32,6 +33,7 @@ from .storage import (
 )
 from .collection_utils import filter_items_by_query, page_slice, paginate, sort_items
 from .progress import mod_activity, report
+from .storage_policy import profile_config
 
 IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
@@ -86,6 +88,8 @@ def parse_extensions(cfg: Dict) -> Tuple[bool, List[str], bool]:
     return False, exts, include_folders
 
 def is_mod_file(path: Path, cfg: Dict) -> bool:
+    if path.name.casefold() in RESERVED_MOD_DIRECTORIES:
+        return False
     if directory_mode(cfg):
         return path.is_dir() and path.name.casefold() != "images" and not path.name.startswith(".mod-import-")
     show_all, exts, include_folders = parse_extensions(cfg)
@@ -108,6 +112,8 @@ def _link_dest_name(p: Path, link_prefix: str) -> str:
 def _iter_mod_sources(src_dir: Path, recursive: bool, include_folders: bool, imported_folders: set[str] | None = None):
     """Yield (path, is_dir) candidates from src_dir, honoring folder/recursive options."""
     for p in sorted(src_dir.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        if p.name.casefold() in RESERVED_MOD_DIRECTORIES:
+            continue
         if p.is_dir():
             if p.name.casefold() == "images" or (p.name.startswith(".mod-import-") and p.name.casefold() not in (imported_folders or set())):
                 continue
@@ -458,6 +464,9 @@ def remove_favorites_from_mods(cfg: Dict, targets: List[str]) -> str:
 def change_mods(
     mods: List[ModItem], action: str = "toggle", overwrite: bool = False, *, pending_only: bool = True,
 ) -> OperationResult:
+    cfg = profile_config()
+    if cfg is not None:
+        mods = [replace(mod, copy_install=is_copy_install(cfg)) for mod in mods]
     pending = []
     results = []
     report("progress_updating", total=len(mods))
@@ -484,7 +493,10 @@ def change_mods(
 def change_mods_page(
     cfg: Dict, page: int, label_filter: str | Sequence[str], search_query: str | Sequence[str], order_mode: str,
     favorite_only: bool = False, overwrite: bool = False, *, action: str = "install", state_filter: str = "all",
+    targets: Sequence[ModItem] | None = None,
 ) -> Tuple[int, OperationResult]:
+    if targets is not None:
+        return page, change_mods(list(targets), action, overwrite)
     _items, shown, target_page, _pages, _labels = mods_view(
         cfg, page, label_filter, search_query, order_mode, favorite_only, state_filter=state_filter
     )

@@ -25,7 +25,12 @@ class DeferredRunner:
 
     def complete(self, index=0, error=None):
         worker, callback = self.jobs.pop(index)
-        callback(worker() if error is None else None, error)
+        try:
+            result = worker() if error is None else None
+        except Exception as failure:
+            callback(None, failure)
+        else:
+            callback(result, error)
 
 
 def synthetic_snapshot(cfg):

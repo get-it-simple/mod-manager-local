@@ -10,6 +10,24 @@ def is_windows() -> bool:
     return platform.system().lower().startswith("win")
 
 
+def hide_directory(path: Path) -> None:
+    if not is_windows():
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_attributes = kernel.GetFileAttributesW
+    get_attributes.argtypes = (wintypes.LPCWSTR,)
+    get_attributes.restype = wintypes.DWORD
+    set_attributes = kernel.SetFileAttributesW
+    set_attributes.argtypes = (wintypes.LPCWSTR, wintypes.DWORD)
+    set_attributes.restype = wintypes.BOOL
+    attributes = get_attributes(str(path))
+    if attributes == 0xFFFFFFFF or not set_attributes(str(path), attributes | 0x2):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
 def supports_links(directory: Path) -> bool | None:
     if not is_windows():
         return None

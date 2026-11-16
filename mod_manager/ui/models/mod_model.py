@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui
 
 from ...models import ModItem
+from ...i18n import t
 from ...labels import label_names
 from .. import icons
 from ..theme import colors, tokens
@@ -33,6 +34,7 @@ class ModTableModel(QtCore.QAbstractTableModel):
         self.records: dict[str, dict] = {}
         self.favorites: set[str] = set()
         self.active_mods: set[str] = set()
+        self.operation_states: dict[str, str] = {}
         self.operation_frames: dict[str, OperationVisual] = {}
         self.activity_phase = 0.0
         self.set_accent(accent_color or colors.FALLBACK_ACCENT)
@@ -68,6 +70,15 @@ class ModTableModel(QtCore.QAbstractTableModel):
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [BUSY_ROLE, DECORATION_ROLE])
 
+    def set_operation_states(self, states: dict[str, str]) -> None:
+        changed = {name for name in self.operation_states.keys() | states.keys()
+                   if self.operation_states.get(name) != states.get(name)}
+        self.operation_states = dict(states)
+        for row, mod in enumerate(self.mods):
+            if mod.name in changed:
+                self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1),
+                                      [DISPLAY_ROLE, DECORATION_ROLE, TOOLTIP_ROLE])
+
     def columnCount(self, parent=QtCore.QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.COLUMNS)
 
@@ -82,6 +93,9 @@ class ModTableModel(QtCore.QAbstractTableModel):
         mod = self.mods[index.row()]
         column = index.column()
         if role == TOOLTIP_ROLE and column in (1, 2):
+            if mod.name in self.active_mods:
+                state = self.operation_states.get(mod.name, "queue_waiting")
+                return mod.name + " — " + t(state)
             return mod.name if column == 1 else self.labels.get(mod.name, "-")
         if role == ITEM_ROLE:
             return mod
@@ -90,11 +104,14 @@ class ModTableModel(QtCore.QAbstractTableModel):
         if role == OPERATION_ROLE:
             return self.operation_frames.get(mod.name)
         if role == DECORATION_ROLE and column == 0:
+            if mod.name in self.operation_states:
+                return None
             return self._installed_icon if mod.installed else self._empty_icon
         if role == ALIGNMENT_ROLE:
             return columns.alignment(self.COLUMNS, column)
         if role != DISPLAY_ROLE:
             return None
         record = self.records.get(mod.name, {})
-        values = ("", mod.name, self.labels.get(mod.name, "-"), record.get("last_managed") or "-")
+        status = t(self.operation_states[mod.name]) if mod.name in self.operation_states else ""
+        values = (status, mod.name, self.labels.get(mod.name, "-"), record.get("last_managed") or "-")
         return values[column]

@@ -127,7 +127,7 @@ class LibraryChipsGuiTests(WindowTestCase):
         self.assertTrue(view.model().index(1, 0).data(QtCore.Qt.UserRole)[3])
         self.enter(self.window.search_box, "first")
         self.assertEqual(view.model().index(1, 0).data(QtCore.Qt.UserRole)[2], 2)
-        QtTest.QTest.keyClick(view, QtCore.Qt.Key_Return)
+        QtTest.QTest.keyClick(view, QtCore.Qt.Key_Return, QtCore.Qt.ShiftModifier)
         self.assertEqual(self.window.filters.labels, ())
         self.assertFalse(view.model().index(1, 0).data(QtCore.Qt.UserRole)[3])
         self.assertEqual(view.delegate.accent, QtGui.QColor(self.window.theme.system_accent))

@@ -210,13 +210,17 @@ class LibraryLoadingTests(WindowTestCase):
         self.assertTrue(self.window.library.loading)
         self.assertEqual(len(self.deferred.jobs), 1)
 
-    def test_filters_sorting_and_pagination_do_not_submit_disk_work(self):
+    def test_filters_and_pagination_do_not_scan_and_sort_preferences_save_in_queue(self):
         self.window.search_box.setCurrentText("combat")
         self.window.search_box.lineEdit().returnPressed.emit()
         self.window._change_filter_mode("installed")
         self.window._sort_mods("name")
         self.window._change_mod_page(1)
         self.window._mods_clear()
+        self.assertEqual(len(self.deferred.jobs), 1)
+        self.assertEqual(len(self.window.runner.commands), 1)
+        self.assertFalse(self.window.runner.commands[0].mod_names)
+        self.deferred.complete()
         self.assertEqual(self.deferred.jobs, [])
 
     def test_late_completion_after_shutdown_is_ignored(self):

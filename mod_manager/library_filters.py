@@ -49,6 +49,13 @@ class LibraryFilters:
         if not self.add("label", name):
             self.remove("label", name)
 
+    def activate_label(self, name: str, additive: bool = False) -> None:
+        if additive:
+            self.toggle_label(name)
+        else:
+            self.clear()
+            self.add("label", name)
+
     def reconcile_labels(self, names: Iterable[str], renames: dict[str, str] | None = None) -> None:
         canonical = {name.casefold(): name for name in names}
         renamed = {old.casefold(): new for old, new in (renames or {}).items()}

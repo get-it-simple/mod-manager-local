@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+TRASH_CLEANUP_MS = 60 * 60 * 1000
+
 from ...i18n import t
 
 SPACE_XS = 2

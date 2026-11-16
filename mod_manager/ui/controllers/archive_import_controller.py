@@ -32,6 +32,7 @@ class ArchiveImportController(QtCore.QObject):
         self.cfg = {}
         self.assets = None
         self.drop_target = None
+        self._native_drop = None
         self.closed = False
         self.scans = 0
         self.publishing = False
@@ -119,7 +120,8 @@ class ArchiveImportController(QtCore.QObject):
             if not self.archives:
                 self._cleanup()
                 return
-            if self.dialog or len(self.archives) > 1 or len(self.archives[0].units) > 1:
+            if (self.dialog or len(self.archives) > 1 or len(self.archives[0].units) > 1
+                    or (self.archives[0].mode == "together" and self.archives[0].preserve_structure)):
                 self._show_manager()
             else:
                 self.commit()
@@ -146,9 +148,12 @@ class ArchiveImportController(QtCore.QObject):
                     table.setCurrentIndex(index)
                 self.handle_paths(paths)
 
-            self.drop_target = QtWindowsDropTarget(self.dialog.browser.table.viewport(), native_drop)
+            self._native_drop = native_drop
+            self.dialog.browser.dropViewportChanging.connect(self._disable_drop_target)
+            self.dialog.browser.dropViewportChanged.connect(self._enable_drop_target)
         self.dialog.browser.destination_root = self.cfg.get("mods_source_dir", "")
         self.dialog.browser.set_archives(self.archives)
+        self._enable_drop_target()
         self.dialog.set_working(False)
         show_dialog(self.dialog)
 
@@ -274,7 +279,7 @@ class ArchiveImportController(QtCore.QObject):
                 if not self.closed:
                     self.window._import_paths(paths, target)
 
-        self.window._run_action(t('importing_archives'), worker, done)
+        self.window._run_action(t('importing_archives'), worker, done, mod_names=tuple(plan.name for plan in plans))
 
     def _finished(self, _result) -> None:
         dialog = self.dialog
@@ -287,6 +292,15 @@ class ArchiveImportController(QtCore.QObject):
         if self.drop_target is not None:
             self.drop_target.disable()
             self.drop_target = None
+
+    def _enable_drop_target(self) -> None:
+        if self.dialog is None or self._native_drop is None:
+            return
+        viewport = self.dialog.browser.drop_viewport
+        if self.drop_target is not None and self.drop_target.viewport is viewport:
+            return
+        self._disable_drop_target()
+        self.drop_target = QtWindowsDropTarget(viewport, self._native_drop)
 
     def _cleanup(self) -> None:
         self._disable_drop_target()

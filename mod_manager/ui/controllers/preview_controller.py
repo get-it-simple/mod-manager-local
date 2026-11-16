@@ -67,7 +67,7 @@ class PreviewController:
 
     def choose(self) -> None:
         names = self.window._selected_mod_names()
-        if not names or self.window.busy:
+        if not names or not self.window._mods_available(names):
             return
         try:
             source = self._clipboard_source()
@@ -109,6 +109,8 @@ class PreviewController:
                 if not name:
                     return
                 names = [name]
+            if not self.window._mods_available(names):
+                return
             if len(names) > 1 and not confirmed:
                 if prompts.choose_preview_image(self.window, source.path, len(names)) != "apply":
                     return
@@ -133,7 +135,7 @@ class PreviewController:
                 if errors:
                     prompts.show_warning(self.window, t('text_1e63fa10de76'), "\n".join(errors))
 
-            self.window._run_action(t('setting_preview_images'), worker, done)
+            self.window._run_action(t('setting_preview_images'), worker, done, mod_names=names)
             submitted = True
         finally:
             if not submitted:

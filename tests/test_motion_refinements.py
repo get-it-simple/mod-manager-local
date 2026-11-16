@@ -260,7 +260,7 @@ class MotionRefinementTests(WindowTestCase):
         self.assertIn("2", buttons[1].text())
         self.assertIn("2", buttons[3].text())
 
-    def test_fast_scan_cannot_enable_actions_or_repeat_action_during_result(self):
+    def test_result_animation_leaves_available_mod_actions_enabled(self):
         self.select_mod_rows(0, 1)
         self.window._set_busy(True)
         self.progress("started")
@@ -270,13 +270,13 @@ class MotionRefinementTests(WindowTestCase):
         self.assertFalse(self.window.busy)
         self.assertTrue(self.window.activity.visual_busy)
         for key in ("install_selected", "uninstall_selected", "install_page", "uninstall_page"):
-            self.assertFalse(self.window.mods_actions.button(key).isEnabled())
+            self.assertTrue(self.window.mods_actions.button(key).isEnabled())
         with patch("mod_manager.ui.controllers.error_history_controller.ErrorHistoryController.run") as run:
             self.window._install_page()
             self.window._uninstall_page()
             self.window._toggle_selected_mods()
             self.window._toggle_selected_presets(["ui"])
-            run.assert_not_called()
+            self.assertEqual(run.call_count, 4)
         self.advance(tokens.OPERATION_CYCLE_MS * 3)
         self.assertTrue(self.window.mods_actions.button("install_page").isEnabled())
 
@@ -299,7 +299,7 @@ class MotionRefinementTests(WindowTestCase):
         self.window._set_busy(False)
         self.assertIs(frame, self.window.presets_model.operation_frames["ui"])
         self.assertFalse(frame.success)
-        self.assertFalse(self.window.presets_toolbar.button("toggle").isEnabled())
+        self.assertTrue(self.window.presets_toolbar.button("toggle").isEnabled())
         self.advance(tokens.OPERATION_CYCLE_MS * 3)
         self.assertTrue(self.window.presets_toolbar.button("toggle").isEnabled())
         self.assertFalse(self.window.presets_model.operation_frames)

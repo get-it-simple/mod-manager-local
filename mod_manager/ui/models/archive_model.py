@@ -37,6 +37,8 @@ class ArchiveModModel(QtCore.QAbstractTableModel):
             return ("", unit.name, ", ".join(path.as_posix() for path in unit.members))[index.column()]
         if role == QtCore.Qt.CheckStateRole and index.column() == 0:
             selected = self.archive.mode == "together" or index.row() in self.archive.selected
+            if self.archive.mode == "together" and self.archive.preserve_structure:
+                selected = all(member.is_relative_to(self.archive.import_root) for member in unit.members)
             return QtCore.Qt.Checked if selected else QtCore.Qt.Unchecked
         if role == QtCore.Qt.ToolTipRole:
             return "\n".join(path.as_posix() for path in unit.members)
