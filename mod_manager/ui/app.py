@@ -989,9 +989,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         selected = [self.current_mods_shown[row] for row in self._selected_rows(self._current_mod_view())
                     if row < len(self.current_mods_shown)]
+        pending = self.runner.pending_mods
         for key, mods, installed in (("install_selected", selected, False), ("uninstall_selected", selected, True),
                                      ("install_page", self.current_mods_shown, False), ("uninstall_page", self.current_mods_shown, True)):
-            count = sum(mod.installed == installed and mod.name not in self.runner.pending_mods for mod in mods)
+            count = sum(mod.installed == installed and mod.name not in pending for mod in mods)
             button = self.mods_actions.button(key)
             button.setText(t(key, count=count))
             button.setEnabled(not self.operation_blocked and count > 0)

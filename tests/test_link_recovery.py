@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import os
-import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -62,22 +61,22 @@ class LinkBackendTests(unittest.TestCase):
         self.source.write_text("source", encoding="utf-8")
         self.target = self.root / "target.pak"
 
-    def test_single_unsupported_link_never_starts_a_command(self):
+    def test_single_unsupported_link_never_calls_the_native_backend(self):
         with patch("mod_manager.links.supports_links", return_value=False), patch(
-            "mod_manager.links.subprocess.run",
-        ) as command:
+            "mod_manager.links.os.symlink",
+        ) as native:
             result = links.mklink(self.source, self.target)
         self.assertEqual(result, (False, links.UNSUPPORTED_LINK_MESSAGE))
-        command.assert_not_called()
+        native.assert_not_called()
         self.assertFalse(self.target.exists())
         self.assertEqual(self.source.read_text(encoding="utf-8"), "source")
 
     def test_batch_keeps_validation_errors_when_nothing_can_be_linked(self):
         existing = self.root / "existing.pak"
         existing.write_text("keep", encoding="utf-8")
-        with patch("mod_manager.links.is_windows", return_value=True), patch(
-            "mod_manager.links.supports_links", return_value=False,
-        ), patch("mod_manager.links.subprocess.run") as command:
+        with patch("mod_manager.links.supports_links", return_value=False), patch(
+            "mod_manager.links.os.symlink",
+        ) as native:
             results = links.mklink_batch([
                 (self.source, self.target, False),
                 (self.root / "missing.pak", self.root / "other.pak", False),
@@ -86,62 +85,54 @@ class LinkBackendTests(unittest.TestCase):
         self.assertEqual(results[0], (False, links.UNSUPPORTED_LINK_MESSAGE))
         self.assertIn("Source not found", results[1][1])
         self.assertIn("Target already exists", results[2][1])
-        command.assert_not_called()
+        native.assert_not_called()
         self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
 
     def test_unknown_support_attempts_link_and_preserves_native_error(self):
-        with patch("mod_manager.links.is_windows", return_value=True), patch(
-            "mod_manager.links.supports_links", return_value=None,
-        ), patch("mod_manager.links.subprocess.run", return_value=subprocess.CompletedProcess(
-            [], 1, "", "Native failure",
-        )) as command:
-            self.assertEqual(links.mklink(self.source, self.target), (False, "Native failure"))
-        command.assert_called_once()
-
-    @unittest.skipUnless(os.name == "nt", "Windows batch execution")
-    def test_real_batch_output_contains_only_the_error_for_each_failed_item(self):
-        native_run = subprocess.run
-        scripts = []
-
-        def substitute_backend(arguments, **kwargs):
-            script = Path(arguments[-1])
-            scripts.append(script)
-            lines = []
-            index = 0
-            for line in script.read_text(encoding="utf-8").splitlines():
-                if line.startswith("mklink "):
-                    if index == 0:
-                        lines.extend(["echo Created", "cmd /d /c exit 0"])
-                    else:
-                        lines.extend(["echo The device does not support symbolic links.", "cmd /d /c exit 1"])
-                    index += 1
-                else:
-                    lines.append(line)
-            script.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return native_run(arguments, **kwargs)
-
         with patch("mod_manager.links.supports_links", return_value=None), patch(
-            "mod_manager.links.subprocess.run", side_effect=substitute_backend,
+            "mod_manager.links.os.symlink", side_effect=OSError("Native failure"),
+        ) as native:
+            self.assertEqual(links.mklink(self.source, self.target), (False, "Native failure"))
+        native.assert_called_once()
+        self.assertFalse(self.target.exists())
+
+    def test_native_batch_reports_separate_errors_and_continues(self):
+        native_symlink = os.symlink
+        failed = self.root / "second.pak"
+        final = self.root / "third.pak"
+
+        def create(source, destination, **kwargs):
+            if destination == failed:
+                raise OSError("The device does not support symbolic links.")
+            return native_symlink(source, destination, **kwargs)
+
+        with patch("mod_manager.links.supports_links", return_value=None) as support, patch(
+            "mod_manager.links.os.symlink", side_effect=create,
         ):
             result = links.mklink_batch([
                 (self.source, self.target, False),
-                (self.source, self.root / "second.pak", False),
+                (self.source, failed, False),
+                (self.source, final, False),
             ])
-        self.assertEqual(result, [(True, "OK"), (False, "The device does not support symbolic links.")])
-        self.assertTrue(all(not script.exists() for script in scripts))
+        self.assertEqual(result, [
+            (True, "OK"), (False, "The device does not support symbolic links."), (True, "OK"),
+        ])
+        support.assert_called_once_with(self.root)
+        self.assertTrue(os.path.samefile(self.target, self.source))
+        self.assertTrue(os.path.samefile(final, self.source))
+        self.assertFalse(failed.exists())
 
-    def test_command_start_failure_preserves_prevalidated_results(self):
+    def test_native_failure_preserves_validation_results(self):
         missing = self.root / "missing.pak"
-        with patch("mod_manager.links.is_windows", return_value=True), patch(
-            "mod_manager.links.supports_links", return_value=None,
-        ), patch("mod_manager.links.subprocess.run", side_effect=OSError("Cannot start cmd")):
+        with patch("mod_manager.links.supports_links", return_value=None), patch(
+            "mod_manager.links.os.symlink", side_effect=OSError("Cannot create link"),
+        ):
             results = links.mklink_batch([
                 (missing, self.target, False),
                 (self.source, self.root / "second.pak", False),
             ])
         self.assertIn("Source not found", results[0][1])
-        self.assertEqual(results[1], (False, "Cannot start cmd"))
-
+        self.assertEqual(results[1], (False, "Cannot create link"))
 
 class CopyRecoveryTests(CliEnvironment, unittest.TestCase):
     def setUp(self):

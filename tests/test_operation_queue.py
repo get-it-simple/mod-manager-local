@@ -6,13 +6,14 @@ from unittest.mock import patch
 
 from PySide6 import QtCore, QtTest
 
+from mod_manager.i18n import t
 from mod_manager.models import OperationItem, OperationResult
 from mod_manager.storage_policy import profile_config
 from mod_manager.ui.task_runner import TaskRunner
 from mod_manager.ui.widgets.sidebar_labels import SidebarLabels
 from tests.gui_background import DeferredRunner
 from tests.qt_support import qt_app
-from tests.window_fixture import WindowTestCase
+from tests.window_fixture import WindowTestCase, mod_item
 
 
 class OperationQueueTests(unittest.TestCase):
@@ -116,6 +117,21 @@ class QueueGuiTests(WindowTestCase):
             self.finish_commands()
             self.assertEqual(change.call_count, 2)
         self.assertFalse(self.window.runner.pending_mods)
+
+    def test_large_unicode_page_counts_exclude_reserved_mods_and_recover_after_completion(self):
+        self.mods[:] = [mod_item(f"中文😀-{index}.pak", installed=index % 2 == 0) for index in range(1000)]
+        self.window.refresh_mods()
+        self.finish_commands()
+        reserved = tuple(mod.name for index, mod in enumerate(self.mods) if index % 4 in (0, 1))
+        self.window.runner.run("Synthetic large operation", lambda: None, config=self.window.cfg,
+                               mod_names=reserved, blocking=False)
+        for key in ("install_page", "uninstall_page"):
+            self.assertEqual(self.window.mods_actions.button(key).text(), t(key, count=250))
+            self.assertTrue(self.window.mods_actions.button(key).isEnabled())
+        self.finish_commands()
+        for key in ("install_page", "uninstall_page"):
+            self.assertEqual(self.window.mods_actions.button(key).text(), t(key, count=500))
+            self.assertTrue(self.window.mods_actions.button(key).isEnabled())
 
     def test_page_targets_remain_fixed_when_filters_change_while_queued(self):
         self.window._run_action("earlier operation", lambda: None)

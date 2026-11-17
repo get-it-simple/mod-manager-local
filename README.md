@@ -2,6 +2,7 @@
 
 A symlink-based mod manager for Unreal Engine games and most other engines, supports both copy or symlink-based mods.
 - Manages mods as symbolic links (files) and junctions (folders), or copies them when a game profile requires it.
+- Preserves Unicode mod names, including Chinese characters and emoji, when creating links or copies, including bulk installations. Names remain subject to file system restrictions.
 - Supports copy based installation so the games that rejects symlink based mods will work without issues.
 
 ---
