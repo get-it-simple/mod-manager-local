@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from .i18n import t
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from copy import deepcopy
 from typing import Iterable
+
+from .label_icons import validate_icon_reference
 
 
 MANUAL = "manual"
@@ -30,6 +32,23 @@ class LabelDefinition:
     mode: str = MANUAL
     terms: list[str] = field(default_factory=list)
     exclusions: list[str] = field(default_factory=list)
+    icon: str = ""
+    icon_only: bool = False
+
+    def to_record(self) -> dict:
+        value = {"mode": self.mode, "terms": list(self.terms), "exclusions": list(self.exclusions)}
+        if self.icon or self.icon_only:
+            value.update(icon=self.icon, icon_only=self.icon_only)
+        return value
+
+    @classmethod
+    def from_record(cls, value: dict) -> LabelDefinition:
+        icon = validate_icon_reference(value.get("icon", ""))
+        icon_only = value.get("icon_only", False)
+        if not isinstance(icon_only, bool):
+            raise ValueError(t("label_icon_invalid"))
+        return cls(value.get("mode", MANUAL), unique_names(value.get("terms", [])),
+                   unique_names(value.get("exclusions", [])), icon, icon_only)
 
 
 @dataclass
@@ -48,6 +67,13 @@ class LabelState:
             or (definition.mode == AUTOMATIC and matching_fragment_ids(mod_name, definition.terms)
                 and not matching_fragment_ids(mod_name, definition.exclusions))
         ), key=str.casefold))
+
+    def counts(self, mods: Iterable[str]) -> dict[str, int]:
+        counts = dict.fromkeys(self.definitions, 0)
+        for mod in mods:
+            for name in self.members(mod):
+                counts[name] += 1
+        return counts
 
     def rename(self, old: str, new: str) -> None:
         new = new.strip()
@@ -86,6 +112,9 @@ class LabelState:
         if any(not name for name in folded) or len(set(folded)) != len(folded):
             raise ValueError(t('enter_unique_nonempty_label_names'))
         for name, definition in self.definitions.items():
+            validate_icon_reference(definition.icon)
+            if not isinstance(definition.icon_only, bool):
+                raise ValueError(t("label_icon_invalid"))
             if definition.mode not in (MANUAL, AUTOMATIC):
                 raise ValueError(t('unknown_mode_for_label_value0', value0=f'{name}'))
             definition.terms = unique_names(definition.terms)
@@ -117,9 +146,10 @@ def merge_label_states(saved: LabelState, edited: LabelState, current: LabelStat
     for name in sorted(baseline.definitions.keys() | edited.definitions.keys() | latest.definitions.keys(), key=str.casefold):
         before, desired, actual = (state.definitions.get(name) for state in (baseline, edited, latest))
         if before is not None and desired is not None and actual is not None:
-            result.definitions[name] = LabelDefinition(_merge_label_value(before.mode, desired.mode, actual.mode),
-                                                       _merge_label_value(before.terms, desired.terms, actual.terms),
-                                                       _merge_label_value(before.exclusions, desired.exclusions, actual.exclusions))
+            result.definitions[name] = LabelDefinition(**{
+                item.name: _merge_label_value(getattr(before, item.name), getattr(desired, item.name), getattr(actual, item.name))
+                for item in fields(LabelDefinition)
+            })
         else:
             definition = _merge_label_value(before, desired, actual)
             if definition is not None:

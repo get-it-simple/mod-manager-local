@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...i18n import t
-from .. import icons
+from ..label_artwork import label_icon
 from ..theme import tokens
 from .style_utils import set_variant
 from .buttons import icon_button
@@ -39,12 +39,14 @@ class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
         pad = tokens.SPACE_XS if self.compact else tokens.SPACE_SM
         content = rect.adjusted(pad, 0, -pad, 0)
         icon_rect = QtCore.QRect(content.left(), content.center().y() - tokens.ICON_SIZE // 2, tokens.ICON_SIZE, tokens.ICON_SIZE)
-        icons.standard_icon("settings" if mode == "automatic" else "label_add").paint(painter, icon_rect)
+        if self.compact:
+            icon_rect.moveCenter(content.center())
+        label_icon(self.view.definitions.get(name), "settings" if mode == "automatic" else "label_add").paint(painter, icon_rect)
         content.adjust(tokens.ICON_SIZE + tokens.SPACE_XS, 0, 0, 0)
         painter.setPen(option.palette.text().color())
-        count_width = option.fontMetrics.horizontalAdvance(str(count))
-        painter.drawText(content, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, str(count))
         if not self.compact:
+            count_width = option.fontMetrics.horizontalAdvance(str(count))
+            painter.drawText(content, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, str(count))
             content.adjust(0, 0, -count_width - tokens.SPACE_SM, 0)
             painter.drawText(content, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(name, QtCore.Qt.ElideRight, content.width()))
         painter.restore()
@@ -72,6 +74,7 @@ class SidebarLabels(QtWidgets.QListView):
         self.setMouseTracking(True)
         self.clicked.connect(lambda index: self._activate(index, QtWidgets.QApplication.keyboardModifiers()))
         self._entries = []
+        self.definitions = {}
         self.feedback = ButtonItemFeedback(self, lambda index: bool(index.data(QtCore.Qt.UserRole) and index.data(QtCore.Qt.UserRole)[3]))
         self.add_button = icon_button("add", t("label_quick_add"), self._add_hovered, parent=self.viewport())
         self.add_button.hide()
@@ -86,7 +89,7 @@ class SidebarLabels(QtWidgets.QListView):
             self.labelToggleRequested.emit(self._hovered.data())
 
     def _position_add(self, *_args):
-        if not self._hovered.isValid() or not self.isEnabled():
+        if self.delegate.compact or not self._hovered.isValid() or not self.isEnabled():
             self.add_button.hide()
             return
         rect = self.delegate.add_rect(self.visualRect(QtCore.QModelIndex(self._hovered)))
@@ -106,7 +109,7 @@ class SidebarLabels(QtWidgets.QListView):
 
     def mouseReleaseEvent(self, event) -> None:
         index = self.indexAt(event.position().toPoint())
-        if (event.button() == QtCore.Qt.LeftButton and index.isValid()
+        if (not self.delegate.compact and event.button() == QtCore.Qt.LeftButton and index.isValid()
                 and self.delegate.add_rect(self.visualRect(index)).contains(event.position().toPoint())):
             self.labelToggleRequested.emit(index.data())
             event.accept()
@@ -128,7 +131,7 @@ class SidebarLabels(QtWidgets.QListView):
     def viewportEvent(self, event):
         if event.type() == QtCore.QEvent.ToolTip:
             index = self.indexAt(event.pos())
-            if index.isValid() and self.delegate.add_rect(self.visualRect(index)).contains(event.pos()):
+            if not self.delegate.compact and index.isValid() and self.delegate.add_rect(self.visualRect(index)).contains(event.pos()):
                 QtWidgets.QToolTip.showText(event.globalPos(), t("label_quick_add"), self)
                 return True
         return super().viewportEvent(event)
@@ -180,4 +183,5 @@ class SidebarLabels(QtWidgets.QListView):
 
     def set_compact(self, compact: bool) -> None:
         self.delegate.compact = compact
+        self._position_add()
         self.viewport().update()

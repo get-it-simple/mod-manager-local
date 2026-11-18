@@ -31,6 +31,8 @@ class ModTableModel(QtCore.QAbstractTableModel):
         self.mods: list[ModItem] = []
         self.labels: dict[str, str] = {}
         self.label_memberships: dict[str, tuple[str, ...]] = {}
+        self.label_definitions = {}
+        self.active_labels = set()
         self.records: dict[str, dict] = {}
         self.favorites: set[str] = set()
         self.active_mods: set[str] = set()
@@ -54,6 +56,7 @@ class ModTableModel(QtCore.QAbstractTableModel):
         visible_names = {mod.name for mod in mods}
         self.operation_frames = {name: frame for name, frame in self.operation_frames.items() if name in visible_names}
         self.labels = dict(labels or {})
+        self.label_definitions = getattr(getattr(labels, "state", None), "definitions", {})
         self.label_memberships = {mod.name: label_names(labels or {}, mod.name) for mod in mods}
         self.records = dict(records or {})
         self.favorites = set(favorites or ())
@@ -92,6 +95,8 @@ class ModTableModel(QtCore.QAbstractTableModel):
             return None
         mod = self.mods[index.row()]
         column = index.column()
+        if role == TOOLTIP_ROLE and column == 3:
+            return self.records.get(mod.name, {}).get("last_managed") or "-"
         if role == TOOLTIP_ROLE and column in (1, 2):
             if mod.name in self.active_mods:
                 state = self.operation_states.get(mod.name, "queue_waiting")

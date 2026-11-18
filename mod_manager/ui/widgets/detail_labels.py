@@ -10,13 +10,15 @@ from .style_utils import apply_margins
 
 
 class DetailLabels(QtWidgets.QWidget):
-    def __init__(self, labels, count: int, add, assign, remove, edit, filter_label, parent=None):
+    def __init__(self, labels, count: int, add, assign, remove, edit, filter_label, parent=None, *, can_assign=True):
         super().__init__(parent)
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_SM)
         header = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
         header.addWidget(QtWidgets.QLabel(t("labels")))
         header.addWidget(icon_button("label_add", t("new_label"), add))
         assignment = icon_button("label", t("assign_label"), assign)
+        assignment.setProperty("actionAvailable", can_assign)
+        assignment.setEnabled(can_assign)
         header.addWidget(assignment)
         header.addStretch(1)
         layout.addLayout(header)

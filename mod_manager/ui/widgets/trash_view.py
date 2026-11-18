@@ -27,6 +27,7 @@ class TrashView(QtWidgets.QWidget):
     def __init__(self, parent=None, cfg=None, runner=None):
         super().__init__(parent)
         self.entries = []
+        self._preview_paths = ()
         self.cfg = cfg if cfg is not None else {}
         self.mode = self.cfg.get("trash_view_mode", "list")
         self.images = ImageCache(runner, lambda cfg, _name: cfg.get("trash_preview"), self) if runner else None
@@ -39,7 +40,7 @@ class TrashView(QtWidgets.QWidget):
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(tokens.TABLE_ROW_HEIGHT)
         self.table.setShowGrid(False)
@@ -118,14 +119,20 @@ class TrashView(QtWidgets.QWidget):
 
     def set_entries(self, entries) -> None:
         entries = list(entries)
-        if entries == self.entries:
+        previews = tuple(preview_path(entry, self.cfg) for entry in entries)
+        if self.images:
+            self.images.reset()
+        if entries == self.entries and previews == self._preview_paths:
+            self.tiles.viewport().update()
             self.refresh_days()
             return
         selected = {entry.identifier for entry in self.selected_entries()}
         self.entries = list(entries)
+        self._preview_paths = previews
         self.model.clear()
         self.model.setHorizontalHeaderLabels([t("mod"), t("game"), t("trash_deleted_at"), t("trash_expires_at"), t("state")])
-        for entry in entries:
+        self.table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        for entry, preview in zip(entries, previews):
             state = t("trash_incomplete") if entry.missing else t("trash_ready")
             deleted = datetime.fromisoformat(entry.data["deleted_at"]).astimezone().strftime("%Y-%m-%d %H:%M")
             expires = datetime.fromisoformat(entry.data["expires_at"]).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -137,7 +144,7 @@ class TrashView(QtWidgets.QWidget):
                 item.setEditable(False)
                 item.setToolTip(item.toolTip() + chr(10) + expires)
             items[0].setData(entry, TRASH_ENTRY_ROLE)
-            items[0].setData(ModItem(entry.name, entry.path, preview_path(entry), False, False), QtCore.Qt.UserRole)
+            items[0].setData(ModItem(entry.name, entry.path, preview, False, False), QtCore.Qt.UserRole)
             self.model.appendRow(items)
             if entry.identifier in selected:
                 index = self.model.index(self.model.rowCount() - 1, 0)

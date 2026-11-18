@@ -9,6 +9,8 @@ from ... import settings_schema
 
 from ..controllers import ACTIONS, SELECTION
 from ..controllers.mod_context_menu import ModContextMenu
+from ..models.label_delegate import LabelChipsDelegate
+from ..widgets.label_chips import LabelChipInteraction
 from ..models import (
     FavoriteDelegate,
     ModListView,
@@ -169,6 +171,8 @@ def build_mods(window) -> None:
     mods_header.sectionClicked.connect(window._sort_mods_by_section)
     window.mods_table.doubleClicked.connect(lambda _idx: window._toggle_selected_mods())
     window.mods_table.selectionModel().selectionChanged.connect(lambda _a, _b: window._on_mod_selection_changed())
+    window.label_delegate = LabelChipsDelegate(window.mods_table)
+    window.mods_table.setItemDelegateForColumn(tokens.MOD_LABEL_COLUMN, window.label_delegate)
     window.favorite_delegate = FavoriteDelegate(window.mods_table)
     window.favorite_delegate.favoriteToggled.connect(window._toggle_favorite_name)
     window.mods_table.setItemDelegateForColumn(1, window.favorite_delegate)
@@ -193,6 +197,12 @@ def build_mods(window) -> None:
     window.tiles_view.doubleClicked.connect(lambda _idx: window._toggle_selected_mods())
     window.tile_delegate.favoriteToggled.connect(window._toggle_favorite_name)
     window.tile_delegate.labelsRequested.connect(window._show_label_choices)
+    window.label_interactions = []
+    for view, delegate in ((window.mods_table, window.label_delegate), (window.tiles_view, window.tile_delegate)):
+        interaction = LabelChipInteraction(view, delegate, lambda: not window.busy and window.library.ready)
+        interaction.activated.connect(window._sidebar_label_requested)
+        interaction.choicesRequested.connect(window._show_label_choices)
+        window.label_interactions.append(interaction)
 
     window.detail_scroll = DetailPanel()
     window.detail_frame = window.detail_scroll.frame

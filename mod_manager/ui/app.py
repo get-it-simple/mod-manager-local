@@ -249,6 +249,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.interaction.shutdown()
         self._close_label_choices()
         self.mod_menu.shutdown()
+        for interaction in self.label_interactions:
+            interaction.shutdown()
         self.cfg["window_width"] = self.width()
         self.cfg["window_height"] = self.height()
         self._save_tile_splitter_sizes()
@@ -396,13 +398,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
                     event.acceptProposedAction()
                     return True
         if event.type() == QtCore.QEvent.MouseButtonPress:
-            tiles_view = getattr(self, "tiles_view", None)
-            if tiles_view is not None and obj is tiles_view.viewport() and event.button() == QtCore.Qt.LeftButton:
-                label = self._tile_label_at_position(event.position().toPoint())
-                if label:
-                    self._toggle_label_filter(label)
-                    event.accept()
-                    return True
             if isinstance(obj, QtWidgets.QWidget) and obj.window() is self and event.button() == QtCore.Qt.XButton1:
                 return self._nav_back() == "break"
             if isinstance(obj, QtWidgets.QWidget) and obj.window() is self and event.button() == QtCore.Qt.XButton2:
@@ -636,7 +631,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _apply_state_column_width(self) -> None:
         width = tokens.to_int(self.cfg.get("placeholder_image_col_width"), 0)
         if width > 0:
-            self.mods_table.horizontalHeader().resizeSection(0, width)
+            minimum = tokens.STATE_ICON_SIZE + tokens.SPACE_SM * 2 + tokens.BORDER_WIDTH * 2
+            self.mods_table.horizontalHeader().setMinimumSectionSize(minimum)
+            self.mods_table.horizontalHeader().resizeSection(0, max(minimum, width))
 
     def _build_mods(self):
         return build_mods(self)
@@ -1064,8 +1061,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._close_label_choices()
         menu = QtWidgets.QMenu(self)
         menu.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        from .label_artwork import label_icon
+        definitions = getattr(getattr(self.current_mod_labels, "state", None), "definitions", {})
         for name in names:
-            action = menu.addAction(self._icon("label_add"), name)
+            action = menu.addAction(label_icon(definitions.get(name)), name)
             action.setIconVisibleInMenu(True)
             action.triggered.connect(lambda _checked=False, label=name: self._apply_label_choice(menu, label))
         self._label_choices_menu = menu
@@ -1078,7 +1077,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _apply_label_choice(self, menu: QtWidgets.QMenu, name: str) -> None:
         if getattr(self, "_label_choices_menu", None) is menu and not self.busy and self._is_mods_tab_active():
-            self._toggle_label_filter(name)
+            self._sidebar_label_requested(name, bool(QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier))
 
     def _close_label_choices(self) -> None:
         menu = getattr(self, "_label_choices_menu", None)
@@ -1160,7 +1159,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         controls = DetailLabels(labels, len(targets), guarded(self._add_label_selected), guarded(self._assign_existing_label),
                                 guarded(lambda name: self._change_label_selected(name, remove=True)),
-                                guarded(self._edit_label_rule), guarded(self._toggle_label_filter))
+                                guarded(self._edit_label_rule), guarded(lambda name: self._sidebar_label_requested(name)),
+                                can_assign=bool(self._manual_label_names()))
         self.detail_scroll.add_widget(controls)
 
     def _edit_label_rule(self, name: str) -> None:
@@ -1218,7 +1218,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         active = {name.casefold() for name in self.filters.labels}
         entries = [(name, mode, count, name.casefold() in active)
                    for name, mode, count in sorted(catalog, key=lambda entry: (-entry[2], entry[0].casefold()))]
+        self.mods_model.active_labels = set(self.filters.labels)
+        self.workspace.labels_list.definitions = getattr(getattr(labels, "state", None), "definitions", {})
         self.workspace.labels_list.update_labels(entries, self.theme.system_accent)
+        self.workspace.labels_list.viewport().update()
 
     def _update_label_controls(self) -> None:
         enabled = bool(active_game_profile(self.cfg)) and not self.busy and self.library.ready
@@ -1385,6 +1388,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def refresh_all(self, *, reload_artwork: bool = False) -> None:
         if reload_artwork:
+            from .label_artwork import invalidate_label_icons
+            invalidate_label_icons()
             self.images.reset()
         self.refresh_mods()
 
@@ -1678,14 +1683,19 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         self._change_label_selected(label.strip())
 
-    def _assign_existing_label(self) -> None:
+    def _manual_label_names(self) -> list[str]:
         labels = self.current_mod_labels
-        values = sorted((name for name, definition in labels.state.definitions.items() if definition.mode != AUTOMATIC), key=str.casefold) if isinstance(labels, ResolvedLabels) else sorted({name for name in labels.values() if name}, key=str.casefold)
-        if not values:
-            self._add_label_selected()
+        if isinstance(labels, ResolvedLabels):
+            return sorted((name for name, definition in labels.state.definitions.items() if definition.mode != AUTOMATIC), key=str.casefold)
+        return sorted({name for name in labels.values() if name}, key=str.casefold)
+
+    def _assign_existing_label(self) -> None:
+        values = self._manual_label_names()
+        if not values or not self._mods_available(self._selected_mod_names()):
             return
-        label, accepted = prompts.choose_item(self, t('assign_label'), t('label'), values)
-        if accepted:
+        definitions = getattr(getattr(self.current_mod_labels, "state", None), "definitions", {})
+        label, accepted = prompts.choose_label(self, values, definitions)
+        if accepted and label in self._manual_label_names():
             self._change_label_selected(label)
 
     def _change_label_selected(self, label: str, *, remove: bool = False) -> None:

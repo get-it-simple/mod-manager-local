@@ -275,7 +275,9 @@ class ModContextMenuOperationTests(ModContextMenuCase):
     def mods_view(self, *args, **kwargs):
         for mod in self.mods:
             mod.installed = mod.dest.exists() and mod.dest.read_bytes() == mod.src.read_bytes()
-        return self.mods, self.mods, 1, 1, storage.load_labels()
+        from mod_manager.labels import ResolvedLabels
+
+        return self.mods, self.mods, 1, 1, ResolvedLabels(storage.load_label_state(), [mod.name for mod in self.mods])
 
     def test_install_on_unselected_mod_copies_only_its_payload_and_preserves_sources(self):
         for mode in ("list", "tiles"):
@@ -335,16 +337,24 @@ class ModContextMenuOperationTests(ModContextMenuCase):
         self.assertEqual(storage.load_favorites(self.window.cfg), set())
 
     def test_assign_label_dialog_writes_only_target(self):
+        from mod_manager.labels import LabelDefinition, LabelState
+
+        storage.save_label_state(LabelState({"Custom label": LabelDefinition()}))
+        self.window.refresh_mods()
         self.select_mod_rows(0)
-        with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=("  Custom label  ", True)) as choose:
+        with patch("mod_manager.ui.dialogs.prompts.choose_label", return_value=("Custom label", True)) as choose:
             self.trigger(1, "add_label")
-        self.assertEqual(choose.call_args.args[2], "Label")
+        self.assertEqual(choose.call_args.args[1], ["Custom label"])
         self.assertEqual(storage.load_labels(), {"ui.pak": "Custom label"})
         self.assertEqual(self.window._selected_mod_names(), ["ui.pak"])
 
-    def test_cancelled_or_empty_label_input_never_writes_metadata(self):
-        for text, accepted in (("cancelled", False), ("  ", True)):
-            with patch("mod_manager.ui.dialogs.prompts.choose_text", return_value=(text, accepted)):
+    def test_cancelled_or_unknown_label_input_never_writes_metadata(self):
+        from mod_manager.labels import LabelDefinition, LabelState
+
+        storage.save_label_state(LabelState({"Existing": LabelDefinition()}))
+        self.window.refresh_mods()
+        for text, accepted in (("Existing", False), ("Unknown", True), ("", True)):
+            with patch("mod_manager.ui.dialogs.prompts.choose_label", return_value=(text, accepted)):
                 self.trigger(1, "add_label")
             self.assertEqual(storage.load_labels(), {})
 

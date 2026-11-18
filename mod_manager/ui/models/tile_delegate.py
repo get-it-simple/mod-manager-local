@@ -8,10 +8,10 @@ from ...models import ModItem
 from .. import icons
 from ..theme import colors, tokens
 from ..widgets.item_feedback import blend_color
+from ..widgets.label_chips import chip_tooltip, layout_chips, paint_chips
 from ..widgets.operation_feedback import paint_operation
 
 NO_IMAGE_TEXT = t('no_image')
-EMPTY_LABEL = "-"
 
 
 def qcolor(value) -> QtGui.QColor:
@@ -106,11 +106,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             self._draw_badge(painter, badge, accent)
             self._draw_badge_check(painter, badge, foreground)
 
-        for badge, text, _label in self._label_badges(option, index):
-            self._draw_badge(painter, badge, accent)
-            painter.setPen(foreground)
-            inset = tokens.TILE_LABEL_TEXT_INSET
-            painter.drawText(badge.adjusted(inset, 0, -inset, 0), QtCore.Qt.AlignCenter, text)
+        self._paint_labels(painter, option, index)
 
         name_badge = self._name_badge_rect(rect, image_rect)
         state = index.model().operation_states.get(mod.name)
@@ -137,6 +133,10 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             )
             icon.paint(painter, favorite_rect, QtCore.Qt.AlignCenter)
         painter.restore()
+
+    def _paint_labels(self, painter, option, index):
+        paint_chips(painter, option, index, self._label_badges(option, index),
+                    getattr(index.model(), "label_definitions", {}))
 
     def editorEvent(self, event, model, option, index) -> bool:
         if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease} and event.button() == QtCore.Qt.LeftButton:
@@ -189,12 +189,6 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             path.lineTo(*point)
         painter.drawPath(path)
 
-    def _label_badge_text(self, label: str) -> str:
-        label = (label or "").strip()
-        if not label or label == EMPTY_LABEL:
-            return ""
-        return label[: tokens.TILE_LABEL_BADGE_MAX_CHARS]
-
     def _elided_mod_name(self, metrics: QtGui.QFontMetrics, name: str, width: int) -> str:
         return metrics.elidedText(str(name or ""), QtCore.Qt.ElideRight, max(1, width))
 
@@ -246,7 +240,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         image_rect = self._image_rect(rect)
         for badge, text, label in self._label_badges(option, index):
             if badge.contains(pos):
-                return (label if label != text else "") if label else "\n".join(self._labels(index))
+                return chip_tooltip(label, self._labels(index))
         name_badge = self._name_badge_rect(rect, image_rect)
         favorite_rect = self._favorite_rect(image_rect)
         if favorite_rect.contains(pos):
@@ -272,32 +266,16 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         if not labels:
             return []
         rect = self._content_rect(option)
-        metrics = QtGui.QFontMetrics(option.font)
-        if len(labels) == 1:
-            text = self._label_badge_text(labels[0])
-            return [(self._label_badge_rect(rect, metrics, text), text, labels[0])]
+        left = rect.left() + tokens.TILE_BADGE_MARGIN
         mod = index.data(QtCore.Qt.UserRole)
-        available = rect.width() - tokens.TILE_BADGE_MARGIN * 2
         if mod.installed:
-            available -= tokens.TILE_CHECK_BADGE_WIDTH + tokens.SPACE_SM
-        entries = []
-        for i, label in enumerate(labels):
-            text = self._label_badge_text(label)
-            width = max(tokens.TILE_LABEL_BADGE_MIN_WIDTH, metrics.horizontalAdvance(text) + tokens.TILE_LABEL_BADGE_PADDING)
-            remaining = len(labels) - i - 1
-            reserve = (metrics.horizontalAdvance(f"+{remaining}") + tokens.TILE_LABEL_BADGE_PADDING + tokens.SPACE_SM) if remaining else 0
-            if width + reserve > available:
-                text = f"+{len(labels) - i}"
-                width = min(available, metrics.horizontalAdvance(text) + tokens.TILE_LABEL_BADGE_PADDING)
-                entries.append((max(1, width), text, None))
-                break
-            entries.append((width, text, label))
-            available -= width + tokens.SPACE_SM
-        x = rect.right() - tokens.TILE_BADGE_MARGIN - sum(width for width, _text, _label in entries) - tokens.SPACE_SM * (len(entries) - 1)
-        badges = []
-        for width, text, label in entries:
-            badges.append((QtCore.QRect(x, rect.top() + tokens.TILE_BADGE_MARGIN, width, tokens.TILE_BADGE_HEIGHT), text, label))
-            x += width + tokens.SPACE_SM
+            left += tokens.TILE_CHECK_BADGE_WIDTH + tokens.SPACE_SM
+        area = QtCore.QRect(left, rect.top() + tokens.TILE_BADGE_MARGIN,
+                           max(0, rect.right() - tokens.TILE_BADGE_MARGIN - left + 1), tokens.TILE_BADGE_HEIGHT)
+        badges = layout_chips(labels, index.model().label_definitions, area, QtGui.QFontMetrics(option.font))
+        if badges:
+            offset = area.right() - badges[-1][0].right()
+            badges = [(badge.translated(offset, 0), text, label) for badge, text, label in badges]
         return badges
 
     def _pixmap_for(self, mod: ModItem, size: QtCore.QSize) -> QtGui.QPixmap:

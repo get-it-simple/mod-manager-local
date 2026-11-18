@@ -61,6 +61,11 @@ LABEL_MODE_FIELD = FieldSpec(
     "label_mode", t('mode'), t('manual_uses_selected_mods_automatic_matches_any_name_fragment_ignoring_l'),
     CHOICE, choices=(t('manual'), t('automatic')),
 )
+LABEL_ICON_FIELD = FieldSpec("label_icon", t("label_icon"), t("label_icon_help"), PATH)
+LABEL_ICON_ONLY_FIELD = FieldSpec(
+    "label_icon_only", t("label_icon_display"), t("label_icon_display_help"), CHOICE,
+    choices=(t("label_icon_with_name"), t("label_icon_without_name")),
+)
 LABEL_TERMS_FIELD = FieldSpec(
     "label_terms", t('name_fragments'), t('enter_a_fragment_and_press_enter_to_add_another_edit_or_delete_existing_'), TEXT,
 )

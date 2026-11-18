@@ -181,10 +181,17 @@ class TileDelegateTest(unittest.TestCase):
         size = self.delegate.sizeHint(QtWidgets.QStyleOptionViewItem(), QtCore.QModelIndex())
         self.assertEqual((size.width(), size.height()), tokens.tile_item_size(tokens.TILE_SIZE_MIN))
 
-    def test_label_badge_text_is_truncated_and_skips_placeholders(self):
-        self.assertEqual(self.delegate._label_badge_text("a-very-long-label"), "a-very-l")
-        self.assertEqual(self.delegate._label_badge_text("-"), "")
-        self.assertEqual(self.delegate._label_badge_text("   "), "")
+    def test_single_label_uses_actual_tile_width_instead_of_character_limit(self):
+        model = ModTableModel()
+        item = mods()[0]
+        name = "a-very-long-label"
+        model.set_data([item], {item.name: name}, {})
+        option = QtWidgets.QStyleOptionViewItem()
+        option.font = self.app.font()
+        option.rect = QtCore.QRect(0, 0, 400, 460)
+        badges = self.delegate._label_badges(option, model.index(0, 0))
+        self.assertEqual(badges[0][1], name)
+        self.assertEqual(badges[0][2], name)
 
     def test_palette_change_updates_the_badge_colors(self):
         self.delegate.set_palette(colors.build_palette("light", "#ff0000"))

@@ -15,7 +15,7 @@ from .import_registry import directory_mods, register_directory_mod, unregister_
 from .imports import _remove_import_path
 from .labels import LabelDefinition
 from .models import ModItem, OperationItem, OperationResult
-from .mod_modes import TRASH_DIRECTORY
+from .mod_modes import TRASH_DIRECTORY, internal_mod_icon
 from .mods import IMAGE_EXTENSIONS, deactivate_mod_result
 from .progress import mod_activity
 from .platform_utils import hide_directory
@@ -29,12 +29,26 @@ def remaining_days(entry: TrashEntry, now: datetime | None = None) -> int:
     return max(0, ceil(seconds / timedelta(days=1).total_seconds()))
 
 
-def preview_path(entry: TrashEntry) -> Path | None:
+def preview_path(entry: TrashEntry, cfg: dict | None = None) -> Path | None:
     for member in entry.data["files"]:
         if Path(member["original"]).parent == Path("images"):
             path = _stored(entry.path, member["stored"])
             if path.is_file():
                 return path
+    if not entry.data["files"]:
+        return None
+    rule = entry.data.get("mod_icon_path")
+    if rule is None and cfg is not None:
+        try:
+            rule = _profile_config(cfg, entry).get("mod_icon_path", "")
+        except ValueError:
+            rule = ""
+    for member in entry.data["files"]:
+        if Path(member["original"]).parent == Path("images"):
+            continue
+        path = internal_mod_icon({"mod_icon_path": rule or ""}, _stored(entry.path, member["stored"]))
+        if path is not None:
+            return path
     return None
 
 
@@ -177,8 +191,8 @@ def _capture(cfg: dict, mod: ModItem, now: datetime) -> dict:
         "profile_name": (storage.active_game_profile(cfg) or {}).get("name", t("default")),
         "deleted_at": now.isoformat(), "expires_at": (now + timedelta(days=RETENTION_DAYS)).isoformat(),
         "state": "preparing", "record": records.get(mod.name),
-        "definitions": {name: {"mode": definition.mode, "terms": list(definition.terms),
-                               "exclusions": list(definition.exclusions)}
+        "mod_icon_path": cfg.get("mod_icon_path", ""),
+        "definitions": {name: definition.to_record()
                         for name, definition in state.definitions.items() if name in assignments},
         "favorite": mod.name in storage.load_favorites(cfg),
         "presets": [name for name, members in storage.load_presets().items() if mod.name in members],
@@ -221,14 +235,15 @@ def _recover_preparing(cfg: dict, root: Path, path: Path, data: dict) -> None:
 
 
 def _restore_metadata(cfg: dict, data: dict, name: str) -> None:
+    existing_definitions = storage.load_label_definitions()
     if data.get("record") is not None:
         records = storage.load_mod_records()
         records[name] = {**data["record"], "state": "uninstalled"}
         storage.save_mod_records(records)
     state = storage.load_label_state()
     for label, definition in data.get("definitions", {}).items():
-        if state.canonical_name(label) not in state.definitions:
-            state.definitions[label] = LabelDefinition(definition["mode"], definition["terms"], definition["exclusions"])
+        if state.canonical_name(label) not in existing_definitions:
+            state.definitions[label] = LabelDefinition.from_record(definition)
     storage.save_label_state(state)
     if data.get("favorite"):
         storage.update_favorites(cfg, [name], True)

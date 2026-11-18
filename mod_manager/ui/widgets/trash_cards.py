@@ -24,6 +24,12 @@ class TrashTileDelegate(TileDelegate):
         self.image_cache = images
         self.show_favorites = False
 
+    def _paint_labels(self, painter, option, index):
+        for rect, text, _label in self._label_badges(option, index):
+            self._draw_badge(painter, rect, self.accent_color)
+            painter.setPen(self.badge_foreground)
+            painter.drawText(rect, QtCore.Qt.AlignCenter, text)
+
     def _labels(self, index):
         return ()
 

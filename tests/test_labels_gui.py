@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -17,6 +19,64 @@ if qt_available():
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class LabelsGuiTests(WindowTestCase):
+    def test_icon_editor_import_display_rename_and_removal_are_saved(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "wide.png"
+            image = QtGui.QImage(640, 80, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.blue)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(path)):
+                self.editor.artwork.choose.click()
+            reference = self.controller.state.definitions["Combat"].icon
+            self.assertTrue(icon_path(reference).is_file())
+            self.editor.artwork.display.setCurrentIndex(1)
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Combat"].icon, reference)
+            self.assertTrue(self.persisted.definitions["Combat"].icon_only)
+            self.editor.name_edit.setText("Renamed")
+            self.editor.name_edit.textEdited.emit("Renamed")
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Renamed"].icon, reference)
+            self.assertEqual(self.window.mods_model.label_definitions["Renamed"].icon, reference)
+            bad = Path(directory) / "bad.png"
+            bad.write_bytes(b"not an image")
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(bad)):
+                self.editor.artwork.choose.click()
+            self.assertEqual(self.controller.state.definitions["Renamed"].icon, reference)
+            self.assertIn("Cannot read", self.editor.status.text())
+            self.editor.artwork.remove.click()
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Renamed"].icon, "")
+            self.assertFalse(self.persisted.definitions["Renamed"].icon_only)
+            self.assertTrue(icon_path(reference).is_file())
+
+    def test_icon_draft_survives_navigation_and_failed_metadata_save(self):
+        from mod_manager import storage
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "icon.png"
+            image = QtGui.QImage(20, 40, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(path)):
+                self.editor.artwork.choose.click()
+            reference = self.controller.state.definitions["Combat"].icon
+            with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")):
+                self.controller.save()
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+            self.assertEqual(self.persisted.definitions["Combat"].icon, "")
+            self.assertFalse(self.editor.retry.isHidden())
+            self.controller.save()
+            self.open_label("Looks")
+            self.open_label("Combat")
+            self.assertEqual(self.persisted.definitions["Combat"].icon, reference)
+            self.assertFalse(self.editor.artwork.preview.pixmap().isNull())
+
     def test_autosave_waits_for_profile_and_rename_barriers(self):
         from tests.gui_background import DeferredRunner
 
@@ -549,7 +609,7 @@ class LabelsGuiTests(WindowTestCase):
         bottom = self.editor.matches_view.mapTo(frame, self.editor.matches_view.rect().bottomLeft()).y()
         self.assertLessEqual(frame.height() - bottom, tokens.DETAIL_MARGIN + 1)
 
-    def test_compact_label_list_shows_mode_icon_and_count_and_restores_names(self):
+    def test_compact_label_list_shows_only_icon_and_restores_names(self):
         self.open_label("Looks")
         self.show_editor()
         view = self.editor.list_view
@@ -563,7 +623,7 @@ class LabelsGuiTests(WindowTestCase):
             option = QtWidgets.QStyleOptionViewItem()
             option.initFrom(view)
             view.itemDelegate().initStyleOption(option, index)
-            self.assertEqual(option.text, "1")
+            self.assertEqual(option.text, "")
             self.assertFalse(option.icon.isNull())
             self.assertIn(name, index.data(QtCore.Qt.ToolTipRole))
             self.assertIn("Matching mods: 1", index.data(QtCore.Qt.ToolTipRole))
@@ -578,7 +638,7 @@ class LabelsGuiTests(WindowTestCase):
         self.assertIn("Looks", option.text)
         self.assertIn("Automatic", option.text)
 
-    def test_compact_minimum_fits_large_font_and_multi_digit_counts(self):
+    def test_compact_minimum_fits_icon_and_moves_multi_digit_counts_to_tooltip(self):
         self.mods.extend(mod_item(f"ui_{number}.pak") for number in range(120))
         self.window.refresh_mods()
         self.open_label("Looks")
@@ -592,7 +652,9 @@ class LabelsGuiTests(WindowTestCase):
                 self.editor.splitter.setSizes([view.minimumWidth(), self.editor.splitter.width()])
                 self.qt_app.processEvents()
                 self.assertTrue(view.compact)
-                self.assertGreaterEqual(view.viewport().width(), view.fontMetrics().horizontalAdvance("121") + tokens.ICON_SIZE)
+                self.assertGreaterEqual(view.viewport().width(), tokens.ICON_SIZE)
+                self.assertLess(view.viewport().width(), view.fontMetrics().horizontalAdvance("121") + tokens.ICON_SIZE)
+                self.assertIn("Matching mods: 121", view.currentIndex().data(QtCore.Qt.ToolTipRole))
                 self.assertGreater(view.width(), 0)
                 self.assertEqual(view.currentIndex().data(QtCore.Qt.UserRole), "Looks")
 
@@ -748,10 +810,10 @@ class LabelsGuiTests(WindowTestCase):
             self.window._add_label_selected()
         error.assert_called_once()
         change.assert_not_called()
-        with patch("mod_manager.ui.dialogs.prompts.choose_item", return_value=("Combat", True)) as choose, patch.object(
+        with patch("mod_manager.ui.dialogs.prompts.choose_label", return_value=("Combat", True)) as choose, patch.object(
             self.window, "_change_label_selected") as change:
             self.window._assign_existing_label()
-        self.assertEqual(choose.call_args.args[3], ["Combat"])
+        self.assertEqual(choose.call_args.args[1], ["Combat"])
         change.assert_called_once_with("Combat")
 
     def test_label_menu_dismissal_and_refresh_release_and_invalidate_actions(self):

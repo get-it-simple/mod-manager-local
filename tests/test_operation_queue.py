@@ -220,8 +220,10 @@ class SidebarLabelActionTests(WindowTestCase):
             point = view.delegate.add_rect(view.visualRect(index)).center()
             QtTest.QTest.mouseMove(view.viewport(), point)
             QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=point)
-            self.assertEqual(plain.count(), 0)
-        self.assertEqual(additive.count(), 2)
+            self.assertEqual(plain.count(), int(compact))
+            if compact:
+                self.assertFalse(view.add_button.isVisible())
+        self.assertEqual(additive.count(), 1)
         QtTest.QTest.keyClick(view, QtCore.Qt.Key_Return, QtCore.Qt.ShiftModifier)
-        self.assertEqual(additive.count(), 3)
+        self.assertEqual(additive.count(), 2)
         self.assertEqual(view.sizeHint(), size)

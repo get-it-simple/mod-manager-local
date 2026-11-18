@@ -194,4 +194,4 @@ class UiRefinementTests(WindowTestCase):
         self.qt_app.sendEvent(view.viewport(), event)
         self.assertEqual(view.viewport().cursor().shape(), QtCore.Qt.PointingHandCursor)
         self.assertEqual(view.add_button.property("iconName"), "add")
-        self.assertTrue(view.add_button.isVisible())
+        self.assertEqual(view.add_button.isVisible(), not view.delegate.compact)
