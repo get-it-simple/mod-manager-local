@@ -3,7 +3,9 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...i18n import t
-from ...keyboard import COMMANDS, effective_combos, validate_bindings
+from ...keyboard import COMMANDS, COMMAND_PAGES, effective_combos, validate_bindings
+from ...dragdrop import clipboard_has_files
+from ..image_clipboard import clipboard_has_image
 from ..dialogs import prompts
 from ..widgets.shortcut_editor import ShortcutEditor, display_combo
 
@@ -61,6 +63,21 @@ class KeyboardController(QtCore.QObject):
                     button.setAccessibleName(button.toolTip())
 
     def eventFilter(self, obj, event) -> bool:
+        if (event.type() in (QtCore.QEvent.ShortcutOverride, QtCore.QEvent.KeyPress)
+                and isinstance(obj, QtWidgets.QWidget) and obj.window() is self.window
+                and self.window.workspace.current_page == "labels"):
+            binding = self.bindings["paste"]
+            focus = QtWidgets.QApplication.focusWidget()
+            capturing = isinstance(focus, QtWidgets.QLineEdit) and focus.isReadOnly()
+            if (not capturing and binding["enabled"] and binding["combo"]
+                    and QtGui.QKeySequence(event.keyCombination()) == key_sequence(binding["combo"])
+                    and QtWidgets.QApplication.activeModalWidget() is None
+                    and self.window.labels_controller.artwork.available()
+                    and (clipboard_has_files() or clipboard_has_image())):
+                event.accept()
+                if event.type() == QtCore.QEvent.KeyPress and not event.isAutoRepeat():
+                    self.window._handle_paste()
+                return True
         if event.type() != QtCore.QEvent.ShortcutOverride or not isinstance(obj, QtWidgets.QWidget):
             return False
         current = obj
@@ -82,15 +99,13 @@ class KeyboardController(QtCore.QObject):
         app = QtWidgets.QApplication.instance()
         if window.busy or app.activeModalWidget() is not None or app.activeWindow() is not window:
             return
-        if name in ("install", "uninstall", "import_files", "import_folder", "paste") and not window.library.ready:
+        if name in ("install", "uninstall", "import_files", "import_folder", "paste") and window.workspace.current_page == "library" and not window.library.ready:
             return
         command = next(command for command in COMMANDS if command.id == name)
         page = window.workspace.current_page
-        if command.context == "library" and page != "library":
+        if command.context != "window" and page not in COMMAND_PAGES[command.context]:
             return
-        if command.context == "editor" and page not in ("labels", "settings"):
-            return
-        if window._editing_text() and name not in ("search", "save", "refresh", "help"):
+        if window._editing_text() and name not in ("search", "save", "refresh", "help") and not (name == "paste" and page == "labels"):
             return
         actions = {
             "search": lambda: window.filter_input.open("search"),

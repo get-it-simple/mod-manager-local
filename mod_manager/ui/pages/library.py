@@ -200,7 +200,7 @@ def build_mods(window) -> None:
     window.label_interactions = []
     for view, delegate in ((window.mods_table, window.label_delegate), (window.tiles_view, window.tile_delegate)):
         interaction = LabelChipInteraction(view, delegate, lambda: not window.busy and window.library.ready)
-        interaction.activated.connect(window._sidebar_label_requested)
+        interaction.activated.connect(window._library_label_requested)
         interaction.choicesRequested.connect(window._show_label_choices)
         window.label_interactions.append(interaction)
 

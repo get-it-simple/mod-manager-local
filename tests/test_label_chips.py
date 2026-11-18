@@ -83,6 +83,102 @@ class LabelArtworkGuiTests(unittest.TestCase):
         self.assertTrue(dialog.buttons.button(QtWidgets.QDialogButtonBox.Ok).isEnabled())
         self.assertEqual(dialog.selected_label, "Visual overhaul")
 
+    def test_icon_corners_are_transparent_and_original_pixels_are_preserved(self):
+        from mod_manager.label_icons import icon_path
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "square.png"
+            image = QtGui.QImage(80, 80, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            reference = import_label_icon(str(path))
+            stored = QtGui.QImage(str(icon_path(reference)))
+            self.assertEqual(stored, image)
+            rendered = label_icon(LabelDefinition(icon=reference)).pixmap(40, 40).toImage()
+            self.assertEqual(rendered.pixelColor(0, 0).alpha(), 0)
+            self.assertEqual(rendered.pixelColor(20, 20), QtGui.QColor(QtCore.Qt.red))
+
+    def test_icon_only_shading_preserves_transparency_without_a_chip_background(self):
+        from mod_manager.ui.models.mod_model import ModTableModel
+        from mod_manager.ui.widgets.label_chips import paint_chips
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "square.png"
+            source = QtGui.QImage(80, 80, QtGui.QImage.Format_ARGB32)
+            source.fill(QtCore.Qt.red)
+            self.assertTrue(source.save(str(path)))
+            definition = LabelDefinition(icon=import_label_icon(str(path)), icon_only=True)
+            model = ModTableModel(QtGui.QColor(QtCore.Qt.blue))
+            index = QtCore.QModelIndex()
+            view = QtWidgets.QTableView()
+            view.setModel(model)
+            self.addCleanup(dispose, view)
+            option = QtWidgets.QStyleOptionViewItem()
+            option.widget = view
+            option.font = view.font()
+            rect = QtCore.QRect(10, 10, 40, 30)
+            images = []
+            for hovered in (False, True):
+                view._label_chip_hover = (QtCore.QPersistentModelIndex(index), "Icon") if hovered else None
+                image = QtGui.QImage(60, 50, QtGui.QImage.Format_ARGB32)
+                image.fill(QtCore.Qt.transparent)
+                painter = QtGui.QPainter(image)
+                paint_chips(painter, option, index, [(rect, "", "Icon")], {"Icon": definition})
+                painter.end()
+                images.append(image)
+                self.assertEqual(image.pixelColor(12, 20).alpha(), 0)
+                corner = rect.center() - QtCore.QPoint((tokens.ICON_SIZE - 1) // 2, (tokens.ICON_SIZE - 1) // 2)
+                self.assertEqual(image.pixelColor(corner).alpha(), 0)
+            self.assertGreater(images[0].pixelColor(30, 25).red(), images[1].pixelColor(30, 25).red())
+            self.assertEqual(images[0].pixelColor(30, 25).alpha(), images[1].pixelColor(30, 25).alpha())
+
+    def test_detail_labels_respect_icon_only_and_retain_counts_and_actions(self):
+        from mod_manager.ui.widgets.detail_labels import DetailLabels
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "icon.png"
+            image = QtGui.QImage(40, 40, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.green)
+            self.assertTrue(image.save(str(path)))
+            reference = import_label_icon(str(path))
+            for icon_only in (False, True):
+                with self.subTest(icon_only=icon_only):
+                    filtered, removed = [], []
+                    widget = DetailLabels([("Combat", 1, False)], 2, lambda: None, lambda: None,
+                                          removed.append, lambda _name: None, filtered.append,
+                                          definitions={"Combat": LabelDefinition(icon=reference, icon_only=icon_only)})
+                    try:
+                        buttons = widget.findChildren(QtWidgets.QPushButton)
+                        button = next(button for button in buttons if button.accessibleName() == "Combat (1/2)")
+                        self.assertEqual(button.text(), "" if icon_only else "Combat (1/2)")
+                        self.assertIn("Combat (1/2)", button.toolTip())
+                        self.assertFalse(button.icon().isNull())
+                        button.click()
+                        next(button for button in buttons if button.toolTip() == t("remove_label")).click()
+                        self.assertEqual(filtered, ["Combat"])
+                        self.assertEqual(removed, ["Combat"])
+                    finally:
+                        dispose(widget)
+
+    def test_wrapped_detail_labels_remain_inside_the_visible_panel_after_resize(self):
+        from mod_manager.ui.widgets.detail_labels import DetailLabels
+        from mod_manager.ui.widgets.detail_view import DetailPanel
+
+        panel = DetailPanel()
+        self.addCleanup(dispose, panel)
+        labels = DetailLabels([(name, 2, False) for name in ("Artwork", "Icon only", "Plain")], 2,
+                              lambda: None, lambda: None, lambda _name: None, lambda _name: None, lambda _name: None)
+        panel.add_widget(labels)
+        panel.resize(280, 400)
+        panel.show()
+        self.app.processEvents()
+        for width in (280, 500, 240):
+            panel.resize(width, 400)
+            self.app.processEvents()
+            self.assertGreaterEqual(labels.height(), labels.heightForWidth(labels.width()))
+            for button in labels.findChildren(QtWidgets.QPushButton):
+                self.assertTrue(labels.rect().contains(QtCore.QRect(button.mapTo(labels, QtCore.QPoint()), button.size())))
+
 
 class LabelChipWindowTests(WindowTestCase):
     def setUp(self):
@@ -147,6 +243,63 @@ class LabelChipWindowTests(WindowTestCase):
         self.qt_app.processEvents()
         after = view.viewport().grab(rect).toImage()
         self.assertNotEqual(before, after)
+
+    def test_repeated_clicks_and_double_click_release_toggle_filters_without_mod_action(self):
+        for mode in ("list", "tiles"):
+            with self.subTest(mode=mode):
+                self.window._set_view_mode(mode)
+                self.window.filters.clear()
+                self.qt_app.processEvents()
+                view = self.window._current_mod_view()
+                delegate = self.window.label_delegate if mode == "list" else self.window.tile_delegate
+                with patch.object(self.window, "_toggle_selected_mods") as toggle:
+                    for expected in (("Alpha",), (), ("Alpha",)):
+                        _index, badges = self.badges(view, delegate)
+                        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, pos=badges[0][0].center())
+                        self.assertEqual(self.window.filters.labels, expected)
+                    self.window.filters.add("search", "retained")
+                    _index, badges = self.badges(view, delegate)
+                    point = badges[0][0].center()
+                    QtTest.QTest.mouseDClick(view.viewport(), QtCore.Qt.LeftButton, pos=point)
+                    QtTest.QTest.mouseRelease(view.viewport(), QtCore.Qt.LeftButton, pos=point)
+                    self.assertEqual(self.window.filters.labels, ())
+                    self.assertEqual(self.window.filters.queries, ("retained",))
+                    toggle.assert_not_called()
+
+    def test_chip_shading_is_borderless_and_tracks_filter_and_hover_in_both_themes(self):
+        from mod_manager.ui.widgets.label_chips import paint_chips
+        from mod_manager.ui.theme.colors import build_palette
+
+        model = self.window.mods_model
+        index = model.index(0, 0)
+        rect = QtCore.QRect(10, 10, 100, 30)
+        for mode in ("light", "dark"):
+            palette = build_palette(mode)
+            option = QtWidgets.QStyleOptionViewItem()
+            option.widget = self.window.mods_table
+            option.font = self.window.font()
+            option.palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(palette.accent))
+            option.palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(palette.accent_text))
+            def render(active, hovered, focused=False):
+                model.active_labels = {"Alpha"} if active else set()
+                option.widget._label_chip_hover = (QtCore.QPersistentModelIndex(index), "Alpha") if hovered else None
+                option.state = QtWidgets.QStyle.State_HasFocus if focused else QtWidgets.QStyle.State_None
+                image = QtGui.QImage(120, 50, QtGui.QImage.Format_ARGB32)
+                image.fill(QtCore.Qt.transparent)
+                painter = QtGui.QPainter(image)
+                paint_chips(painter, option, index, [(rect, "Alpha", "Alpha")], {})
+                painter.end()
+                return image
+            idle = render(False, False)
+            active = render(True, False)
+            hover = render(False, True)
+            active_hover = render(True, True)
+            for image in (idle, active, hover, active_hover):
+                self.assertEqual(image.pixelColor(9, 25).alpha(), 0)
+            levels = [image.pixelColor(20, 20).lightnessF() for image in (idle, active, hover, active_hover)]
+            self.assertEqual(levels, sorted(levels, reverse=True))
+            self.assertEqual(len(set(levels)), 4)
+            self.assertEqual(idle, render(False, False, True))
 
     def test_long_single_label_uses_available_width_and_multiple_labels_offer_overflow(self):
         metrics = self.window.fontMetrics()

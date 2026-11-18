@@ -28,7 +28,14 @@ def _file_icon(path: str) -> QtGui.QIcon:
     canvas = QtGui.QPixmap(extent, extent)
     canvas.fill(QtCore.Qt.transparent)
     painter = QtGui.QPainter(canvas)
-    painter.drawImage((extent - image.width()) // 2, (extent - image.height()) // 2, image)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    rect = QtCore.QRectF((extent - image.width()) // 2, (extent - image.height()) // 2,
+                        image.width(), image.height())
+    radius = min(tokens.LABEL_ICON_RADIUS * extent / tokens.ICON_SIZE, min(rect.width(), rect.height()) / 2)
+    clip = QtGui.QPainterPath()
+    clip.addRoundedRect(rect, radius, radius)
+    painter.setClipPath(clip)
+    painter.drawImage(rect, image)
     painter.end()
     return QtGui.QIcon(canvas)
 

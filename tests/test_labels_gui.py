@@ -112,6 +112,141 @@ class LabelsGuiTests(WindowTestCase):
         self.window.refresh_mods()
         self.controller = self.window.labels_controller
         self.editor = self.controller.editor
+        clipboard = patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=[])
+        clipboard.start()
+        self.addCleanup(clipboard.stop)
+        image_clipboard = patch("mod_manager.ui.image_source.read_clipboard_image", return_value=None)
+        image_clipboard.start()
+        self.addCleanup(image_clipboard.stop)
+
+    def test_pasted_raw_icon_is_saved_and_temporary_input_is_removed(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "clipboard.png"
+            image = QtGui.QImage(64, 32, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.blue)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                self.window._handle_paste()
+            self.assertFalse(path.exists())
+            self.controller.save_timer.timeout.emit()
+            reference = self.persisted.definitions["Combat"].icon
+            self.assertTrue(reference)
+            self.assertEqual(QtGui.QImage(str(icon_path(reference))), image)
+            self.open_label("Looks")
+            self.open_label("Combat")
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+
+    def test_icon_button_applies_clipboard_file_without_chooser_and_preserves_source(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "source.png"
+            image = QtGui.QImage(32, 64, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            original = path.read_bytes()
+            with patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=[path]), patch(
+                    "mod_manager.ui.dialogs.prompts.choose_open_file") as choose:
+                self.editor.artwork.choose.click()
+            choose.assert_not_called()
+            self.assertEqual(path.read_bytes(), original)
+            reference = self.controller.state.definitions["Combat"].icon
+            self.assertEqual(QtGui.QImage(str(icon_path(reference))), image)
+
+    def test_invalid_and_multiple_pasted_images_preserve_prior_icon_and_release_sources(self):
+        from mod_manager import storage
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "source.png"
+            image = QtGui.QImage(32, 32, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            self.controller.artwork.apply(str(path))
+            reference = self.controller.state.definitions["Combat"].icon
+            class Paths(list):
+                closed = False
+                def close(self):
+                    self.closed = True
+            paths = Paths([path, path])
+            with patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=paths):
+                self.window._handle_paste()
+            self.assertTrue(paths.closed)
+            self.assertIn("one image", self.editor.status.text())
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+            path.write_bytes(b"invalid")
+            with patch("mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                self.window._handle_paste()
+            self.assertFalse(path.exists())
+            self.assertIn("Cannot read", self.editor.status.text())
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+
+    def test_paste_shortcut_handles_image_in_text_editor_and_leaves_text_paste_alone(self):
+        from mod_manager import storage
+        from mod_manager.ui.controllers.keyboard_controller import key_sequence
+
+        self.open_label("Combat")
+        self.show_editor()
+        self.editor.name_edit.setFocus()
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            for combo in ("ctrl+v", "ctrl+shift+v"):
+                path = Path(directory) / "clipboard.png"
+                image = QtGui.QImage(32, 32, QtGui.QImage.Format_ARGB32)
+                image.fill(QtCore.Qt.red)
+                self.assertTrue(image.save(str(path)))
+                self.window.keyboard.bindings["paste"] = {"combo": combo, "enabled": True}
+                with patch("mod_manager.ui.controllers.keyboard_controller.clipboard_has_image", return_value=True), patch(
+                        "mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                    QtTest.QTest.keySequence(self.editor.name_edit, key_sequence(combo))
+                self.assertFalse(path.exists())
+                self.assertTrue(self.controller.state.definitions["Combat"].icon)
+                self.assertEqual(self.editor.name_edit.text(), "Combat")
+            event = QtGui.QKeyEvent(QtCore.QEvent.ShortcutOverride, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+            self.window.keyboard.bindings["paste"] = {"combo": "ctrl+v", "enabled": True}
+            with patch("mod_manager.ui.controllers.keyboard_controller.clipboard_has_image", return_value=False), patch(
+                    "mod_manager.ui.controllers.keyboard_controller.clipboard_has_files", return_value=False), patch.object(
+                    self.controller.artwork, "paste") as paste:
+                self.assertFalse(self.window.keyboard.eventFilter(self.editor.name_edit, event))
+            paste.assert_not_called()
+
+    def test_icon_editor_wraps_groups_only_when_available_width_requires_it(self):
+        self.open_label("Combat")
+        self.show_editor()
+        artwork = self.editor.artwork
+        layout = artwork.layout()
+        natural = layout.sizeHint().width()
+        layout.setGeometry(QtCore.QRect(0, 0, natural, 100))
+        self.assertEqual(layout.itemAt(0).geometry().top(), layout.itemAt(1).geometry().top())
+        narrow = max(layout.itemAt(0).sizeHint().width(), layout.itemAt(1).sizeHint().width())
+        layout.setGeometry(QtCore.QRect(0, 0, narrow, 200))
+        self.assertGreater(layout.itemAt(1).geometry().top(), layout.itemAt(0).geometry().bottom())
+
+    def test_paste_without_a_selected_label_or_during_a_barrier_does_not_read_the_clipboard(self):
+        from tests.gui_background import DeferredRunner
+
+        self.open_label("Combat")
+        with patch("mod_manager.ui.controllers.label_artwork_controller.clipboard_source") as read:
+            selected = self.controller.selected
+            self.controller.selected = ""
+            self.window._handle_paste()
+            self.controller.selected = selected
+            background = self.window.runner.background
+            deferred = DeferredRunner()
+            self.window.runner.background = deferred.background
+            self.window.runner.run("Synthetic barrier", lambda: None, barrier=True, blocking=False)
+            try:
+                self.window._handle_paste()
+            finally:
+                deferred.complete()
+                self.window.runner.background = background
+        read.assert_not_called()
+        self.assertEqual(self.controller.state.definitions["Combat"].icon, "")
 
     def tearDown(self):
         super().tearDown()

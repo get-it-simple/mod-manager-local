@@ -1160,7 +1160,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         controls = DetailLabels(labels, len(targets), guarded(self._add_label_selected), guarded(self._assign_existing_label),
                                 guarded(lambda name: self._change_label_selected(name, remove=True)),
                                 guarded(self._edit_label_rule), guarded(lambda name: self._sidebar_label_requested(name)),
-                                can_assign=bool(self._manual_label_names()))
+                                can_assign=bool(self._manual_label_names()), definitions=state.definitions if state else {})
         self.detail_scroll.add_widget(controls)
 
     def _edit_label_rule(self, name: str) -> None:
@@ -1209,6 +1209,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.mod_page.set(1)
             self._navigate("library")
             self._render_mods()
+
+    def _library_label_requested(self, label: str, additive: bool = False) -> None:
+        active = any(value.casefold() == label.casefold() for value in self.filters.labels)
+        self._sidebar_label_requested(label, additive or active)
 
     def _update_sidebar_labels(self) -> None:
         labels = self.current_mod_labels
@@ -1901,6 +1905,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         if self.archive_import.dialog is not None and self.archive_import.dialog.isVisible():
             self.archive_import.paste()
+            return
+        if self.workspace.current_page == "labels":
+            self.labels_controller.artwork.paste()
             return
         if not self._is_mods_tab_active():
             return

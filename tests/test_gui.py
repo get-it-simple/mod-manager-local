@@ -440,6 +440,8 @@ class GuiTests(unittest.TestCase):
         QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, position())
         self.assertEqual(self.window.filters.labels, ("combat",))
         QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, position())
+        self.assertEqual(self.window.filters.labels, ())
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.ShiftModifier, position())
         self.assertEqual(self.window.filters.labels, ("combat",))
         QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.ShiftModifier, position())
         self.assertEqual(self.window.filters.labels, ())

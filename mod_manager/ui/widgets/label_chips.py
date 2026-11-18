@@ -6,6 +6,7 @@ from shiboken6 import isValid
 from ...i18n import t
 from ..label_artwork import custom_label_icon
 from ..theme import tokens
+from ..theme.colors import LABEL_CHIP_SHADE
 
 
 def chip_content(name, definition, metrics):
@@ -52,7 +53,6 @@ def layout_chips(names, definitions, rect, metrics):
 def paint_chips(painter, option, index, badges, definitions):
     view = option.widget
     hovered = getattr(view, "_label_chip_hover", None)
-    pressed = getattr(view, "_label_chip_pressed", None)
     active = getattr(index.model(), "active_labels", set())
     painter.save()
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -60,25 +60,42 @@ def paint_chips(painter, option, index, badges, definitions):
     for rect, text, name in badges:
         key = (QtCore.QPersistentModelIndex(index), name)
         is_hovered = key == hovered
-        is_pressed = key == pressed
-        base = option.palette.highlight().color()
-        if is_pressed:
-            base = base.darker(tokens.CHIP_PRESSED_FACTOR)
-        elif is_hovered:
-            base = base.lighter(tokens.CHIP_HOVER_FACTOR)
-        painter.setBrush(base)
-        focused = bool(option.state & QtWidgets.QStyle.State_HasFocus)
-        painter.setPen(option.palette.text().color() if focused or name in active else QtCore.Qt.NoPen)
-        painter.drawRoundedRect(rect, tokens.TILE_BADGE_RADIUS, tokens.TILE_BADGE_RADIUS)
-        content = rect.adjusted(tokens.TILE_LABEL_TEXT_INSET, 0, -tokens.TILE_LABEL_TEXT_INSET, 0)
+        is_active = name in active
+        if is_active:
+            darkening = tokens.LABEL_CHIP_ACTIVE_HOVER_DARKENING if is_hovered else tokens.LABEL_CHIP_ACTIVE_DARKENING
+        else:
+            darkening = tokens.LABEL_CHIP_HOVER_DARKENING if is_hovered else 0
+        icon = QtGui.QIcon()
+        extra = 0
         if name is not None:
             _full, icon, extra = chip_content(name, definitions.get(name), option.fontMetrics)
+        base = option.palette.highlight().color()
+        icon_only = not text and not icon.isNull()
+        painter.setPen(QtCore.Qt.NoPen)
+        if not icon_only:
+            base = QtGui.QColor.fromRgbF(base.redF() * (1 - darkening), base.greenF() * (1 - darkening),
+                                        base.blueF() * (1 - darkening), base.alphaF())
+            painter.setBrush(base)
+            painter.drawRoundedRect(rect, tokens.TILE_BADGE_RADIUS, tokens.TILE_BADGE_RADIUS)
+        content = rect.adjusted(tokens.TILE_LABEL_TEXT_INSET, 0, -tokens.TILE_LABEL_TEXT_INSET, 0)
+        if name is not None:
             if not icon.isNull():
                 icon_rect = QtCore.QRect(content.left(), content.center().y() - tokens.ICON_SIZE // 2,
                                          tokens.ICON_SIZE, tokens.ICON_SIZE)
                 if not text:
                     icon_rect.moveCenter(content.center())
-                icon.paint(painter, icon_rect, QtCore.Qt.AlignCenter)
+                if icon_only and darkening:
+                    pixmap = icon.pixmap(icon_rect.size(), painter.device().devicePixelRatioF())
+                    shaded = pixmap.copy()
+                    shade = QtGui.QPainter(shaded)
+                    shade.setCompositionMode(QtGui.QPainter.CompositionMode_SourceAtop)
+                    color = QtGui.QColor(LABEL_CHIP_SHADE)
+                    color.setAlphaF(darkening)
+                    shade.fillRect(shaded.rect(), color)
+                    shade.end()
+                    painter.drawPixmap(icon_rect, shaded)
+                else:
+                    icon.paint(painter, icon_rect, QtCore.Qt.AlignCenter)
                 content.adjust(extra, 0, 0, 0)
         painter.setPen(option.palette.highlightedText().color())
         painter.drawText(content, QtCore.Qt.AlignCenter, text)
@@ -150,7 +167,7 @@ class LabelChipInteraction(QtCore.QObject):
                 return False
             hit = self.at(event.position().toPoint())
             if hit is not None:
-                if kind == QtCore.QEvent.MouseButtonPress:
+                if kind in (QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonDblClick):
                     self.pressed = hit if self.available() else None
                     self.view._label_chip_pressed = self.pressed
                     self.view.viewport().update()
@@ -165,6 +182,8 @@ class LabelChipInteraction(QtCore.QObject):
                             self.choicesRequested.emit(self.delegate._labels(index), event.globalPosition().toPoint())
                         else:
                             self.activated.emit(name, bool(event.modifiers() & QtCore.Qt.ShiftModifier))
+                            self.view._label_chip_hover = self.at(event.position().toPoint()) if self.available() else None
+                            self.viewport.update()
                 return True
             if kind == QtCore.QEvent.MouseButtonRelease:
                 self.pressed = None

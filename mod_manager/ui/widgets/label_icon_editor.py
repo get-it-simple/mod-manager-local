@@ -7,19 +7,22 @@ from ...i18n import t
 from ..label_artwork import label_icon
 from ..theme import tokens
 from .buttons import icon_button
+from .flow_layout import FlowLayout, WrappingWidget
 from .select import select_box
 from .style_utils import apply_margins
 
 
-class LabelIconEditor(QtWidgets.QWidget):
+class LabelIconEditor(WrappingWidget):
     chooseRequested = QtCore.Signal()
     removeRequested = QtCore.Signal()
     displayChanged = QtCore.Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_SM)
-        row = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
+        layout = FlowLayout(self, constrain_items=True)
+        layout.setSpacing(tokens.SPACE_SM)
+        actions = QtWidgets.QWidget(self)
+        row = apply_margins(QtWidgets.QHBoxLayout(actions), margins=None, spacing=tokens.SPACE_SM)
         caption = QtWidgets.QLabel(LABEL_ICON_FIELD.label)
         caption.setToolTip(LABEL_ICON_FIELD.tooltip)
         self.preview = QtWidgets.QLabel()
@@ -31,19 +34,19 @@ class LabelIconEditor(QtWidgets.QWidget):
         row.addWidget(self.preview)
         row.addWidget(self.choose)
         row.addWidget(self.remove)
-        row.addStretch()
-        layout.addLayout(row)
+        layout.addWidget(actions)
         self.display = select_box()
         self.display.addItems(LABEL_ICON_ONLY_FIELD.choices)
         self.display.setToolTip(LABEL_ICON_ONLY_FIELD.tooltip)
         self.display.setAccessibleName(LABEL_ICON_ONLY_FIELD.label)
         self.display.currentIndexChanged.connect(lambda index: self.displayChanged.emit(bool(index)))
-        display_row = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
+        display_group = QtWidgets.QWidget(self)
+        display_row = apply_margins(QtWidgets.QHBoxLayout(display_group), margins=None, spacing=tokens.SPACE_SM)
         display_caption = QtWidgets.QLabel(LABEL_ICON_ONLY_FIELD.label)
         display_caption.setToolTip(LABEL_ICON_ONLY_FIELD.tooltip)
         display_row.addWidget(display_caption)
         display_row.addWidget(self.display, 1)
-        layout.addLayout(display_row)
+        layout.addWidget(display_group)
 
     def set_definition(self, definition):
         with QtCore.QSignalBlocker(self.display):
