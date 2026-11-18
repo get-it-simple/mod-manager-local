@@ -235,6 +235,13 @@ APPEARANCE_FIELDS = (
 
 MODS_VIEW_FIELDS = (
     FieldSpec(
+        key="trash_view_mode",
+        label=t("trash_view"),
+        tooltip=t("trash_view_help"),
+        kind=CHOICE,
+        choices=("list", "tiles"),
+    ),
+    FieldSpec(
         key="mod_view_mode",
         label=t('mods_view'),
         tooltip=t('show_mods_as_a_details_list_or_as_image_tiles_with_a_preview_panel_next_'),

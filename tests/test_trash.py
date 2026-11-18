@@ -17,6 +17,16 @@ from mod_manager.trash import (
 
 
 class TrashTests(CliEnvironment, unittest.TestCase):
+    def test_remaining_days_rounds_up_and_uses_the_utc_expiry_boundary(self):
+        from mod_manager.trash import TrashEntry, remaining_days
+
+        expires = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        entry = TrashEntry(self.source, "synthetic", {"expires_at": expires.isoformat()})
+        self.assertEqual(remaining_days(entry, expires - timedelta(days=1, seconds=1)), 2)
+        self.assertEqual(remaining_days(entry, expires - timedelta(seconds=1)), 1)
+        self.assertEqual(remaining_days(entry, expires), 0)
+        self.assertEqual(remaining_days(entry, expires + timedelta(seconds=1)), 0)
+
     def setUp(self):
         super().setUp()
         self.cfg = storage.load_config()

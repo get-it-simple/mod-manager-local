@@ -143,7 +143,8 @@ class LibraryChipsGuiTests(WindowTestCase):
         view = summary.view
         bar = view.horizontalScrollBar()
         self.assertGreater(bar.maximum(), 0)
-        self.assertTrue(bar.isVisible())
+        self.assertFalse(bar.isVisible())
+        self.assertTrue(view._overlay_scrollbars.horizontal.isVisible())
         self.assertEqual(view.verticalScrollBar().maximum(), 0)
         rects = [view.visualRect(summary.model.index(row, 0)) for row in range(summary.model.rowCount())]
         self.assertEqual(len({rect.top() for rect in rects}), 1)
@@ -165,6 +166,7 @@ class LibraryChipsGuiTests(WindowTestCase):
         self.qt_app.processEvents()
         self.assertEqual(bar.maximum(), 0)
         self.assertFalse(bar.isVisible())
+        self.assertFalse(view._overlay_scrollbars.horizontal.isVisible())
 
     def test_profile_reconciliation_removes_missing_labels_and_retains_search_and_mode(self):
         self.window.filters.add("label", "Looks")

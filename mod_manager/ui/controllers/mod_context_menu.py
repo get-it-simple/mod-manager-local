@@ -120,6 +120,7 @@ class ModContextMenu(QtCore.QObject):
         self._action(menu, names, "add_label", t('assign_label'), "label_add", self._assign_label)
         self._action(menu, names, "set_image", t('set_preview_image'), "image", window._set_mod_image)
         if len(mods) == 1:
+            self._action(menu, names, "rename_mod", t("rename_mod"), "edit", window._rename_selected_mod)
             menu.addSeparator()
             mod = mods[0]
             self._action(menu, names, "source", t('show_source_in_explorer'), "folder", lambda: select_in_explorer(mod.src))

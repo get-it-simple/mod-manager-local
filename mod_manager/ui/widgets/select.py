@@ -12,7 +12,7 @@ def fit_popup(view: QtWidgets.QAbstractItemView, anchor: QtWidgets.QWidget) -> N
     available = screen.availableGeometry().adjusted(tokens.FILTER_POPUP_MARGIN, tokens.FILTER_POPUP_MARGIN,
                                                    -tokens.FILTER_POPUP_MARGIN, -tokens.FILTER_POPUP_MARGIN)
     popup = view.window()
-    width = min(available.width(), max(anchor.width(), view.sizeHintForColumn(0) + tokens.SCROLLBAR_WIDTH + tokens.SPACE_LG))
+    width = min(available.width(), max(anchor.width(), view.sizeHintForColumn(0) + tokens.SPACE_LG))
     height = min(popup.height(), available.height())
     origin = anchor.mapToGlobal(QtCore.QPoint())
     x = max(available.left(), min(origin.x(), available.right() - width + 1))

@@ -60,7 +60,7 @@ class FilterChipView(QtWidgets.QListView):
 
     def _update_height(self) -> None:
         height = max(tokens.ICON_BUTTON_SIZE, self.fontMetrics().height() + tokens.SPACE_LG * 2)
-        self.setFixedHeight(height + tokens.SCROLLBAR_WIDTH + self.frameWidth() * 2)
+        self.setFixedHeight(height + self.frameWidth() * 2)
 
     def changeEvent(self, event):
         super().changeEvent(event)

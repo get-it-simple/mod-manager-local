@@ -83,6 +83,16 @@ def choose_text(parent, title: str, label: str, text: str = "") -> tuple[str, bo
     return QtWidgets.QInputDialog.getText(parent, title, label, text=text)
 
 
+def choose_mod_name(parent, mod) -> tuple[str, bool]:
+    from .rename_mod import RenameModDialog
+    dialog = RenameModDialog(parent, mod)
+    try:
+        accepted = dialog.exec() == QtWidgets.QDialog.Accepted
+        return dialog.new_name, accepted
+    finally:
+        dialog.deleteLater()
+
+
 def choose_import_conflict(parent, name: str) -> str:
     dialog = QtWidgets.QMessageBox(parent)
     dialog.setWindowTitle(t('import_name_conflict'))

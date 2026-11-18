@@ -17,6 +17,23 @@ if qt_available():
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class LabelsGuiTests(WindowTestCase):
+    def test_autosave_waits_for_profile_and_rename_barriers(self):
+        from tests.gui_background import DeferredRunner
+
+        self.open_label("Looks")
+        self.editor.terms_edit.new_edit.setText("queued")
+        background = self.window.runner.background
+        deferred = DeferredRunner()
+        self.window.runner.background = deferred.background
+        self.window.runner.run("Synthetic barrier", lambda: None, barrier=True, blocking=False)
+        self.controller.save()
+        self.assertEqual(len(self.window.runner.commands), 1)
+        self.assertNotIn("queued", self.persisted.definitions["Looks"].terms)
+        deferred.complete()
+        self.window.runner.background = background
+        self.controller.flush()
+        self.assertIn("queued", self.persisted.definitions["Looks"].terms)
+
     def setUp(self):
         super().setUp()
         self.persisted = LabelState(
@@ -100,8 +117,9 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
         self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin", "pak"])
-        self.assertEqual(fragments.new_edit.text(), " pak ")
-        self.assertEqual(fragments.model.rowCount(), 2)
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual(fragments.model.rowCount(), 3)
+        self.assertEqual(fragments.model.index(2, 1).data(), "pak")
 
     def test_fragment_row_edit_save_and_enter_return_to_new_input(self):
         self.open_label("Looks")
@@ -135,8 +153,9 @@ class LabelsGuiTests(WindowTestCase):
         fragments.new_edit.setText("pak")
         self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
-        self.assertEqual(fragments.draft.editing, 0)
-        self.assertEqual(fragments.new_edit.text(), "pak")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual([fragments.model.index(row, 1).data() for row in range(2)], ["combat", "pak"])
 
     def test_fragment_actions_support_keyboard_activation_and_escape_cancels_edit(self):
         self.open_label("Looks")
@@ -248,20 +267,22 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(fragments.model.index(0, 1).data(), "ui")
         self.window.cfg["active_game_profile_id"] = first
         self.open_label("Looks")
-        self.assertEqual(fragments.new_edit.text(), "  pak  ")
-        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "combat")
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertEqual([fragments.model.index(row, 1).data() for row in range(2)], ["combat", "pak"])
         self.controller._rebuild("Combat")
         self.controller.save()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
 
-    def test_unchanged_open_fragment_editor_is_retained_on_reactivation(self):
+    def test_unchanged_open_fragment_is_committed_on_navigation(self):
         self.open_label("Looks")
         fragments = self.editor.terms_edit
         fragments.start_edit(0)
         self.window._navigate("library")
         self.open_label("Looks")
-        self.assertEqual(fragments.draft.editing, 0)
-        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "ui")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertIsNone(fragments.view.indexWidget(fragments.model.index(0, 1)))
+        self.assertEqual(fragments.model.index(0, 1).data(), "ui")
 
     def test_delete_renumbers_all_match_ids_and_empty_automatic_cannot_save(self):
         self.open_label("Looks")

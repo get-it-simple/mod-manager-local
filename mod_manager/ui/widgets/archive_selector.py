@@ -5,6 +5,7 @@ from ...i18n import t
 from PySide6 import QtCore, QtWidgets
 
 from ..theme import tokens
+from .overlay_scrollbar import OverlayScrollArea
 
 
 class ArchiveNameModel(QtCore.QStringListModel):
@@ -61,6 +62,8 @@ class ArchiveSelector(QtWidgets.QListView):
         self._pixel_delta = 0
         self.model().modelAboutToBeReset.connect(self._clear_pressed)
         self.selectionModel().currentChanged.connect(self._show_current)
+        self._overlay_scrollbars = None
+        self._overlay_scrollbars = OverlayScrollArea(self)
 
     def item_height(self) -> int:
         return max(tokens.ICON_BUTTON_SIZE, max(tokens.ICON_SIZE, self.fontMetrics().height()) + (tokens.BUTTON_PADDING[0] + tokens.BORDER_WIDTH) * 2)
@@ -81,10 +84,7 @@ class ArchiveSelector(QtWidgets.QListView):
         self._relayout()
 
     def _relayout(self) -> None:
-        minimum = tokens.ARCHIVE_SWITCHER_MIN_WIDTH + tokens.SPACE_XS * 2
-        overflow = self.model().rowCount() * minimum > self.viewport().width()
-        scrollbar = self.horizontalScrollBar().sizeHint().height() if overflow else 0
-        self.setFixedHeight(self.item_height() + scrollbar)
+        self.setFixedHeight(self.item_height())
         self.doItemsLayout()
         self._show_current()
 

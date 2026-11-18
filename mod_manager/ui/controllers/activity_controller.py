@@ -36,6 +36,8 @@ class ActivityController(QtCore.QObject):
         window.runner.activityChanged.connect(self.sync)
         window.runner.busyChanged.connect(self._busy_changed)
         window.runner.progressChanged.connect(self.update_progress)
+        window.runner.commandStarted.connect(self._command_started)
+        window.runner.commandFinished.connect(self._command_finished)
         window.library.changed.connect(self.sync)
         window.motion.enabledChanged.connect(self.sync)
         window.installEventFilter(self)
@@ -89,6 +91,27 @@ class ActivityController(QtCore.QObject):
                 self._detail_frame = self.window.mods_model.operation_frames.get(selection[0])
         self.detail_cover.refresh_content()
         self.detail_cover.set_frame(self._detail_frame)
+        self.sync()
+
+    def _command_started(self, command) -> None:
+        selection = tuple(self.window._selected_mod_names())
+        if set(command.mod_names).intersection(selection):
+            self._detail_selection = selection
+            self._detail_frame = None
+            self._detail_results.clear()
+            self._detail_touched.clear()
+            self.detail_cover.set_frame(None)
+
+    def _command_finished(self, command) -> None:
+        for name in command.mod_names:
+            frame = self.window.mods_model.operation_frames.get(name)
+            if frame is not None and frame.finished_at is None:
+                frame.finished_at = frame.elapsed
+        if self._detail_frame is not None and set(command.mod_names).intersection(self._detail_selection):
+            self._detail_frame.success = bool(self._detail_touched) and all(
+                self._detail_results.get(name, False) for name in self._detail_touched)
+            self._detail_frame.finished_at = self._detail_frame.elapsed
+        self.detail_cover.refresh_content()
         self.sync()
 
     def update_progress(self, progress) -> None:
@@ -226,6 +249,8 @@ class ActivityController(QtCore.QObject):
         self.window.runner.activityChanged.disconnect(self.sync)
         self.window.runner.busyChanged.disconnect(self._busy_changed)
         self.window.runner.progressChanged.disconnect(self.update_progress)
+        self.window.runner.commandStarted.disconnect(self._command_started)
+        self.window.runner.commandFinished.disconnect(self._command_finished)
         self.window.library.changed.disconnect(self.sync)
         self.window.motion.enabledChanged.disconnect(self.sync)
         self.indicator.shutdown()

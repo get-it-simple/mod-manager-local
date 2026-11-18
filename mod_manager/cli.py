@@ -27,6 +27,7 @@ from .storage import (
 )
 from .storage_policy import storage_policy
 from .trash import list_entries, purge_entries, restore_entry, trash_mods
+from .renames import recover_renames, rename_mod
 
 
 def report_error(message: str) -> int:
@@ -125,6 +126,10 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
     if args.page > pages:
         raise argparse.ArgumentTypeError(f"Page {args.page} does not exist. There are {pages} pages.")
     targets = selected_items(shown, args.indexes) if hasattr(args, "indexes") else shown
+    if args.mods_cmd == "rename":
+        target, = selected_items(shown, [args.index])
+        print(rename_mod(cfg, target, args.new_name).summary())
+        return 0
     if args.mods_cmd in {"install", "uninstall", "toggle"}:
         pending = [mod for mod in targets if not mod.installed]
         if args.mods_cmd != "uninstall" and not _allow_overwrite(pending, args.overwrite):
@@ -361,6 +366,7 @@ def run_cli(
             return run_gui()
         with storage_policy():
             cfg = load_config()
+            recover_renames(cfg)
             if args.cmd == "doctor":
                 messages, errors = diagnose(cfg)
                 print("\n".join(messages))

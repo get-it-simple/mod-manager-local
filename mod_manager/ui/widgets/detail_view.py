@@ -164,7 +164,7 @@ class DetailPanel(QtWidgets.QScrollArea):
         self.layout.addWidget(widget)
         return widget
 
-    def add_heading(self, title: str, on_close: Callable | None = None) -> None:
+    def add_heading(self, title: str, on_close: Callable | None = None, on_edit: Callable | None = None) -> None:
         label = QtWidgets.QLabel(title)
         label.setWordWrap(True)
         label.setMinimumWidth(0)
@@ -176,7 +176,12 @@ class DetailPanel(QtWidgets.QScrollArea):
         font.setPointSize(font.pointSize() + tokens.DETAIL_TITLE_FONT_STEP)
         font.setBold(True)
         label.setFont(font)
-        if on_close is None:
+        if on_edit is not None:
+            buttons = [label, icon_button("edit", t("rename_mod_help"), on_edit)]
+            if on_close is not None:
+                buttons.append(icon_button("remove", t("hide_details"), on_close))
+            self.add_row(*buttons)
+        elif on_close is None:
             self.add_widget(label)
         else:
             self.add_row(label, icon_button("remove", t('hide_details'), on_close))

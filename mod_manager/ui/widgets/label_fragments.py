@@ -10,6 +10,7 @@ from .style_utils import apply_margins
 from .buttons import icon_button
 from .label_rule_draft import FragmentDraft
 from .label_fragment_view import FragmentsModel, FragmentListView, FragmentDelegate
+from .item_feedback import ButtonItemFeedback
 
 
 class FragmentEditor(QtWidgets.QWidget):
@@ -27,6 +28,7 @@ class FragmentEditor(QtWidgets.QWidget):
         self.view.setModel(self.model)
         self.view.setModelColumn(1)
         self.view.setItemDelegate(FragmentDelegate(self))
+        self.feedback = ButtonItemFeedback(self.view, lambda index: self.draft.rule_excluded(index.row()))
         self.view.setViewMode(QtWidgets.QListView.ListMode)
         self.view.setFlow(QtWidgets.QListView.LeftToRight)
         self.view.setWrapping(True)
@@ -46,7 +48,7 @@ class FragmentEditor(QtWidgets.QWidget):
         self.new_edit.setToolTip(t('fragment_autosave_help'))
         self.new_edit.textChanged.connect(self._pending)
         self.new_edit.returnPressed.connect(self.add_pending)
-        self.mode_button = icon_button("add", t("inclusion_mode"), self.toggle_pending_mode)
+        self.mode_button = icon_button("add", t("inclusion_mode"), self.toggle_pending_mode, checkable=True)
         self.next_id = QtWidgets.QLabel()
         self.next_id.setAccessibleName(t('new_fragment_number'))
         self.heading = QtWidgets.QLabel(LABEL_TERMS_FIELD.label)
@@ -65,7 +67,10 @@ class FragmentEditor(QtWidgets.QWidget):
     def _update_metrics(self) -> None:
         values = self.draft.exclusions if self.draft.pending_excluded else self.draft.terms
         self.next_id.setText(str(len(values) + 1))
-        self.mode_button.setIcon(icons.standard_icon("remove" if self.draft.pending_excluded else "add"))
+        icon_name = "exclude" if self.draft.pending_excluded else "add"
+        self.mode_button.setProperty("iconName", icon_name)
+        self.mode_button.setIcon(icons.standard_icon(icon_name))
+        self.mode_button.setChecked(self.draft.pending_excluded)
         tooltip = t("exclusion_mode" if self.draft.pending_excluded else "inclusion_mode")
         self.mode_button.setToolTip(tooltip)
         self.mode_button.setAccessibleName(tooltip)
@@ -164,7 +169,7 @@ class FragmentEditor(QtWidgets.QWidget):
         if self.draft.editing != row and not self.start_edit(row):
             return
         self.draft.edited_excluded = not self.draft.edited_excluded
-        self.view.viewport().update()
+        self.model.dataChanged.emit(self.model.index(row, 1), self.model.index(row, 1))
         self.changed.emit()
 
     def _edited(self, text: str) -> None:

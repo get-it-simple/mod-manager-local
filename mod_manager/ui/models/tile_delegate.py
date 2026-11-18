@@ -31,6 +31,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         self.cfg = cfg
         self.image_cache = getattr(parent, "images", None)
         self.favorites: set[str] = set()
+        self.show_favorites = True
         self.set_palette(palette or colors.build_palette("light"))
 
     def set_palette(self, palette: colors.Palette) -> None:
@@ -67,6 +68,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
 
     def _paint_content(self, painter, option, index) -> None:
         painter.save()
+        painter.setFont(option.font)
         mod = index.data(QtCore.Qt.UserRole)
         selected = bool(option.state & QtWidgets.QStyle.State_Selected)
         rect = self._content_rect(option)
@@ -125,7 +127,7 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         favorite = mod.name in self.favorites
         hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
         progress = feedback.value(index, "favorite", 1.0) if feedback else 1.0
-        if favorite or hovered or progress < 1.0:
+        if self.show_favorites and (favorite or hovered or progress < 1.0):
             favorite_rect = self._favorite_rect(image_rect)
             painter.setOpacity(painter.opacity() * (progress if favorite else 1.0 - progress if not hovered else 1.0))
             self._draw_badge(painter, favorite_rect, qcolor(self.palette_colors.panel))

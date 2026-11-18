@@ -138,7 +138,7 @@ class LabelsController(QtCore.QObject):
             return
         selected = index.data(QtCore.Qt.UserRole)
         if not self._rebuilding and self.selected and self.selected in self.state.definitions:
-            self.save()
+            self.save(commit_fragments=True)
         if selected not in self.state.definitions:
             self._rebuild()
             return
@@ -242,11 +242,35 @@ class LabelsController(QtCore.QObject):
             self.editor.status.setText(t('unsaved_changes'))
             self.save_timer.start()
 
-    def save(self, *, reconcile: bool = True) -> None:
+    def _commit_fragments(self) -> bool:
+        drafts = self.fragments[self.profile_id]
+        try:
+            values = {name: (draft.committed_terms(), draft.committed_exclusions())
+                      for name, draft in drafts.items() if name in self.state.definitions}
+            candidate = deepcopy(self.state)
+            for name, (terms, exclusions) in values.items():
+                candidate.definitions[name].terms = list(terms)
+                candidate.definitions[name].exclusions = list(exclusions)
+            candidate.validate()
+        except ValueError as error:
+            self.editor.status.setText(str(error))
+            return False
+        for name, (terms, exclusions) in values.items():
+            draft = drafts[name]
+            changed = draft.unfinished
+            draft.commit_inputs(terms, exclusions)
+            if changed and name == self.selected:
+                self.editor.terms_edit.bind(draft)
+        self.drafts[self.profile_id] = candidate
+        return True
+
+    def save(self, *, reconcile: bool = True, commit_fragments: bool = False) -> None:
         self.save_timer.stop()
         if self.profile_id not in self.drafts or self.profile_id != str(self.window.cfg.get("active_game_profile_id") or ""):
             return
-        if self.window.busy:
+        if commit_fragments and not self._commit_fragments():
+            return
+        if self.window.busy or self.window.runner.barrier_pending:
             self.save_timer.start()
             return
         if self._saving:
@@ -340,12 +364,19 @@ class LabelsController(QtCore.QObject):
         if prompts.ask_yes_no(self.window, t("labels"), t("discard_label_draft"), default_no=True):
             self.reset()
 
+    def remap_mods(self, renamed) -> None:
+        for profile, old, new in renamed:
+            for states in (self.drafts, self.saved):
+                state = states.get(profile)
+                if state is not None and old in state.assignments and old != new:
+                    state.assignments[new] = state.assignments.pop(old)
+
     def flush(self) -> bool:
-        self.save()
+        self.save(commit_fragments=True)
         return not self._save_failed
 
     def shutdown(self) -> bool:
-        self.save(reconcile=False)
+        self.save(reconcile=False, commit_fragments=True)
         saved = not self._save_failed
         self.save_timer.stop()
         return saved

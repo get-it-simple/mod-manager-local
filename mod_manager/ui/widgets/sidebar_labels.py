@@ -6,6 +6,8 @@ from ...i18n import t
 from .. import icons
 from ..theme import tokens
 from .style_utils import set_variant
+from .buttons import icon_button
+from .item_feedback import ButtonItemFeedback, paint_item_button
 
 
 class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
@@ -19,7 +21,7 @@ class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
         return QtCore.QSize(0, max(tokens.NAVIGATION_HEIGHT, option.fontMetrics.height() + tokens.SPACE_LG * 2))
 
     def add_rect(self, rect):
-        size = tokens.ICON_SIZE + tokens.SPACE_XS
+        size = tokens.ICON_BUTTON_SIZE
         return QtCore.QRect(rect.right() - size - tokens.SPACE_SM, rect.center().y() - size // 2, size, size)
 
     def paint(self, painter, option, index):
@@ -30,6 +32,7 @@ class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
         painter.setBrush(option.palette.alternateBase() if active else QtCore.Qt.NoBrush)
         painter.setPen(self.accent if active else QtCore.Qt.transparent)
         painter.drawRoundedRect(rect, tokens.RADIUS_MD, tokens.RADIUS_MD)
+        paint_item_button(painter, option, index, active)
         if option.state & QtWidgets.QStyle.State_HasFocus:
             painter.setPen(option.palette.mid().color())
             painter.drawRect(rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.SPACE_XS, -tokens.SPACE_XS))
@@ -44,11 +47,6 @@ class SidebarLabelDelegate(QtWidgets.QStyledItemDelegate):
         if not self.compact:
             content.adjust(0, 0, -count_width - tokens.SPACE_SM, 0)
             painter.drawText(content, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(name, QtCore.Qt.ElideRight, content.width()))
-        if ((option.state & QtWidgets.QStyle.State_MouseOver or index == self.view._hovered)
-                and option.state & QtWidgets.QStyle.State_Enabled):
-            overlay = self.add_rect(option.rect)
-            painter.fillRect(overlay, option.palette.alternateBase())
-            icons.standard_icon("add").paint(painter, overlay)
         painter.restore()
 
 
@@ -74,6 +72,33 @@ class SidebarLabels(QtWidgets.QListView):
         self.setMouseTracking(True)
         self.clicked.connect(lambda index: self._activate(index, QtWidgets.QApplication.keyboardModifiers()))
         self._entries = []
+        self.feedback = ButtonItemFeedback(self, lambda index: bool(index.data(QtCore.Qt.UserRole) and index.data(QtCore.Qt.UserRole)[3]))
+        self.add_button = icon_button("add", t("label_quick_add"), self._add_hovered, parent=self.viewport())
+        self.add_button.hide()
+        self.verticalScrollBar().valueChanged.connect(self._position_add)
+        self._scroll_restore = QtCore.QTimer(self)
+        self._scroll_restore.setSingleShot(True)
+        self._scroll_restore.timeout.connect(self._restore_scroll)
+        self._saved_scroll = None
+
+    def _add_hovered(self):
+        if self._hovered.isValid() and self.isEnabled():
+            self.labelToggleRequested.emit(self._hovered.data())
+
+    def _position_add(self, *_args):
+        if not self._hovered.isValid() or not self.isEnabled():
+            self.add_button.hide()
+            return
+        rect = self.delegate.add_rect(self.visualRect(QtCore.QModelIndex(self._hovered)))
+        self.add_button.setGeometry(rect)
+        self.add_button.setVisible(self.viewport().rect().contains(rect))
+        self.add_button.raise_()
+
+    def _restore_scroll(self):
+        if self._saved_scroll is not None:
+            value, self._saved_scroll = self._saved_scroll, None
+            self.verticalScrollBar().setValue(value)
+        self._position_add()
 
     def _activate(self, index, modifiers=QtCore.Qt.NoModifier) -> None:
         signal = self.labelToggleRequested if modifiers & QtCore.Qt.ShiftModifier else self.labelRequested
@@ -90,12 +115,14 @@ class SidebarLabels(QtWidgets.QListView):
 
     def mouseMoveEvent(self, event) -> None:
         self._hovered = QtCore.QPersistentModelIndex(self.indexAt(event.position().toPoint()))
-        self.viewport().update()
+        self._position_add()
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:
+        if self.add_button.underMouse():
+            return
         self._hovered = QtCore.QPersistentModelIndex()
-        self.viewport().update()
+        self.add_button.hide()
         super().leaveEvent(event)
 
     def viewportEvent(self, event):
@@ -107,22 +134,42 @@ class SidebarLabels(QtWidgets.QListView):
         return super().viewportEvent(event)
 
     def update_labels(self, entries, accent: str) -> None:
-        self.delegate.accent = QtGui.QColor(accent)
-        if entries != self._entries:
-            scroll = self.verticalScrollBar().value()
-            current = self.currentIndex().data()
-            self._entries = list(entries)
-            self.label_model.clear()
-            for name, mode, count, active in entries:
+        entries = list(entries)
+        accent = QtGui.QColor(accent)
+        theme_changed = accent != self.delegate.accent
+        self.delegate.accent = accent
+        if entries == self._entries:
+            if theme_changed:
+                self.viewport().update()
+            return
+        if self._saved_scroll is None:
+            self._saved_scroll = self.verticalScrollBar().value()
+        self._entries = entries
+        model = self.label_model
+        current = self.currentIndex().data()
+        wanted = {entry[0] for entry in entries}
+        for row in reversed(range(model.rowCount())):
+            if model.item(row).text() not in wanted:
+                model.removeRow(row)
+        for row, entry in enumerate(entries):
+            name, mode, count, active = entry
+            existing = next((index for index in range(row, model.rowCount()) if model.item(index).text() == name), None)
+            if existing is None:
                 item = QtGui.QStandardItem(name)
-                item.setData((name, mode, count, active), QtCore.Qt.UserRole)
-                item.setToolTip(t("value0_value1_matching_mods_value2", value0=name, value1=mode.capitalize(), value2=str(count)))
-                item.setAccessibleText(item.toolTip())
-                self.label_model.appendRow(item)
-                if name == current:
-                    self.setCurrentIndex(item.index())
-            self.verticalScrollBar().setValue(scroll)
-        self.viewport().update()
+                item.setEditable(False)
+                model.insertRow(row, item)
+            elif existing != row:
+                model.insertRow(row, model.takeRow(existing))
+            item = model.item(row)
+            if item.data(QtCore.Qt.UserRole) != entry:
+                item.setData(entry, QtCore.Qt.UserRole)
+                tooltip = t("value0_value1_matching_mods_value2", value0=name, value1=mode.capitalize(), value2=str(count))
+                item.setToolTip(tooltip)
+                item.setAccessibleText(tooltip)
+            if name == current and self.currentIndex() != item.index():
+                self.setCurrentIndex(item.index())
+        self.verticalScrollBar().setValue(self._saved_scroll)
+        self._scroll_restore.start(tokens.IMMEDIATE_MS)
 
     def keyPressEvent(self, event):
         if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter, QtCore.Qt.Key_Space) and self.currentIndex().isValid():

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from ...i18n import t
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...labels import AUTOMATIC, matching_fragment_ids
 from .. import icons
 from ..theme import tokens
+from .item_feedback import ButtonItemFeedback, paint_item_button
 
 
 LABEL_MODE_ROLE = QtCore.Qt.UserRole + 1
@@ -22,6 +23,26 @@ def update_label_item(item, name: str, mode: str, count: int) -> None:
 
 
 class LabelListDelegate(QtWidgets.QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        option = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(option, index)
+        painter.save()
+        selected = bool(option.state & QtWidgets.QStyle.State_Selected)
+        paint_item_button(painter, option, index, selected)
+        content = option.rect.adjusted(tokens.SPACE_LG, 0, -tokens.SPACE_LG, 0)
+        icon_rect = QtCore.QRect(content.left(), content.center().y() - tokens.ICON_SIZE // 2, tokens.ICON_SIZE, tokens.ICON_SIZE)
+        option.icon.paint(painter, icon_rect)
+        content.adjust(tokens.ICON_SIZE + tokens.SPACE_LG, 0, 0, 0)
+        painter.setFont(option.font)
+        painter.setPen(option.palette.text().color())
+        painter.drawText(content, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(option.text, QtCore.Qt.ElideRight, content.width()))
+        if option.state & QtWidgets.QStyle.State_HasFocus:
+            painter.setPen(option.palette.highlight().color())
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawRoundedRect(option.rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.SPACE_XS, -tokens.SPACE_XS),
+                                    tokens.RADIUS_MD, tokens.RADIUS_MD)
+        painter.restore()
+
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
         option.icon = icons.standard_icon("settings" if index.data(LABEL_MODE_ROLE) == AUTOMATIC else "edit")
@@ -45,6 +66,7 @@ class LabelListView(QtWidgets.QListView):
 
     def setModel(self, model):
         super().setModel(model)
+        self.feedback = ButtonItemFeedback(self)
         model.dataChanged.connect(self._update_minimum)
         model.modelReset.connect(self._update_minimum)
         model.rowsInserted.connect(self._update_minimum)
@@ -55,7 +77,7 @@ class LabelListView(QtWidgets.QListView):
         model = self.model()
         counts = [str(model.index(row, 0).data(LABEL_COUNT_ROLE) or 0) for row in range(model.rowCount())] if model else []
         width = max((self.fontMetrics().horizontalAdvance(count) for count in counts), default=self.fontMetrics().horizontalAdvance("0"))
-        self.setMinimumWidth(width + tokens.ICON_SIZE + tokens.SPACE_LG * 3 + self.frameWidth() * 2 + tokens.SCROLLBAR_WIDTH)
+        self.setMinimumWidth(width + tokens.ICON_SIZE + tokens.SPACE_LG * 3 + self.frameWidth() * 2)
         self.viewport().update()
 
     def resizeEvent(self, event):

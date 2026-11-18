@@ -38,6 +38,8 @@ class TaskRunner(QtCore.QObject):
     activityChanged = QtCore.Signal(bool)
     actionFinished = QtCore.Signal()
     queueChanged = QtCore.Signal()
+    commandStarted = QtCore.Signal(object)
+    commandFinished = QtCore.Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -115,6 +117,7 @@ class TaskRunner(QtCore.QObject):
         if not accepted:
             self._finish(command)
             return
+        self.commandStarted.emit(command)
 
         def work():
             with storage_policy(strict=True, migrate=False, config=command.config):
@@ -136,6 +139,7 @@ class TaskRunner(QtCore.QObject):
         self.background(work, callback, "operations")
 
     def _finish(self, command) -> None:
+        self.commandFinished.emit(command)
         if command.blocking:
             self.set_busy(False)
         self._current = None

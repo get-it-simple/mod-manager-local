@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 TRASH_CLEANUP_MS = 60 * 60 * 1000
+TRASH_BADGE_REFRESH_MS = 60 * 1000
 
 from ...i18n import t
 
@@ -83,6 +84,9 @@ NAVIGATION_HEIGHT = 36
 TABLE_ROW_HEIGHT = 34
 TABLE_HEADER_HEIGHT = 32
 SCROLLBAR_WIDTH = 10
+SCROLLBAR_IDLE_WIDTH = 3
+SCROLLBAR_MIN_HANDLE = 18
+RENAME_DIALOG_WIDTH = 480
 SPLITTER_WIDTH = 4
 SEARCH_MIN_WIDTH = 130
 LABEL_FILTER_MIN_WIDTH = 92
@@ -144,6 +148,7 @@ GLYPH_PEN = 1.8
 ICON_SCALE_FACTORS = (1, 2, 3)
 LABEL_GLYPH = (((9, 2), (2, 2), (2, 9), (7, 14), (14, 7), (9, 2)), ((5, 5), (6, 5)))
 GLYPH_PATHS = {
+    "exclude": (((4, 9), (14, 9)),),
     "add": (((4, 9), (14, 9)), ((9, 4), (9, 14))),
     "remove": (((4, 4), (14, 14)), ((14, 4), (4, 14))),
     "clear": (((4, 4), (14, 14)), ((14, 4), (4, 14))),

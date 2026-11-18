@@ -14,6 +14,8 @@ from ..folder_actions import ensure_paths, select_in_explorer
 from ..dragdrop import clipboard_has_files, read_clipboard_paths
 from ..imports import ignored_file, regular_import_tasks
 from ..models import ModItem, OperationResult
+from ..renames import pending_renames, recover_renames
+from .controllers.rename_controller import RenameController
 from ..mod_modes import directory_mode
 from ..i18n import t
 from ..library_state import folder_issues
@@ -81,6 +83,7 @@ from .localization import system_action_text as _sys_str
 from .theme import colors, tokens
 from .task_runner import TaskRunner
 from .motion import MotionController
+from .controllers.interaction_controller import InteractionController
 from .image_cache import ImageCache
 from .controllers.library_controller import LibraryController
 from .controllers.image_prefetch_controller import ImagePrefetchController
@@ -149,9 +152,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.runner.busyChanged.connect(self._on_busy_changed)
         self.archive_import = ArchiveImportController(self)
         self.previews = PreviewController(self)
+        self.renames = RenameController(self)
         self._init_theme()
         self.context = AppContext(self.cfg, self.theme, self.runner)
         self.motion = MotionController(self)
+        self.interaction = InteractionController(self)
         self.images = ImageCache(self.runner, lambda cfg, name: mod_image_path(cfg, name), self)
         self.images.ready.connect(self._image_ready)
         self.library = LibraryController(self)
@@ -193,7 +198,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._setup_com_drop_targets()
         self._bind_navigation_events()
         self.keyboard = KeyboardController(self)
-        self.refresh_all()
+        if pending_renames():
+            self._run_action(t("rename_recovering"), lambda: recover_renames(deepcopy(self.cfg)),
+                             lambda _result: self.refresh_all(), barrier=True)
+        else:
+            self.refresh_all()
         self.runner.queueChanged.connect(self._queue_changed)
         self.runner.activityChanged.connect(self._close_when_idle)
 
@@ -237,6 +246,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.library.shutdown()
         self.images.shutdown()
         self.motion.shutdown()
+        self.interaction.shutdown()
         self._close_label_choices()
         self.mod_menu.shutdown()
         self.cfg["window_width"] = self.width()
@@ -303,6 +313,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.presets_model.set_palette(palette)
             self.tile_delegate.set_palette(palette)
             self.workspace.refresh_icons()
+            if hasattr(self, "trash"):
+                self.trash.view.tile_delegate.set_palette(palette)
+                self.trash.view.tiles.viewport().update()
             self._update_sidebar_labels()
             self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tiles_view.viewport().update()
@@ -996,6 +1009,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             button = self.mods_actions.button(key)
             button.setText(t(key, count=count))
             button.setEnabled(not self.operation_blocked and count > 0)
+        self.mods_actions.button("rename_mod").setEnabled(enabled and len(selected) == 1)
 
     def _on_mod_selection_changed(self) -> None:
         self._update_mod_selection_actions()
@@ -1344,7 +1358,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.detail_scroll.add_heading(t('no_mod_selected'), self.details_button.click)
             self.detail_scroll.add_text_row(t('details'), t('select_a_mod_to_see_its_information_and_available_actions'))
             return
-        self.detail_scroll.add_heading(mod.name, self.details_button.click)
+        self.detail_scroll.add_heading(mod.name, self.details_button.click, self._rename_selected_mod)
         self.detail_scroll.add_flow_row([
             QtWidgets.QLabel(t('installed_mods') if mod.installed else t('not_installed_mods')),
             self._detail_favorite_button(mod), self._detail_state_button(mod),
@@ -1811,6 +1825,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.cfg = self.context.replace_config(new_cfg)
         self.motion.set_enabled(bool(new_cfg.get("gui_animations_enabled", True)))
         self.tile_delegate.cfg = new_cfg
+        self.trash.view.cfg = self.cfg
+        self.trash.view.tile_delegate.cfg = self.cfg
+        self.trash.view.set_mode(self.cfg.get("trash_view_mode", "list"), persist=False)
         self._apply_state_column_width()
         self.mod_view_mode.set(normalize_view_mode(self.cfg.get("mod_view_mode")))
         self._show_mod_view()
@@ -1989,6 +2006,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _delete_selected_mods(self) -> None:
         self.trash.remove_mods()
+
+    def _rename_selected_mod(self) -> None:
+        self.renames.open()
 
 
 def _app_icon() -> QtGui.QIcon | None:

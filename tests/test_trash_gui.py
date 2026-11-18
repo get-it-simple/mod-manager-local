@@ -18,6 +18,43 @@ from mod_manager.trash import list_entries
 
 
 class TrashGuiTests(CliEnvironment, unittest.TestCase):
+
+    def test_rename_button_updates_real_presets_and_keeps_the_new_mod_selected(self):
+        with storage_policy(config=self.cfg):
+            storage.save_presets({"Core": ["sample.pak"], "Other": ["sample.pak", "missing.pak"]})
+        self.window.refresh_all()
+        self.select_mod()
+        with patch("mod_manager.ui.dialogs.prompts.choose_mod_name", return_value=("renamed.pak", True)):
+            self.window.mods_actions.button("rename_mod").click()
+        self.assertEqual((self.source / "renamed.pak").read_bytes(), b"sample.pak")
+        self.assertFalse((self.source / "sample.pak").exists())
+        self.assertEqual(self.window._selected_mod_names(), ["renamed.pak"])
+        with storage_policy(config=self.cfg):
+            self.assertEqual(storage.load_presets(), {"Core": ["renamed.pak"], "Other": ["renamed.pak", "missing.pak"]})
+        self.assertEqual(self.window.library.snapshot.presets["Core"], ["renamed.pak"])
+
+    def test_trash_cards_share_selection_and_show_remaining_days_over_the_preview(self):
+        self.select_mod()
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True):
+            self.window._delete_selected_mods()
+        self.window._navigate("trash")
+        view = self.window.trash.view
+        view.table.selectRow(0)
+        selected = [entry.identifier for entry in view.selected_entries()]
+        view.set_mode("tiles")
+        self.assertIs(view.stack.currentWidget(), view.tiles)
+        self.assertEqual([entry.identifier for entry in view.selected_entries()], selected)
+        option = QtWidgets.QStyleOptionViewItem()
+        option.initFrom(view.tiles)
+        option.rect = QtCore.QRect(QtCore.QPoint(), view.tile_delegate.sizeHint(option, view.model.index(0, 0)))
+        badge, text, _action = view.tile_delegate._label_badges(option, view.model.index(0, 0))[0]
+        self.assertIn("days left", text)
+        image = view.tile_delegate._image_rect(view.tile_delegate._content_rect(option))
+        self.assertTrue(image.intersects(badge))
+        self.assertTrue(view.toolbar.button("restore").isEnabled())
+        view.toolbar.button("restore").click()
+        self.assertEqual((self.source / "sample.pak").read_bytes(), b"sample.pak")
+        self.assertEqual(view.model.rowCount(), 0)
     @classmethod
     def setUpClass(cls):
         cls.app = qt_app()

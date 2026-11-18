@@ -7,7 +7,7 @@ from mod_manager.keyboard import default_bindings
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.37"
+APP_VERSION = "1.2.38"
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -56,6 +56,7 @@ DEFAULT_CONFIG = {
     "ui_scale_percent": 100,
     "placeholder_image_col_width": 56,
     "mod_view_mode": "list",
+    "trash_view_mode": "list",
     "mod_details_visible": True,
     "tile_size": 140,
     "window_width": 1200,

@@ -88,6 +88,8 @@ def parse_extensions(cfg: Dict) -> Tuple[bool, List[str], bool]:
     return False, exts, include_folders
 
 def is_mod_file(path: Path, cfg: Dict) -> bool:
+    if path.name.startswith(".mod-rename-"):
+        return False
     if path.name.casefold() in RESERVED_MOD_DIRECTORIES:
         return False
     if directory_mode(cfg):
@@ -112,6 +114,8 @@ def _link_dest_name(p: Path, link_prefix: str) -> str:
 def _iter_mod_sources(src_dir: Path, recursive: bool, include_folders: bool, imported_folders: set[str] | None = None):
     """Yield (path, is_dir) candidates from src_dir, honoring folder/recursive options."""
     for p in sorted(src_dir.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        if p.name.startswith(".mod-rename-"):
+            continue
         if p.name.casefold() in RESERVED_MOD_DIRECTORIES:
             continue
         if p.is_dir():

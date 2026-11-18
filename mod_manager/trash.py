@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 from uuid import UUID, uuid4
+from math import ceil
 
 from . import storage
 from .archive_backend import safe_relative_path
@@ -21,6 +22,20 @@ from .platform_utils import hide_directory
 from .storage_policy import storage_policy
 
 RETENTION_DAYS = 14
+
+
+def remaining_days(entry: TrashEntry, now: datetime | None = None) -> int:
+    seconds = (datetime.fromisoformat(entry.data["expires_at"]) - (now or utc_now())).total_seconds()
+    return max(0, ceil(seconds / timedelta(days=1).total_seconds()))
+
+
+def preview_path(entry: TrashEntry) -> Path | None:
+    for member in entry.data["files"]:
+        if Path(member["original"]).parent == Path("images"):
+            path = _stored(entry.path, member["stored"])
+            if path.is_file():
+                return path
+    return None
 
 
 @dataclass(frozen=True)
