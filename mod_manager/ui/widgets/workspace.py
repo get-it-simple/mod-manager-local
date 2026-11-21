@@ -48,6 +48,8 @@ class WorkspacePage(QtWidgets.QWidget):
     def set_subtitle(self, text: str, elide: bool = False) -> None:
         self._subtitle_text = text
         self._elide_subtitle = elide
+        policy = QtWidgets.QSizePolicy.Ignored if elide else QtWidgets.QSizePolicy.Preferred
+        self.subtitle.setSizePolicy(policy, self.subtitle.sizePolicy().verticalPolicy())
         self.subtitle.setWordWrap(not elide)
         self.subtitle.setToolTip(text)
         self.subtitle.setVisible(bool(text))

@@ -11,9 +11,10 @@ from typing import Dict, List
 
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
-from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
+from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS, QUICK_TOOLS
 from .storage_policy import StorageError, current_policy, profile_config
 from .labels import LabelDefinition, LabelState, state_from_records, unique_names
+from .quick_tools import parse_quick_tools
 
 FAVORITES_KEY = "__favorites__"
 LABEL_DEFINITIONS_KEY = "__label_definitions__"
@@ -80,9 +81,7 @@ def _validate_config(cfg: Dict) -> None:
             elif spec.kind == settings_schema.FLAG:
                 if not isinstance(value, bool) and not (spec.key in GAME_PROFILE_KEYS and value == ""):
                     raise StorageError(f"{spec.label} must be true or false. Repair config.json.")
-            elif spec.kind == settings_schema.SHORTCUTS:
-                settings_schema.coerce_value(spec, value)
-            elif spec.kind == settings_schema.SHORTCUTS:
+            elif spec.kind in {settings_schema.SHORTCUTS, QUICK_TOOLS}:
                 settings_schema.coerce_value(spec, value)
             elif not isinstance(value, str):
                 raise StorageError(f"{spec.label} must be text. Repair config.json.")
@@ -133,6 +132,7 @@ def _profile_from_legacy(cfg: Dict) -> Dict | None:
     return profile
 
 def normalize_game_profiles(cfg: Dict) -> Dict:
+    cfg[QUICK_TOOLS] = parse_quick_tools(cfg.get(QUICK_TOOLS), strict=False)
     profiles = [p for p in cfg.get("game_profiles", []) if isinstance(p, dict)]
     normalized = []
     seen = set()
@@ -146,6 +146,8 @@ def normalize_game_profiles(cfg: Dict) -> Dict:
         item = {"id": profile_id, "name": name, "created_at": created_at}
         for key in GAME_PROFILE_KEYS:
             value = profile.get(key, DEFAULT_CONFIG.get(key, ""))
+            if key == QUICK_TOOLS:
+                value = parse_quick_tools(value, strict=False)
             item[key] = DEFAULT_CONFIG[key] if value == "" and (isinstance(DEFAULT_CONFIG[key], bool) or key == "mod_mode") else value
         normalized.append(item)
 
@@ -188,7 +190,7 @@ def create_game_profile(name: str, values: Dict | None = None, cfg: Dict | None 
         "created_at": created_at,
     }
     for key in GAME_PROFILE_KEYS:
-        profile[key] = values.get(key, DEFAULT_CONFIG.get(key, ""))
+        profile[key] = deepcopy(values.get(key, DEFAULT_CONFIG.get(key, "")))
     if cfg is not None:
         cfg.setdefault("game_profiles", []).append(profile)
         cfg["active_game_profile_id"] = profile["id"]
@@ -222,7 +224,7 @@ def delete_game_profile(cfg: Dict, profile_id: str) -> bool:
     cfg["game_profiles"] = kept
     if not kept:
         for key in GAME_PROFILE_KEYS:
-            cfg[key] = DEFAULT_CONFIG[key]
+            cfg[key] = deepcopy(DEFAULT_CONFIG[key])
     if cfg.get("active_game_profile_id") == profile_id:
         cfg["active_game_profile_id"] = kept[0]["id"] if kept else ""
     normalize_game_profiles(cfg)

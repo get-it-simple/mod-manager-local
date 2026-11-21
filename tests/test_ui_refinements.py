@@ -15,7 +15,7 @@ from tests.window_fixture import WindowTestCase
 
 class UiRefinementTests(WindowTestCase):
 
-    def test_fragment_text_stays_visible_after_painting_its_mode_button(self):
+    def test_fragment_text_stays_visible_after_painting_both_modes(self):
         from mod_manager.ui.widgets.label_fragments import FragmentDraft, FragmentEditor
 
         self.show_window()
@@ -35,9 +35,7 @@ class UiRefinementTests(WindowTestCase):
         painter = QtGui.QPainter(image)
         delegate.paint(painter, option, index)
         painter.end()
-        text = delegate.chip_rect(option.rect).adjusted(
-            tokens.ICON_BUTTON_SIZE + tokens.SPACE_SM + delegate.number_width(0), 0,
-            -tokens.ICON_BUTTON_SIZE * 2 - tokens.SPACE_SM, 0)
+        text = delegate.text_rect(option.rect, 0)
         foreground = option.palette.text().color()
         self.assertTrue(any(image.pixelColor(x, y) == foreground
                             for x in range(text.left(), text.right()) for y in range(text.top(), text.bottom())))
@@ -59,6 +57,53 @@ class UiRefinementTests(WindowTestCase):
             image = view.table.grab()
         self.assertFalse(image.isNull())
         self.assertEqual(failures, [])
+
+    def test_fragment_modes_fit_a_narrow_panel_and_highlight_the_active_icon(self):
+        from mod_manager.ui.widgets.label_fragments import FragmentDraft, FragmentEditor
+
+        self.show_window()
+        editor = FragmentEditor(self.window)
+        editor.resize(tokens.DETAIL_PANEL_MIN_WIDTH, editor.sizeHint().height())
+        editor.show()
+        font = editor.font()
+        font.setPointSize(18)
+        editor.setFont(font)
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                self.window.theme.cfg["gui_theme"] = theme
+                self.window.theme.apply()
+                images = []
+                for excluded in (False, True):
+                    draft = (FragmentDraft(exclusions=["fragment"]) if excluded
+                             else FragmentDraft(["fragment"]))
+                    editor.bind(draft)
+                    self.qt_app.processEvents()
+                    view = editor.view
+                    delegate = view.itemDelegate()
+                    index = editor.model.index(0, 1)
+                    rect = view.visualRect(index)
+                    mode_rects = [delegate.mode_rect(rect, mode) for mode in (False, True)]
+                    edit_rect = delegate.action_rect(rect, 2)
+                    self.assertLess(mode_rects[0].right(), mode_rects[1].left())
+                    self.assertLess(mode_rects[1].right(), edit_rect.left())
+                    self.assertTrue(view.viewport().rect().contains(delegate.action_rect(rect, 1)))
+                    mode_images = [view.viewport().grab(mode_rect).toImage() for mode_rect in mode_rects]
+                    inactive = mode_images[int(not excluded)]
+                    center = inactive.rect().center()
+                    pixels = {inactive.pixel(x, y)
+                              for x in range(center.x() - tokens.SPACE_SM, center.x() + tokens.SPACE_SM)
+                              for y in range(center.y() - tokens.SPACE_SM, center.y() + tokens.SPACE_SM)}
+                    self.assertGreater(len(pixels), 1)
+                    images.append(mode_images)
+                for included, excluded in zip(*images):
+                    self.assertNotEqual(included, excluded)
+                for button in editor.mode_control.buttons.values():
+                    self.assertTrue(button.isVisible())
+                    self.assertGreaterEqual(button.width(), button.sizeHint().width())
+                    self.assertTrue(editor.rect().contains(button.mapTo(editor, button.rect().bottomRight())))
+                field_top = editor.new_edit.mapTo(editor, QtCore.QPoint()).y()
+                self.assertGreater(field_top, editor.mode_control.geometry().bottom())
+                self.assertTrue(editor.rect().contains(editor.new_edit.mapTo(editor, editor.new_edit.rect().bottomRight())))
     def show_window(self):
         self.window.resize(tokens.DEFAULT_WIDTH, tokens.DEFAULT_HEIGHT)
         self.window.show()

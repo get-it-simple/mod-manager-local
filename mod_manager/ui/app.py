@@ -61,6 +61,7 @@ from ..storage import (
     normalize_game_profiles,
     save_config,
 )
+from ..settings_schema import QUICK_TOOLS
 from . import icons
 from .image_clipboard import clipboard_has_image, read_clipboard_image
 from .pages.library import build_mods, build_mods_toolbar, build_mods_actions
@@ -513,6 +514,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _sync_workspace(self) -> None:
         profile = active_game_profile(self.cfg)
+        if profile:
+            self.quick_tools.set_tools(profile.get("id", ""), profile.get(QUICK_TOOLS, []))
+        else:
+            self.quick_tools.set_tools("", [])
         self.workspace.set_profiles(self.cfg.get("game_profiles", []), profile.get("id", "") if profile else "", self.busy)
         self._update_sidebar_labels()
         count = t("showing_mods", count=len(self.current_mod_items), total=len(self.current_mod_names))

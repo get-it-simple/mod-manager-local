@@ -268,7 +268,8 @@ def _profile_values_from_args(args: argparse.Namespace) -> Dict:
     for key in GAME_PROFILE_KEYS:
         value = getattr(args, key, None)
         if value is not None:
-            values[key] = value
+            values[key] = ([{"label": label, "path": path} for label, path in value]
+                           if key == settings_schema.QUICK_TOOLS else value)
     return settings_schema.coerce_game_profile(values)
 
 

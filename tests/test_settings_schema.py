@@ -58,7 +58,7 @@ class SchemaShapeTest(unittest.TestCase):
 
     def test_game_profile_fields_reuse_the_mods_section_specs(self):
         self.assertEqual(schema.GAME_PROFILE_FIELDS[0].key, "name")
-        self.assertEqual(schema.GAME_PROFILE_FIELDS[1:], schema.MODS_FIELDS)
+        self.assertEqual(schema.GAME_PROFILE_FIELDS[1:], (*schema.MODS_FIELDS, schema.QUICK_TOOLS_FIELD))
 
     def test_dead_settings_are_gone(self):
         self.assertNotIn("button_size_percent", DEFAULT_CONFIG)

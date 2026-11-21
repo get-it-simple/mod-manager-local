@@ -8,6 +8,7 @@ from app_paths import APP_NAME, APP_VERSION
 from . import settings_schema
 from .cli_commands import ACTION_HELP, COMMAND_HELP
 from .cli_utils import parse_multi_choice
+from .i18n import t
 
 
 OPTION_HELP = {
@@ -122,6 +123,13 @@ def _add_profile_args(parser: argparse.ArgumentParser, use_defaults: bool) -> No
             parser.add_argument(flag, choices=list(spec.choices), default=default, help=spec.tooltip)
         else:
             parser.add_argument(flag, default="" if use_defaults else None, help=spec.tooltip)
+
+    tools = parser.add_mutually_exclusive_group()
+    tools.add_argument("--tool", dest=settings_schema.QUICK_TOOLS, action="append", nargs=2,
+                       metavar=("LABEL", "PATH"), help=settings_schema.QUICK_TOOLS_FIELD.tooltip)
+    if not use_defaults:
+        tools.add_argument("--clear-tools", dest=settings_schema.QUICK_TOOLS, action="store_const", const=[],
+                           help=t("quick_tools_clear_help"))
 
 def _add_view_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=positive_number, default=1)
