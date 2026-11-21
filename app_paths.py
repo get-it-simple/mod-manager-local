@@ -8,14 +8,29 @@ from mod_manager.keyboard import default_bindings
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.43"
+APP_VERSION = "1.2.44"
 INSTALL_MARKER = "mod-manager.machine"
+
+
+def machine_data_directory(local_data: Path) -> Path:
+    directory = local_data / "GetItSimple" / APP_NAME
+    legacy = local_data / APP_NAME
+    if directory.is_dir() or not legacy.is_dir():
+        return directory
+    if any((legacy / "profiles" / "renames").glob("*.json")):
+        return legacy
+    try:
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        legacy.rename(directory)
+    except OSError:
+        return directory if directory.is_dir() else legacy
+    return directory
 
 
 def data_directory(app_dir: Path, *, frozen: bool) -> Path:
     if os.name == "nt" and frozen and (app_dir / INSTALL_MARKER).is_file():
         local_data = os.environ.get("LOCALAPPDATA")
-        return (Path(local_data) if local_data else Path.home() / "AppData" / "Local") / APP_NAME
+        return machine_data_directory(Path(local_data) if local_data else Path.home() / "AppData" / "Local")
     return app_dir
 
 

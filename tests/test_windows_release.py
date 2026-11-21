@@ -24,7 +24,7 @@ def test_machine_data_is_per_user_and_portable_data_stays_next_to_exe(tmp_path, 
         user_dir = tmp_path / account
         monkeypatch.setenv("LOCALAPPDATA", str(user_dir))
         target = app_paths.data_directory(program, frozen=True) / "config.json"
-        assert target == user_dir / app_paths.APP_NAME / "config.json"
+        assert target == user_dir / "GetItSimple" / "Mod Manager" / "config.json"
         monkeypatch.setattr(storage, "CONFIG_PATH", target)
         storage.save_config({"window_width": width})
         assert storage.load_config()["window_width"] == width
@@ -34,6 +34,49 @@ def test_machine_data_is_per_user_and_portable_data_stays_next_to_exe(tmp_path, 
     second = save_for_account("second", 960)
     assert first.read_bytes() != second.read_bytes()
     assert not (program / "config.json").exists()
+
+
+def test_machine_data_directory_moves_legacy_data_as_a_unit(tmp_path):
+    legacy = tmp_path / "Mod Manager"
+    destination = tmp_path / "GetItSimple" / "Mod Manager"
+    files = {
+        "config.json": b'{"window_width": 960}',
+        "profiles/default-imports.json": b"{}",
+        "mod-manager.log": b"existing log",
+    }
+    for name, contents in files.items():
+        path = legacy / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+    assert app_paths.machine_data_directory(tmp_path) == destination
+    assert not legacy.exists()
+    assert {name: (destination / name).read_bytes() for name in files} == files
+    assert app_paths.machine_data_directory(tmp_path) == destination
+
+
+def test_machine_data_directory_keeps_existing_destination(tmp_path):
+    legacy = tmp_path / "Mod Manager"
+    destination = tmp_path / "GetItSimple" / "Mod Manager"
+    legacy.mkdir()
+    destination.mkdir(parents=True)
+    (legacy / "config.json").write_bytes(b'{"window_width": 800}')
+    (destination / "config.json").write_bytes(b'{"window_width": 960}')
+    assert app_paths.machine_data_directory(tmp_path) == destination
+    assert (legacy / "config.json").read_bytes() == b'{"window_width": 800}'
+    assert (destination / "config.json").read_bytes() == b'{"window_width": 960}'
+
+
+def test_machine_data_directory_defers_move_until_legacy_rename_recovery(tmp_path):
+    legacy = tmp_path / "Mod Manager"
+    destination = tmp_path / "GetItSimple" / "Mod Manager"
+    journal = legacy / "profiles" / "renames" / "pending.json"
+    journal.parent.mkdir(parents=True)
+    journal.write_bytes(b"{}")
+    assert app_paths.machine_data_directory(tmp_path) == legacy
+    assert not destination.exists()
+    journal.unlink()
+    assert app_paths.machine_data_directory(tmp_path) == destination
+    assert not legacy.exists()
 
 
 @pytest.fixture

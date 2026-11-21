@@ -18,6 +18,7 @@ function Test-Application([string]$Exe, [PSCredential]$Credential, [switch]$OneF
     if ($Credential) {
         $parameters.Credential = $Credential
         $parameters.LoadUserProfile = $true
+        $parameters.UseNewEnvironment = $true
     }
     $process = Start-Process @parameters
     $windowProcess = $process
@@ -103,8 +104,11 @@ try {
     Assert-Condition (Test-Path -LiteralPath $shortcut) 'The common Start Menu shortcut is missing.'
     Test-Application $exe $credential
     $profile = Get-CimInstance Win32_UserProfile -Filter "SID = '$($user.SID.Value)'"
-    $data = Join-Path $profile.LocalPath 'AppData/Local/Mod Manager'
+    $localData = Join-Path $profile.LocalPath 'AppData/Local'
+    $legacyData = Join-Path $localData 'Mod Manager'
+    $data = Join-Path $localData 'GetItSimple/Mod Manager'
     $config = Join-Path $data 'config.json'
+    Assert-Condition (Test-Path -LiteralPath $config -PathType Leaf) "The standard user did not create settings at $config."
     $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
     Assert-Condition ($settings.window_width -gt 0) 'The standard user did not persist application settings.'
     Assert-Condition (Test-Path -LiteralPath (Join-Path $data 'mod-manager.log')) 'The standard user log is missing.'
@@ -120,7 +124,10 @@ try {
     Assert-Condition ((Get-ItemProperty -LiteralPath $newEntry).DisplayVersion -eq $Version) 'The upgrade did not register the expected version.'
     Assert-Condition ((Get-FileHash -LiteralPath $config).Hash -eq $configHash) 'Upgrade altered user settings.'
     Assert-Condition ((Get-FileHash -LiteralPath $profileData).Hash -eq $profileHash) 'Upgrade altered profile data.'
+    Move-Item -LiteralPath $data -Destination $legacyData
     Test-Application $exe $credential
+    Assert-Condition (-not (Test-Path -LiteralPath $legacyData)) 'The application did not move the legacy data directory.'
+    Assert-Condition ((Get-FileHash -LiteralPath $profileData).Hash -eq $profileHash) 'Data migration altered profile data.'
     $configHash = (Get-FileHash -LiteralPath $config).Hash
 
     Invoke-Installer '/i' $olderPath (Join-Path $scratch 'msi-downgrade.log') -ExpectedCode 1603
