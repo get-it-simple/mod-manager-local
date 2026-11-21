@@ -347,17 +347,25 @@ class InterfaceImprovementsGuiTests(WindowTestCase):
         self.assertEqual(self.window.keyboard.text("search"), "Ctrl+G")
         self.assertIn("Ctrl+G", self.window.search_box.toolTip())
 
+    def select_preset(self, name: str) -> None:
+        model = self.window.presets_model
+        index = model.index(model.keys.index(name), 0)
+        flags = QtCore.QItemSelectionModel.ClearAndSelect | QtCore.QItemSelectionModel.Rows
+        self.window.presets_table.selectionModel().select(index, flags)
+
     def test_cancelled_preset_preview_has_no_side_effects(self):
-        self.window.presets_table.selectRow(1)
+        self.select_preset("ui")
         with patch("mod_manager.ui.dialogs.prompts.review_preset_plan", return_value=False) as review, patch(
             "mod_manager.ui.app.execute_preset_plan"
         ) as execute:
             self.window._toggle_selected_presets()
+        review.assert_called_once()
         self.assertEqual([(change.action, change.name) for change in review.call_args.args[1].changes], [("install", "ui.pak")])
         execute.assert_not_called()
 
     def test_preset_state_change_requires_an_updated_confirmation(self):
-        self.window.presets_table.selectRow(0)
+        self.select_preset("core")
+
         def confirm(*_args):
             if self.mods[0].installed:
                 self.mods[0].installed = False
