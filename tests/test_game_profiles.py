@@ -53,6 +53,7 @@ class GameProfileStorageTests(unittest.TestCase):
         self.assertEqual(profile["mod_extensions"], ".pak")
         self.assertEqual(profile["mod_mode"], "standard")
         self.assertEqual(profile["mod_icon_path"], "")
+        self.assertEqual(profile["quick_tools"], [])
         self.assertEqual(cfg["active_game_profile_id"], profile["id"])
         self.assertEqual(cfg["mods_source_dir"], "D:/mods/source")
 
@@ -127,6 +128,25 @@ class GameProfileStorageTests(unittest.TestCase):
 
         self.assertEqual(storage.load_presets(), {"legacy": ["old.pak"]})
         self.assertTrue((self.profile_dir / f"{profile_id}-presets.json").exists())
+
+    def test_quick_tools_round_trip_through_cli_and_stay_in_their_profile(self):
+        first_path = str(self.root / "Mod Tools" / "Editor.exe")
+        second_path = str(self.root / "Viewer.lnk")
+        tools = [{"label": "Mod editor", "path": first_path}, {"label": "Viewer", "path": second_path}]
+        self.assertEqual(run_cli(["games", "add", "First", "--tool", "Mod editor", first_path,
+                                  "--tool", "Viewer", second_path]), 0)
+        first_id = storage.load_config()["active_game_profile_id"]
+        self.assertEqual(run_cli(["games", "add", "Second"]), 0)
+        self.assertEqual(storage.load_config()["quick_tools"], [])
+        self.assertEqual(run_cli(["games", "edit", first_id, "--name", "Renamed"]), 0)
+        self.assertEqual(run_cli(["games", "select", first_id]), 0)
+        self.assertEqual(storage.load_config()["quick_tools"], tools)
+        self.assertEqual(run_cli(["games", "edit", first_id, "--tool", "Relative", "editor.exe"]), 1)
+        self.assertEqual(storage.load_config()["quick_tools"], tools)
+        self.assertEqual(run_cli(["games", "edit", first_id, "--tool", "Updated", second_path]), 0)
+        self.assertEqual(storage.load_config()["quick_tools"], [{"label": "Updated", "path": second_path}])
+        self.assertEqual(run_cli(["games", "edit", first_id, "--clear-tools"]), 0)
+        self.assertEqual(storage.load_config()["quick_tools"], [])
 
     def test_new_profile_does_not_inherit_legacy_presets_and_labels(self):
         storage.save_json(

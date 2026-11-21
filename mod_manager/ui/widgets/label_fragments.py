@@ -4,13 +4,12 @@ from PySide6 import QtCore, QtWidgets
 
 from ...i18n import t
 from ...settings_schema import LABEL_TERMS_FIELD
-from .. import icons
 from ..theme import tokens
+from .flow_layout import FlowLayout
+from .segmented_control import SegmentedControl
 from .style_utils import apply_margins
-from .buttons import icon_button
 from .label_rule_draft import FragmentDraft
-from .label_fragment_view import FragmentsModel, FragmentListView, FragmentDelegate
-from .item_feedback import ButtonItemFeedback
+from .label_fragment_view import FRAGMENT_MODES, FragmentsModel, FragmentListView, FragmentDelegate
 
 
 class FragmentEditor(QtWidgets.QWidget):
@@ -28,7 +27,6 @@ class FragmentEditor(QtWidgets.QWidget):
         self.view.setModel(self.model)
         self.view.setModelColumn(1)
         self.view.setItemDelegate(FragmentDelegate(self))
-        self.feedback = ButtonItemFeedback(self.view, lambda index: self.draft.rule_excluded(index.row()))
         self.view.setViewMode(QtWidgets.QListView.ListMode)
         self.view.setFlow(QtWidgets.QListView.LeftToRight)
         self.view.setWrapping(True)
@@ -48,18 +46,27 @@ class FragmentEditor(QtWidgets.QWidget):
         self.new_edit.setToolTip(t('fragment_autosave_help'))
         self.new_edit.textChanged.connect(self._pending)
         self.new_edit.returnPressed.connect(self.add_pending)
-        self.mode_button = icon_button("add", t("inclusion_mode"), self.toggle_pending_mode, checkable=True)
+        self.mode_control = SegmentedControl(
+            (name, t(f"fragment_mode_{name}"), icon, t(f"{name}_fragment_help"))
+            for name, icon in FRAGMENT_MODES.values()
+        )
+        self.mode_control.valueChanged.connect(self.set_pending_mode)
         self.next_id = QtWidgets.QLabel()
         self.next_id.setAccessibleName(t('new_fragment_number'))
         self.heading = QtWidgets.QLabel(LABEL_TERMS_FIELD.label)
         self.heading.setToolTip(LABEL_TERMS_FIELD.tooltip)
-        new_row = apply_margins(QtWidgets.QHBoxLayout(), margins=None, spacing=tokens.SPACE_SM)
-        new_row.addWidget(self.heading)
-        new_row.addWidget(self.mode_button)
-        new_row.addWidget(self.next_id)
-        new_row.addWidget(self.new_edit, 1)
+        input_group = QtWidgets.QWidget()
+        input_group.setProperty("toolbarStretch", 1)
+        input_row = apply_margins(QtWidgets.QHBoxLayout(input_group), margins=None, spacing=tokens.SPACE_SM)
+        input_row.addWidget(self.next_id)
+        input_row.addWidget(self.new_edit, 1)
+        header = FlowLayout()
+        header.setSpacing(tokens.SPACE_SM)
+        header.addWidget(self.heading)
+        header.addWidget(self.mode_control)
+        header.addWidget(input_group)
         layout = apply_margins(QtWidgets.QVBoxLayout(self), margins=None, spacing=tokens.SPACE_SM)
-        layout.addLayout(new_row)
+        layout.addLayout(header)
         layout.addWidget(self.view)
         self.model.modelReset.connect(self._update_metrics)
         self._update_metrics()
@@ -67,13 +74,7 @@ class FragmentEditor(QtWidgets.QWidget):
     def _update_metrics(self) -> None:
         values = self.draft.exclusions if self.draft.pending_excluded else self.draft.terms
         self.next_id.setText(str(len(values) + 1))
-        icon_name = "exclude" if self.draft.pending_excluded else "add"
-        self.mode_button.setProperty("iconName", icon_name)
-        self.mode_button.setIcon(icons.standard_icon(icon_name))
-        self.mode_button.setChecked(self.draft.pending_excluded)
-        tooltip = t("exclusion_mode" if self.draft.pending_excluded else "inclusion_mode")
-        self.mode_button.setToolTip(tooltip)
-        self.mode_button.setAccessibleName(tooltip)
+        self.mode_control.set_value(FRAGMENT_MODES[self.draft.pending_excluded][0])
         self.next_id.setFixedWidth(self.next_id.fontMetrics().horizontalAdvance(self.next_id.text()))
         self.view.setVisible(bool(self.model.rowCount()))
         self._fit_chips()
@@ -98,7 +99,7 @@ class FragmentEditor(QtWidgets.QWidget):
             if self.draft.editing is not None:
                 self.view.scrollTo(self.model.index(self.draft.editing, 1))
             self.layout().invalidate()
-            self.setFixedHeight(self.layout().sizeHint().height())
+            self.setFixedHeight(self.layout().totalHeightForWidth(self.width()))
             self.updateGeometry()
         finally:
             self._fitting = False
@@ -159,16 +160,24 @@ class FragmentEditor(QtWidgets.QWidget):
         self.draft.pending = text
         self.changed.emit()
 
-    def toggle_pending_mode(self) -> None:
-        self.draft.pending_excluded = not self.draft.pending_excluded
+    def set_pending_mode(self, mode: str) -> None:
+        excluded = mode == FRAGMENT_MODES[True][0]
+        if excluded == self.draft.pending_excluded:
+            return
+        self.draft.pending_excluded = excluded
         self._update_metrics()
         self.changed.emit()
         self.new_edit.setFocus()
 
-    def toggle_rule(self, row: int) -> None:
+    def set_rule_mode(self, row: int, excluded: bool) -> None:
+        if self.draft.rule_excluded(row) == excluded:
+            if self.draft.editing == row:
+                self.focus_edit()
+            return
         if self.draft.editing != row and not self.start_edit(row):
             return
-        self.draft.edited_excluded = not self.draft.edited_excluded
+        self.draft.edited_excluded = excluded
+        self.focus_edit()
         self.model.dataChanged.emit(self.model.index(row, 1), self.model.index(row, 1))
         self.changed.emit()
 

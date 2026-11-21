@@ -6,6 +6,7 @@ from app_paths import DEFAULT_CONFIG
 from .i18n import available_languages, t
 from .keyboard import validate_bindings
 from .mod_modes import MOD_MODES, normalize_icon_path
+from .quick_tools import parse_quick_tools
 
 from .ui.theme.colors import normalize_hex
 
@@ -17,6 +18,7 @@ FLAG = "flag"
 COLOR = "color"
 FONT = "font"
 SHORTCUTS = "shortcuts"
+QUICK_TOOLS = "quick_tools"
 
 INTERNAL_KEYS = frozenset({
     "active_game_profile_id",
@@ -55,6 +57,10 @@ GAME_NAME_FIELD = FieldSpec(
     tooltip=t('name_shown_in_the_game_switcher_the_two_letter_abbreviation_on_the_game_'),
     kind=TEXT,
 )
+
+QUICK_TOOLS_FIELD = FieldSpec(QUICK_TOOLS, t("quick_tools"), t("quick_tools_help"), QUICK_TOOLS)
+QUICK_TOOL_LABEL_FIELD = FieldSpec("label", t("quick_tool_label"), t("quick_tool_label_help"), TEXT)
+QUICK_TOOL_PATH_FIELD = FieldSpec("path", t("quick_tool_path"), t("quick_tool_path_help"), PATH)
 
 LABEL_NAME_FIELD = FieldSpec("label_name", t('label_name'), t('unique_name_shown_in_the_library_and_label_filters'), TEXT)
 LABEL_MODE_FIELD = FieldSpec(
@@ -301,9 +307,9 @@ SETTINGS_SECTIONS = (
     (t('shortcuts_label'), (FieldSpec("keyboard_shortcuts", t("shortcuts_label"), t("shortcuts_help"), SHORTCUTS),)),
 )
 
-GAME_PROFILE_FIELDS = (GAME_NAME_FIELD, *MODS_FIELDS)
+GAME_PROFILE_FIELDS = (GAME_NAME_FIELD, *MODS_FIELDS, QUICK_TOOLS_FIELD)
 
-PROFILE_KEYS = tuple(spec.key for spec in MODS_FIELDS)
+PROFILE_KEYS = tuple(spec.key for spec in (*MODS_FIELDS, QUICK_TOOLS_FIELD))
 
 NON_SETTING_KEYS = INTERNAL_KEYS | frozenset(PROFILE_KEYS)
 
@@ -349,6 +355,8 @@ def normalize_color(spec: FieldSpec, value) -> str:
 
 def read_value(spec: FieldSpec, cfg: dict):
     value = cfg.get(spec.key, DEFAULT_CONFIG.get(spec.key, ""))
+    if spec.kind == QUICK_TOOLS:
+        return parse_quick_tools(value, strict=False)
     if spec.kind == SHORTCUTS:
         return validate_bindings(value or {})
     if spec.kind == FLAG:
@@ -367,6 +375,8 @@ def default_settings() -> dict:
 def coerce_value(spec: FieldSpec, value):
     if spec.key == "mod_icon_path":
         return normalize_icon_path(value)
+    if spec.kind == QUICK_TOOLS:
+        return parse_quick_tools(value)
     if spec.kind == SHORTCUTS:
         if isinstance(value, str):
             import json

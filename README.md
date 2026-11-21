@@ -91,6 +91,7 @@ python build-gui-exe.py --pyz
 - Overwrite confirmation before a copy install replaces files already in the game folder
 - Group several file types into one mod, for example `.pak` + `.utoc` + `.ucas` sharing a name; the detail panel lists every file of the group
 - Game profiles with separate game folders, source folders, presets, labels, and active default selection
+- Add **Quick tools** in a game profile by entering a button name and choosing an application file. Saved tools launch from buttons beside **Details** in the Library. The row scrolls when it runs out of room. On Windows, choose an EXE file or a Windows shortcut (LNK).
 - Presets — save and restore named mod sets
 - Labels — assign several manual labels to a mod, or automatically match labels by name fragments
 - Profile-scoped favorites — star mods independently from labels and combine the favorite, label, and search filters
@@ -120,7 +121,7 @@ python build-gui-exe.py --pyz
 - Each label can have an image icon with rounded corners. Select a label and paste one image or copied image file with **Ctrl+V** to apply it immediately. The image button also uses an available clipboard image, otherwise it opens file selection. Images of any dimensions are centered without cropping. Choose **Icon and name** or **Icon only** for mod tables, tiles and Details. Without a readable icon, the label name remains visible. Icon actions share one row when space permits and wrap in narrow windows.
 - Labels in mod tables and tiles are borderless clickable chips with subtle darkening on hover and while their filter is active. Full names remain in tooltips. A single label uses the available width; several labels share the space and **+N** opens the remaining choices. Click to replace filters; click an active label again to remove its filter. **Shift-click** adds or removes one label while preserving other filters.
 - Labels, fragments and manual assignments save automatically after a 600 ms pause, including input entered without pressing Enter. Duplicate or empty label names and invalid fragments remain editable without overwriting saved values. Automatic labels need at least one fragment. Pending valid changes save before switching profiles or closing; invalid drafts remain separate for each profile during the session. Write errors offer retry, and conflicting edits can be resolved by reloading saved labels. Existing single-label data remains supported.
-- Leaving a label or the Labels page commits valid pending fragment text into its chips without Enter. Inclusion and exclusion buttons show their current mode. Sidebar labels update individually and keep their scroll position when filters or counts change.
+- Choose **Include** or **Exclude** beside the new fragment field. Each fragment chip shows both **+** (Include) and **−** (Exclude), with its current mode highlighted. Click either icon to select its mode, or press Space on a selected chip to switch. Exclusions take priority over inclusions. Leaving a label or the Labels page commits valid pending fragment text without Enter. Sidebar labels update individually and keep their scroll position when filters or counts change.
 - Scrollbars overlay content without reserving layout space. Their thin handles expand on hover or while dragging.
 - Mod details provide separate actions to create a label or assign an existing manual label. Assignment is disabled when the active profile has no manual labels. Its dropdown includes icons and supports filtering by part of the name. Each manual label has a removal icon; automatic labels have an edit-rule icon. With several mods selected, labels show membership counts and removal affects only selected mods. Clicking a label name filters the library. Label removal and management are available through details rather than the context menu.
 - **Search** and **Label** buttons reveal one shared filter input. Press Enter, Tab to complete a suggestion, or choose a suggestion to add a filter chip. Close the input with its cross or Escape; applied chips and unfinished text are retained. Dropdowns and suggestions fit within the screen. Pagination and installation actions stay at the bottom of Library.
@@ -364,7 +365,11 @@ operate on the entire selected page; `toggle` acts only on the given indexes.
 --install-mode link|copy                      How mods reach the game folder
 --mod-mode standard|directories               Discover files/folders or whole folder mods
 --mod-icon-path <relative-path>                Optional icon inside each mod folder
+--tool <label> <absolute-path>                 Quick tool button, repeat in display order
+--clear-tools                                  Remove all quick tools (games edit)
 ```
+
+`games edit` replaces the saved tool list when you pass `--tool`. Pass one `--tool` per button and quote labels and paths that contain spaces.
 
 `games add --help` prints the same descriptions shown as tooltips in the GUI's Game profile fields.
 

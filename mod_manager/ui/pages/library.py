@@ -9,6 +9,7 @@ from ... import settings_schema
 
 from ..controllers import ACTIONS, SELECTION
 from ..controllers.mod_context_menu import ModContextMenu
+from ..controllers.quick_tools_controller import launch_quick_tool
 from ..models.label_delegate import LabelChipsDelegate
 from ..widgets.label_chips import LabelChipInteraction
 from ..models import (
@@ -22,6 +23,7 @@ from ..theme import tokens
 from ..widgets import IconToolbar, PageControl, select_box
 from ..widgets.workspace import EmptyState
 from ..widgets.detail_view import DetailPanel
+from ..widgets.quick_tools_bar import QuickToolsBar
 from ..widgets.buttons import text_button
 from ..widgets.style_utils import set_variant
 from ..widgets.item_feedback import AnimatedItemDelegate, ItemFeedback
@@ -137,6 +139,11 @@ def build_mods(window) -> None:
     layout = apply_margins(QtWidgets.QVBoxLayout(content), margins=None, spacing=tokens.SPACE_2XL)
     window.library_scroll.setWidget(content)
     window.mods_tab.body.addWidget(window.library_scroll, 1)
+    window.quick_tools = QuickToolsBar(window.mods_tab)
+    window.quick_tools.launchRequested.connect(lambda label, path: launch_quick_tool(window, label, path))
+    window.mods_tab.header.setStretch(0, tokens.LIBRARY_HEADER_TITLE_STRETCH)
+    window.mods_tab.header.addWidget(window.quick_tools, tokens.QUICK_TOOLS_HEADER_STRETCH)
+    window.registry.add(ACTIONS, window.quick_tools)
     spec = next(spec for spec in settings_schema.all_specs() if spec.key == "mod_details_visible")
     window.details_button = text_button(spec.label, spec.tooltip, window._toggle_details, icon_name="details")
     window.details_button.setCheckable(True)
