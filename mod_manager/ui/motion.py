@@ -9,7 +9,7 @@ from .theme import colors, tokens
 
 
 def motion_for(widget):
-    while widget is not None:
+    while widget is not None and isValid(widget):
         motion = getattr(widget, "motion", None)
         if motion is not None:
             return motion

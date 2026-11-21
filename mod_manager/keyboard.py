@@ -23,7 +23,7 @@ COMMANDS = (
     CommandSpec("forward", "forward_command", "alt+right", aliases=("forward",)),
     CommandSpec("zoom_in", "zoom_in_command", "ctrl+plus", "library", ("ctrl+equal",)),
     CommandSpec("zoom_out", "zoom_out_command", "ctrl+minus", "library"),
-    CommandSpec("paste", "paste_command", "ctrl+v", "library"),
+    CommandSpec("paste", "paste_command", "ctrl+v", "artwork"),
     CommandSpec("install", "install_command", "", "library"),
     CommandSpec("uninstall", "uninstall_command", "", "library"),
     CommandSpec("import_files", "import_files", "", "library"),
@@ -32,6 +32,11 @@ COMMANDS = (
     CommandSpec("view", "view_command", "", "library"),
 )
 MODIFIERS = ("ctrl", "alt", "shift", "win")
+COMMAND_PAGES = {
+    "library": frozenset(("library",)),
+    "editor": frozenset(("labels", "settings")),
+    "artwork": frozenset(("library", "labels")),
+}
 KEYS = tuple("abcdefghijklmnopqrstuvwxyz0123456789") + tuple(f"f{i}" for i in range(1, 25)) + (
     "plus", "minus", "equal", "back", "forward", "space", "enter", "tab", "escape", "backspace", "delete", "insert",
     "home", "end", "pageup", "pagedown", "left", "right", "up", "down",
@@ -75,7 +80,8 @@ def validate_bindings(value: dict) -> dict:
         if not combo or not result[command.id]["enabled"]:
             continue
         for other, other_combo in used:
-            overlap = command.context == other.context or "window" in (command.context, other.context)
+            overlap = ("window" in (command.context, other.context)
+                       or bool(COMMAND_PAGES[command.context] & COMMAND_PAGES[other.context]))
             if set(effective_combos(command, combo)) & set(effective_combos(other, other_combo)) and overlap:
                 raise ValueError(t("shortcut_conflict", combo=combo, first=t(other.label), second=t(command.label)))
         used.append((command, combo))

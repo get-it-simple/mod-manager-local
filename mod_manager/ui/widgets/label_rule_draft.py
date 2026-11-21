@@ -46,6 +46,11 @@ class FragmentDraft:
         self.terms = unique_names(text for excluded, text in rules if not excluded)
         self.exclusions = unique_names(text for excluded, text in rules if excluded)
 
+    def commit_inputs(self, terms: list[str], exclusions: list[str]) -> None:
+        self.terms, self.exclusions = list(terms), list(exclusions)
+        self.pending = self.edited = ""
+        self.editing = None
+
     def rule_excluded(self, row: int) -> bool:
         return self.edited_excluded if self.editing == row else self.rules[row][0]
 
@@ -59,5 +64,4 @@ class FragmentDraft:
     @property
     def unfinished(self) -> bool:
         return self.editing is not None or bool(self.pending)
-
 

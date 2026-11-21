@@ -7,6 +7,7 @@ from .. import icons
 from ..theme import tokens
 from .label_rule_draft import FragmentDraft
 from .label_fields import text_control_width
+from .item_feedback import paint_item_button
 
 
 class FragmentsModel(QtCore.QAbstractTableModel):
@@ -25,7 +26,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             return None
         row, column = index.row(), index.column()
         if role == QtCore.Qt.DecorationRole and column == 1:
-            return icons.standard_icon("remove" if self.draft.rule_excluded(row) else "add")
+            return icons.standard_icon("exclude" if self.draft.rule_excluded(row) else "add")
         if role == QtCore.Qt.ToolTipRole:
             text = self.draft.edited if self.draft.editing == row else self.draft.rules[row][1]
             return t("exclusion_rule" if self.draft.rule_excluded(row) else "inclusion_rule", value=text)
@@ -96,6 +97,9 @@ class FragmentDelegate(QtWidgets.QStyledItemDelegate):
         painter.drawRoundedRect(rect, tokens.RADIUS_MD, tokens.RADIUS_MD)
         painter.setPen(option.palette.text().color())
         mode_rect = self.mode_rect(option.rect)
+        mode_option = QtWidgets.QStyleOptionViewItem(option)
+        mode_option.rect = mode_rect
+        paint_item_button(painter, mode_option, index, self.fragments.draft.rule_excluded(index.row()))
         icon_rect = QtCore.QRect(mode_rect.center() - QtCore.QPoint(tokens.ICON_SIZE // 2, tokens.ICON_SIZE // 2), QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
         index.data(QtCore.Qt.DecorationRole).paint(painter, icon_rect)
         text_rect = rect.adjusted(tokens.ICON_BUTTON_SIZE + tokens.SPACE_SM, 0, -tokens.ICON_BUTTON_SIZE * 2, 0)
@@ -133,6 +137,9 @@ class FragmentDelegate(QtWidgets.QStyledItemDelegate):
             if event.key() == QtCore.Qt.Key_Delete:
                 self.fragments.delete_fragment(index.row())
                 return True
+            if event.key() == QtCore.Qt.Key_Space:
+                self.fragments.toggle_rule(index.row())
+                return True
         return super().editorEvent(event, model, option, index)
 
     def createEditor(self, parent, option, index):
@@ -161,5 +168,3 @@ class FragmentDelegate(QtWidgets.QStyledItemDelegate):
         if event.type() == QtCore.QEvent.FocusOut:
             return False
         return super().eventFilter(editor, event)
-
-

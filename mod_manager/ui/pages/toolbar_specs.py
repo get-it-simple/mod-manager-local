@@ -15,6 +15,7 @@ MODS_TOOLBAR_SECTIONS = (
 
 MODS_ACTION_SECTIONS = (
     ("manage", t("mods"), (
+        ("rename_mod", "edit", t("rename_mod_help")),
         ("delete_mods", "delete", t("trash_delete_mods")),
     )),
     ("state", t('install_action'), (
@@ -59,7 +60,7 @@ SETTINGS_TOOLBAR_SECTIONS = (
     )),
 )
 
-SELECTION_ACTIONS = ("install_selected", "uninstall_selected", "set_image", "delete_mods")
+SELECTION_ACTIONS = ("install_selected", "uninstall_selected", "set_image", "delete_mods", "rename_mod")
 
 
 def section_keys(specs) -> tuple[str, ...]:

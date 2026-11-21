@@ -14,6 +14,7 @@ from ..widgets.label_fragments import FragmentDraft
 from ..widgets.label_lists import update_label_item
 from ..widgets.workspace import WorkspacePage
 from .widget_registry import ACTIONS
+from .label_artwork_controller import LabelArtworkController
 from ..theme import tokens
 
 
@@ -23,6 +24,7 @@ class LabelsController(QtCore.QObject):
         self.window = window
         self.page = WorkspacePage(t('labels'), t('labels_autosave_help'))
         self.editor = LabelEditor()
+        self.artwork = LabelArtworkController(self)
         self.page.body.addWidget(self.editor)
         self.drafts: dict[str, LabelState] = {}
         self.saved: dict[str, LabelState] = {}
@@ -85,7 +87,7 @@ class LabelsController(QtCore.QObject):
             count = counts[name]
             item = QtGui.QStandardItem()
             item.setEditable(False)
-            update_label_item(item, name, definition.mode, count)
+            update_label_item(item, name, definition.mode, count, definition)
             self.editor.list_model.appendRow(item)
         self._loading = False
         if names:
@@ -107,11 +109,7 @@ class LabelsController(QtCore.QObject):
         self._update_status()
 
     def _counts(self) -> dict[str, int]:
-        counts = dict.fromkeys(self.state.definitions, 0)
-        for mod in self.window.current_mod_names:
-            for name in self.state.members(mod):
-                counts[name] += 1
-        return counts
+        return self.state.counts(self.window.current_mod_names)
 
     def _refresh_items(self) -> None:
         if self.selected not in self.state.definitions:
@@ -130,7 +128,7 @@ class LabelsController(QtCore.QObject):
                     item = QtGui.QStandardItem()
                     item.setEditable(False)
                     model.appendRow(item)
-                update_label_item(item, name, definition.mode, counts[name])
+                update_label_item(item, name, definition.mode, counts[name], definition)
             model.sort(0)
 
     def _select(self, index, _previous) -> None:
@@ -138,7 +136,7 @@ class LabelsController(QtCore.QObject):
             return
         selected = index.data(QtCore.Qt.UserRole)
         if not self._rebuilding and self.selected and self.selected in self.state.definitions:
-            self.save()
+            self.save(commit_fragments=True)
         if selected not in self.state.definitions:
             self._rebuild()
             return
@@ -149,6 +147,7 @@ class LabelsController(QtCore.QObject):
         editor.details.setEnabled(True)
         editor.name_edit.setText(self.name_inputs[self.profile_id].get(self.selected, self.selected))
         editor.mode_box.setCurrentIndex(1 if definition.mode == AUTOMATIC else 0)
+        editor.artwork.set_definition(definition)
         draft = self.fragments[self.profile_id].setdefault(
             self.selected, FragmentDraft(list(definition.terms), exclusions=list(definition.exclusions)))
         editor.terms_edit.bind(draft)
@@ -206,7 +205,7 @@ class LabelsController(QtCore.QObject):
         self.editor.matches_model.set_matches(names, definition.terms if definition.mode == AUTOMATIC else [])
         self.editor.matches_heading.setText(t('matching_mods_value0', value0=f'{len(names)}'))
         item = self.editor.list_model.itemFromIndex(self.editor.list_view.currentIndex())
-        update_label_item(item, self.selected, definition.mode, len(names))
+        update_label_item(item, self.selected, definition.mode, len(names), definition)
         self._update_status()
         if not self._loading:
             self.save_timer.start()
@@ -242,11 +241,35 @@ class LabelsController(QtCore.QObject):
             self.editor.status.setText(t('unsaved_changes'))
             self.save_timer.start()
 
-    def save(self, *, reconcile: bool = True) -> None:
+    def _commit_fragments(self) -> bool:
+        drafts = self.fragments[self.profile_id]
+        try:
+            values = {name: (draft.committed_terms(), draft.committed_exclusions())
+                      for name, draft in drafts.items() if name in self.state.definitions}
+            candidate = deepcopy(self.state)
+            for name, (terms, exclusions) in values.items():
+                candidate.definitions[name].terms = list(terms)
+                candidate.definitions[name].exclusions = list(exclusions)
+            candidate.validate()
+        except ValueError as error:
+            self.editor.status.setText(str(error))
+            return False
+        for name, (terms, exclusions) in values.items():
+            draft = drafts[name]
+            changed = draft.unfinished
+            draft.commit_inputs(terms, exclusions)
+            if changed and name == self.selected:
+                self.editor.terms_edit.bind(draft)
+        self.drafts[self.profile_id] = candidate
+        return True
+
+    def save(self, *, reconcile: bool = True, commit_fragments: bool = False) -> None:
         self.save_timer.stop()
         if self.profile_id not in self.drafts or self.profile_id != str(self.window.cfg.get("active_game_profile_id") or ""):
             return
-        if self.window.busy:
+        if commit_fragments and not self._commit_fragments():
+            return
+        if self.window.busy or self.window.runner.barrier_pending:
             self.save_timer.start()
             return
         if self._saving:
@@ -330,6 +353,7 @@ class LabelsController(QtCore.QObject):
             with QtCore.QSignalBlocker(self.editor.mode_box):
                 self.editor.mode_box.setCurrentIndex(1 if automatic else 0)
             self.editor.set_automatic(automatic)
+            self.editor.artwork.set_definition(merged.definitions[self.selected])
         if merged != latest:
             self.window.refresh_mods(self.window._selected_mod_names())
         self._update_status()
@@ -340,12 +364,19 @@ class LabelsController(QtCore.QObject):
         if prompts.ask_yes_no(self.window, t("labels"), t("discard_label_draft"), default_no=True):
             self.reset()
 
+    def remap_mods(self, renamed) -> None:
+        for profile, old, new in renamed:
+            for states in (self.drafts, self.saved):
+                state = states.get(profile)
+                if state is not None and old in state.assignments and old != new:
+                    state.assignments[new] = state.assignments.pop(old)
+
     def flush(self) -> bool:
-        self.save()
+        self.save(commit_fragments=True)
         return not self._save_failed
 
     def shutdown(self) -> bool:
-        self.save(reconcile=False)
+        self.save(reconcile=False, commit_fragments=True)
         saved = not self._save_failed
         self.save_timer.stop()
         return saved

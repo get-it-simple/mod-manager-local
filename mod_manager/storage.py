@@ -53,6 +53,8 @@ def load_config() -> Dict:
     for key, val in DEFAULT_CONFIG.items():
         cfg.setdefault(key, val)
     cfg = normalize_game_profiles(cfg)
+    if cfg.get("placeholder_image_col_width") == 56:
+        cfg["placeholder_image_col_width"] = DEFAULT_CONFIG["placeholder_image_col_width"]
     return cfg
 
 
@@ -428,7 +430,7 @@ def load_label_definitions() -> dict[str, LabelDefinition]:
         if any(not isinstance(values, list) or any(not isinstance(term, str) for term in values)
                for values in (terms, exclusions)):
             raise StorageError(f"Invalid name fragments for label: {name}")
-        result[name] = LabelDefinition(value.get("mode", "manual"), unique_names(terms), unique_names(exclusions))
+        result[name] = LabelDefinition.from_record(value)
     return result
 
 
@@ -445,7 +447,7 @@ def save_label_state(state: LabelState) -> None:
         record["labels"] = list(names)
         record["label"] = names[0] if names else ""
     records[LABEL_DEFINITIONS_KEY] = {
-        name: {"mode": definition.mode, "terms": list(definition.terms), "exclusions": list(definition.exclusions)}
+        name: definition.to_record()
         for name, definition in state.definitions.items()
     }
     _save_mod_record_data(records)

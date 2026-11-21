@@ -20,7 +20,7 @@ EXPECTED_TOOLBAR = (
 )
 
 EXPECTED_ACTIONS = (
-    ("manage", "Mods", ("Move selected mods to trash",)),
+    ("manage", "Mods", ("Rename this mod and update its files, active installation, labels, favorites and presets in every linked profile.", "Move selected mods to trash")),
     ("state", "Install", (
         "Install all mods on the current page", "Uninstall all mods on the current page", "Install selected mods", "Uninstall selected mods",
     )),

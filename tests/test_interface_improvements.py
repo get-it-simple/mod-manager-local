@@ -44,6 +44,14 @@ def test_shortcut_conflicts_respect_command_context_and_disabled_bindings():
     assert validate_bindings(bindings)["refresh"]["enabled"] is False
 
 
+def test_paste_shortcuts_conflict_with_both_library_and_label_editor_commands():
+    for combo in ("ctrl+f", "ctrl+s"):
+        bindings = default_bindings()
+        bindings["paste"]["combo"] = combo
+        with pytest.raises(ValueError, match="assigned to both"):
+            validate_bindings(bindings)
+
+
 def test_translation_discovery_partial_catalog_and_unknown_language(tmp_path):
     english = dict(i18n._english)
     for language, catalog in (("en", english), ("test", {"install_action": "Test install"})):

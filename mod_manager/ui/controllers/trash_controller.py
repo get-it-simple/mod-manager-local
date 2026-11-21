@@ -10,6 +10,7 @@ from ...trash import list_entries, purge_entries, restore_conflicts, restore_ent
 from ..dialogs import prompts
 from ..theme import tokens
 from ..widgets.trash_view import TrashView
+from .trash_context_menu import TrashContextMenu
 from ..widgets.workspace import WorkspacePage
 
 
@@ -18,7 +19,10 @@ class TrashController(QtCore.QObject):
         super().__init__(window)
         self.window = window
         self.page = WorkspacePage(t("trash"), t("trash_help"))
-        self.view = TrashView(self.page)
+        self.view = TrashView(self.page, window.cfg, window.runner)
+        self.context_menu = TrashContextMenu(self)
+        self.view.tile_delegate.set_palette(window.theme.palette)
+        self.view.modeChanged.connect(self._set_mode)
         self.page.body.addWidget(self.view)
         self.view.restoreRequested.connect(self.restore)
         self.view.deleteRequested.connect(self.delete_selected)
@@ -33,12 +37,17 @@ class TrashController(QtCore.QObject):
         window.runner.queueChanged.connect(self._queue_changed)
 
     def _queue_changed(self) -> None:
+        self.context_menu.close()
         self.view.pending = {identifier for command in self.window.runner.commands
                              for identifier in command.preset_names if identifier.startswith("trash:")}
         self.view.pending = {identifier.removeprefix("trash:") for identifier in self.view.pending}
         if "all" in self.view.pending:
             self.view.pending.update(entry.identifier for entry in self.view.entries)
         self.view.update_actions()
+
+    def _set_mode(self, mode):
+        self.window.cfg["trash_view_mode"] = mode
+        self.window._queue_config_save(("trash_view_mode",))
 
     def refresh(self) -> None:
         if self._closed:
@@ -148,4 +157,6 @@ class TrashController(QtCore.QObject):
         self._closed = True
         self._generation += 1
         self.timer.stop()
+        self.context_menu.shutdown()
+        self.view.shutdown()
         self.window.runner.queueChanged.disconnect(self._queue_changed)

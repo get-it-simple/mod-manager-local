@@ -35,6 +35,7 @@ def configure_header(view: QtWidgets.QTableView, columns, fixed_widths: dict | N
     view.setAlternatingRowColors(False)
     view.setMinimumWidth(0)
     view.setTextElideMode(QtCore.Qt.ElideMiddle)
+    view.setWordWrap(False)
     view.verticalHeader().setDefaultSectionSize(max(tokens.TABLE_ROW_HEIGHT, view.fontMetrics().height() + tokens.SPACE_2XL))
     header = view.horizontalHeader()
     header.setDefaultAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)

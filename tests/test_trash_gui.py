@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 from tests.cli_support import CliEnvironment
 from tests.gui_background import inline_background
@@ -18,6 +18,125 @@ from mod_manager.trash import list_entries
 
 
 class TrashGuiTests(CliEnvironment, unittest.TestCase):
+    def _trash_selected(self, names=("sample.pak",)):
+        self.window.refresh_all()
+        self.window._select_mod_names(list(names))
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True):
+            self.window._delete_selected_mods()
+        self.window._navigate("trash")
+        self.window.resize(1200, 750)
+        self.window.show()
+        self.app.processEvents()
+        return self.window.trash.view
+
+    def test_table_fills_viewport_and_name_receives_extra_width(self):
+        view = self._trash_selected()
+        header = view.table.horizontalHeader()
+        self.assertEqual(header.sectionResizeMode(0), QtWidgets.QHeaderView.Stretch)
+        self.assertFalse(header.stretchLastSection())
+        before = [view.table.columnWidth(column) for column in range(view.model.columnCount())]
+        self.window.resize(1450, 750)
+        self.app.processEvents()
+        after = [view.table.columnWidth(column) for column in range(view.model.columnCount())]
+        self.assertGreater(after[0], before[0])
+        self.assertEqual(after[1:], before[1:])
+        self.assertLessEqual(abs(sum(after) - view.table.viewport().width()), 1)
+
+    def test_context_menu_restores_in_both_views_and_does_not_create_missing_folders(self):
+        for mode in ("list", "tiles"):
+            with self.subTest(mode=mode):
+                view = self._trash_selected()
+                view.set_mode(mode)
+                self.app.processEvents()
+                target = view.tiles if mode == "tiles" else view.table
+                context = self.window.trash.context_menu
+                context.open(target, target.visualRect(view.model.index(0, 0)).center())
+                actions = {action.data(): action for action in context.menu.actions()}
+                self.assertEqual(set(actions), {"restore", "delete", "folder"})
+                self.assertTrue(actions["restore"].isEnabled())
+                folder = view.selected_entries()[0].path / "payload"
+                with patch("mod_manager.ui.controllers.trash_context_menu.open_folder", return_value=(True, "Opened")) as opened:
+                    actions["folder"].trigger()
+                opened.assert_called_once_with(str(folder), create=False)
+                context.open(target, target.visualRect(view.model.index(0, 0)).center())
+                next(action for action in context.menu.actions() if action.data() == "restore").trigger()
+                self.assertEqual((self.source / "sample.pak").read_bytes(), b"sample.pak")
+                self.assertFalse((self.game / "sample.pak").exists())
+
+    def test_context_menu_preserves_multiple_selection_and_permanent_delete_confirmation(self):
+        self.add_mods("other.pak")
+        view = self._trash_selected(("sample.pak", "other.pak"))
+        view.table.selectAll()
+        identifiers = {entry.identifier for entry in view.selected_entries()}
+        context = self.window.trash.context_menu
+        context.open(view.table, view.table.visualRect(view.model.index(0, 0)).center())
+        self.assertEqual({entry.identifier for entry in view.selected_entries()}, identifiers)
+        actions = {action.data(): action for action in context.menu.actions()}
+        self.assertNotIn("folder", actions)
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=False) as asked:
+            actions["delete"].trigger()
+        asked.assert_called_once()
+        self.assertEqual(len(list_entries(self.cfg)), 2)
+        context.open(view.table, view.table.visualRect(view.model.index(0, 0)).center())
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True):
+            next(action for action in context.menu.actions() if action.data() == "delete").trigger()
+        self.assertEqual(list_entries(self.cfg), [])
+
+    def test_context_menu_honors_pending_entries_and_refresh_invalidates_actions(self):
+        view = self._trash_selected()
+        context = self.window.trash.context_menu
+        entry = view.entries[0]
+        view.pending = {entry.identifier}
+        context.open(view.table, view.table.visualRect(view.model.index(0, 0)).center())
+        actions = {action.data(): action for action in context.menu.actions()}
+        self.assertFalse(actions["restore"].isEnabled())
+        self.assertFalse(actions["delete"].isEnabled())
+        view.pending = set()
+        context.open(view.table, view.table.visualRect(view.model.index(0, 0)).center())
+        action = next(action for action in context.menu.actions() if action.data() == "restore")
+        context.close()
+        with patch.object(self.window.trash, "restore") as restore:
+            action.trigger()
+        restore.assert_not_called()
+        self.assertFalse((self.source / "sample.pak").exists())
+
+
+    def test_rename_button_updates_real_presets_and_keeps_the_new_mod_selected(self):
+        with storage_policy(config=self.cfg):
+            storage.save_presets({"Core": ["sample.pak"], "Other": ["sample.pak", "missing.pak"]})
+        self.window.refresh_all()
+        self.select_mod()
+        with patch("mod_manager.ui.dialogs.prompts.choose_mod_name", return_value=("renamed.pak", True)):
+            self.window.mods_actions.button("rename_mod").click()
+        self.assertEqual((self.source / "renamed.pak").read_bytes(), b"sample.pak")
+        self.assertFalse((self.source / "sample.pak").exists())
+        self.assertEqual(self.window._selected_mod_names(), ["renamed.pak"])
+        with storage_policy(config=self.cfg):
+            self.assertEqual(storage.load_presets(), {"Core": ["renamed.pak"], "Other": ["renamed.pak", "missing.pak"]})
+        self.assertEqual(self.window.library.snapshot.presets["Core"], ["renamed.pak"])
+
+    def test_trash_cards_share_selection_and_show_remaining_days_over_the_preview(self):
+        self.select_mod()
+        with patch("mod_manager.ui.dialogs.prompts.ask_yes_no", return_value=True):
+            self.window._delete_selected_mods()
+        self.window._navigate("trash")
+        view = self.window.trash.view
+        view.table.selectRow(0)
+        selected = [entry.identifier for entry in view.selected_entries()]
+        view.set_mode("tiles")
+        self.assertIs(view.stack.currentWidget(), view.tiles)
+        self.assertEqual([entry.identifier for entry in view.selected_entries()], selected)
+        option = QtWidgets.QStyleOptionViewItem()
+        option.initFrom(view.tiles)
+        option.rect = QtCore.QRect(QtCore.QPoint(), view.tile_delegate.sizeHint(option, view.model.index(0, 0)))
+        badge, text, _action = view.tile_delegate._label_badges(option, view.model.index(0, 0))[0]
+        self.assertIn("days left", text)
+        image = view.tile_delegate._image_rect(view.tile_delegate._content_rect(option))
+        self.assertTrue(image.intersects(badge))
+        self.assertTrue(view.toolbar.button("restore").isEnabled())
+        view.toolbar.button("restore").click()
+        self.assertEqual((self.source / "sample.pak").read_bytes(), b"sample.pak")
+        self.assertEqual(view.model.rowCount(), 0)
     @classmethod
     def setUpClass(cls):
         cls.app = qt_app()

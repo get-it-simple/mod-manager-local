@@ -7,7 +7,6 @@ from typing import Callable
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...folder_actions import select_in_explorer
-from ..dialogs import prompts
 
 
 class ModContextMenu(QtCore.QObject):
@@ -117,9 +116,11 @@ class ModContextMenu(QtCore.QObject):
             menu, names, "favorite", t('remove_from_favorites') if favorite else t('add_to_favorites'),
             "favorite_filled" if favorite else "favorite", window._toggle_favorite_selected,
         )
-        self._action(menu, names, "add_label", t('assign_label'), "label_add", self._assign_label)
+        assignment = self._action(menu, names, "add_label", t('assign_label'), "label_add", self._assign_label)
+        assignment.setEnabled(bool(window._manual_label_names()))
         self._action(menu, names, "set_image", t('set_preview_image'), "image", window._set_mod_image)
         if len(mods) == 1:
+            self._action(menu, names, "rename_mod", t("rename_mod"), "edit", window._rename_selected_mod)
             menu.addSeparator()
             mod = mods[0]
             self._action(menu, names, "source", t('show_source_in_explorer'), "folder", lambda: select_in_explorer(mod.src))
@@ -129,6 +130,4 @@ class ModContextMenu(QtCore.QObject):
         self._action(menu, names, "delete", t("trash_delete_mods"), "delete", window._delete_selected_mods)
 
     def _assign_label(self) -> None:
-        label, accepted = prompts.choose_text(self.window, t('text_bb1f28b586be'), t('label'))
-        if accepted and label.strip():
-            self.window._change_label_selected(label.strip())
+        self.window._assign_existing_label()

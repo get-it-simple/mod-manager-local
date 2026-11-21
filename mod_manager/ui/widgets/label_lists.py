@@ -1,34 +1,60 @@
 from __future__ import annotations
 
 from ...i18n import t
+from copy import deepcopy
 
 from PySide6 import QtCore, QtWidgets
 
 from ...labels import AUTOMATIC, matching_fragment_ids
-from .. import icons
+from ..label_artwork import label_icon
 from ..theme import tokens
+from .item_feedback import ButtonItemFeedback, paint_item_button
 
 
 LABEL_MODE_ROLE = QtCore.Qt.UserRole + 1
 LABEL_COUNT_ROLE = QtCore.Qt.UserRole + 2
+LABEL_DEFINITION_ROLE = QtCore.Qt.UserRole + 3
 
 
-def update_label_item(item, name: str, mode: str, count: int) -> None:
+def update_label_item(item, name: str, mode: str, count: int, definition=None) -> None:
     item.setText(f"{name} · {mode.capitalize()} · {count}")
     item.setToolTip(t('value0_value1_matching_mods_value2', value0=f'{name}', value1=f'{mode.capitalize()}', value2=f'{count}'))
     item.setData(name, QtCore.Qt.UserRole)
     item.setData(mode, LABEL_MODE_ROLE)
     item.setData(count, LABEL_COUNT_ROLE)
+    item.setData(deepcopy(definition), LABEL_DEFINITION_ROLE)
 
 
 class LabelListDelegate(QtWidgets.QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        option = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(option, index)
+        painter.save()
+        selected = bool(option.state & QtWidgets.QStyle.State_Selected)
+        paint_item_button(painter, option, index, selected)
+        content = option.rect.adjusted(tokens.SPACE_LG, 0, -tokens.SPACE_LG, 0)
+        icon_rect = QtCore.QRect(content.left(), content.center().y() - tokens.ICON_SIZE // 2, tokens.ICON_SIZE, tokens.ICON_SIZE)
+        if self.parent().compact:
+            icon_rect.moveCenter(content.center())
+        option.icon.paint(painter, icon_rect)
+        content.adjust(tokens.ICON_SIZE + tokens.SPACE_LG, 0, 0, 0)
+        painter.setFont(option.font)
+        painter.setPen(option.palette.text().color())
+        painter.drawText(content, QtCore.Qt.AlignVCenter, option.fontMetrics.elidedText(option.text, QtCore.Qt.ElideRight, content.width()))
+        if option.state & QtWidgets.QStyle.State_HasFocus:
+            painter.setPen(option.palette.highlight().color())
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawRoundedRect(option.rect.adjusted(tokens.SPACE_XS, tokens.SPACE_XS, -tokens.SPACE_XS, -tokens.SPACE_XS),
+                                    tokens.RADIUS_MD, tokens.RADIUS_MD)
+        painter.restore()
+
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
-        option.icon = icons.standard_icon("settings" if index.data(LABEL_MODE_ROLE) == AUTOMATIC else "edit")
+        option.icon = label_icon(index.data(LABEL_DEFINITION_ROLE), "settings" if index.data(LABEL_MODE_ROLE) == AUTOMATIC else "edit")
         option.features |= QtWidgets.QStyleOptionViewItem.HasDecoration
         option.decorationSize = QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE)
         if self.parent().compact:
-            option.text = str(index.data(LABEL_COUNT_ROLE))
+            option.text = ""
 
 
 class LabelListView(QtWidgets.QListView):
@@ -45,6 +71,7 @@ class LabelListView(QtWidgets.QListView):
 
     def setModel(self, model):
         super().setModel(model)
+        self.feedback = ButtonItemFeedback(self)
         model.dataChanged.connect(self._update_minimum)
         model.modelReset.connect(self._update_minimum)
         model.rowsInserted.connect(self._update_minimum)
@@ -52,10 +79,7 @@ class LabelListView(QtWidgets.QListView):
         self._update_minimum()
 
     def _update_minimum(self, *_args) -> None:
-        model = self.model()
-        counts = [str(model.index(row, 0).data(LABEL_COUNT_ROLE) or 0) for row in range(model.rowCount())] if model else []
-        width = max((self.fontMetrics().horizontalAdvance(count) for count in counts), default=self.fontMetrics().horizontalAdvance("0"))
-        self.setMinimumWidth(width + tokens.ICON_SIZE + tokens.SPACE_LG * 3 + self.frameWidth() * 2 + tokens.SCROLLBAR_WIDTH)
+        self.setMinimumWidth(tokens.ICON_SIZE + tokens.SPACE_LG * 2 + self.frameWidth() * 2)
         self.viewport().update()
 
     def resizeEvent(self, event):

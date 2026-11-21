@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -17,6 +19,81 @@ if qt_available():
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class LabelsGuiTests(WindowTestCase):
+    def test_icon_editor_import_display_rename_and_removal_are_saved(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "wide.png"
+            image = QtGui.QImage(640, 80, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.blue)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(path)):
+                self.editor.artwork.choose.click()
+            reference = self.controller.state.definitions["Combat"].icon
+            self.assertTrue(icon_path(reference).is_file())
+            self.editor.artwork.display.setCurrentIndex(1)
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Combat"].icon, reference)
+            self.assertTrue(self.persisted.definitions["Combat"].icon_only)
+            self.editor.name_edit.setText("Renamed")
+            self.editor.name_edit.textEdited.emit("Renamed")
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Renamed"].icon, reference)
+            self.assertEqual(self.window.mods_model.label_definitions["Renamed"].icon, reference)
+            bad = Path(directory) / "bad.png"
+            bad.write_bytes(b"not an image")
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(bad)):
+                self.editor.artwork.choose.click()
+            self.assertEqual(self.controller.state.definitions["Renamed"].icon, reference)
+            self.assertIn("Cannot read", self.editor.status.text())
+            self.editor.artwork.remove.click()
+            self.controller.save()
+            self.assertEqual(self.persisted.definitions["Renamed"].icon, "")
+            self.assertFalse(self.persisted.definitions["Renamed"].icon_only)
+            self.assertTrue(icon_path(reference).is_file())
+
+    def test_icon_draft_survives_navigation_and_failed_metadata_save(self):
+        from mod_manager import storage
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "icon.png"
+            image = QtGui.QImage(20, 40, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.dialogs.prompts.choose_open_file", return_value=str(path)):
+                self.editor.artwork.choose.click()
+            reference = self.controller.state.definitions["Combat"].icon
+            with patch("mod_manager.ui.controllers.labels_controller.save_label_state", side_effect=PermissionError("locked")):
+                self.controller.save()
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+            self.assertEqual(self.persisted.definitions["Combat"].icon, "")
+            self.assertFalse(self.editor.retry.isHidden())
+            self.controller.save()
+            self.open_label("Looks")
+            self.open_label("Combat")
+            self.assertEqual(self.persisted.definitions["Combat"].icon, reference)
+            self.assertFalse(self.editor.artwork.preview.pixmap().isNull())
+
+    def test_autosave_waits_for_profile_and_rename_barriers(self):
+        from tests.gui_background import DeferredRunner
+
+        self.open_label("Looks")
+        self.editor.terms_edit.new_edit.setText("queued")
+        background = self.window.runner.background
+        deferred = DeferredRunner()
+        self.window.runner.background = deferred.background
+        self.window.runner.run("Synthetic barrier", lambda: None, barrier=True, blocking=False)
+        self.controller.save()
+        self.assertEqual(len(self.window.runner.commands), 1)
+        self.assertNotIn("queued", self.persisted.definitions["Looks"].terms)
+        deferred.complete()
+        self.window.runner.background = background
+        self.controller.flush()
+        self.assertIn("queued", self.persisted.definitions["Looks"].terms)
+
     def setUp(self):
         super().setUp()
         self.persisted = LabelState(
@@ -35,6 +112,141 @@ class LabelsGuiTests(WindowTestCase):
         self.window.refresh_mods()
         self.controller = self.window.labels_controller
         self.editor = self.controller.editor
+        clipboard = patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=[])
+        clipboard.start()
+        self.addCleanup(clipboard.stop)
+        image_clipboard = patch("mod_manager.ui.image_source.read_clipboard_image", return_value=None)
+        image_clipboard.start()
+        self.addCleanup(image_clipboard.stop)
+
+    def test_pasted_raw_icon_is_saved_and_temporary_input_is_removed(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "clipboard.png"
+            image = QtGui.QImage(64, 32, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.blue)
+            self.assertTrue(image.save(str(path)))
+            with patch("mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                self.window._handle_paste()
+            self.assertFalse(path.exists())
+            self.controller.save_timer.timeout.emit()
+            reference = self.persisted.definitions["Combat"].icon
+            self.assertTrue(reference)
+            self.assertEqual(QtGui.QImage(str(icon_path(reference))), image)
+            self.open_label("Looks")
+            self.open_label("Combat")
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+
+    def test_icon_button_applies_clipboard_file_without_chooser_and_preserves_source(self):
+        from mod_manager import storage
+        from mod_manager.label_icons import icon_path
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "source.png"
+            image = QtGui.QImage(32, 64, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            original = path.read_bytes()
+            with patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=[path]), patch(
+                    "mod_manager.ui.dialogs.prompts.choose_open_file") as choose:
+                self.editor.artwork.choose.click()
+            choose.assert_not_called()
+            self.assertEqual(path.read_bytes(), original)
+            reference = self.controller.state.definitions["Combat"].icon
+            self.assertEqual(QtGui.QImage(str(icon_path(reference))), image)
+
+    def test_invalid_and_multiple_pasted_images_preserve_prior_icon_and_release_sources(self):
+        from mod_manager import storage
+
+        self.open_label("Combat")
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            path = Path(directory) / "source.png"
+            image = QtGui.QImage(32, 32, QtGui.QImage.Format_ARGB32)
+            image.fill(QtCore.Qt.red)
+            self.assertTrue(image.save(str(path)))
+            self.controller.artwork.apply(str(path))
+            reference = self.controller.state.definitions["Combat"].icon
+            class Paths(list):
+                closed = False
+                def close(self):
+                    self.closed = True
+            paths = Paths([path, path])
+            with patch("mod_manager.ui.image_source.read_clipboard_paths", return_value=paths):
+                self.window._handle_paste()
+            self.assertTrue(paths.closed)
+            self.assertIn("one image", self.editor.status.text())
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+            path.write_bytes(b"invalid")
+            with patch("mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                self.window._handle_paste()
+            self.assertFalse(path.exists())
+            self.assertIn("Cannot read", self.editor.status.text())
+            self.assertEqual(self.controller.state.definitions["Combat"].icon, reference)
+
+    def test_paste_shortcut_handles_image_in_text_editor_and_leaves_text_paste_alone(self):
+        from mod_manager import storage
+        from mod_manager.ui.controllers.keyboard_controller import key_sequence
+
+        self.open_label("Combat")
+        self.show_editor()
+        self.editor.name_edit.setFocus()
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "PROFILE_DATA_DIR", Path(directory) / "profiles"):
+            for combo in ("ctrl+v", "ctrl+shift+v"):
+                path = Path(directory) / "clipboard.png"
+                image = QtGui.QImage(32, 32, QtGui.QImage.Format_ARGB32)
+                image.fill(QtCore.Qt.red)
+                self.assertTrue(image.save(str(path)))
+                self.window.keyboard.bindings["paste"] = {"combo": combo, "enabled": True}
+                with patch("mod_manager.ui.controllers.keyboard_controller.clipboard_has_image", return_value=True), patch(
+                        "mod_manager.ui.image_source.read_clipboard_image", return_value=path):
+                    QtTest.QTest.keySequence(self.editor.name_edit, key_sequence(combo))
+                self.assertFalse(path.exists())
+                self.assertTrue(self.controller.state.definitions["Combat"].icon)
+                self.assertEqual(self.editor.name_edit.text(), "Combat")
+            event = QtGui.QKeyEvent(QtCore.QEvent.ShortcutOverride, QtCore.Qt.Key_V, QtCore.Qt.ControlModifier)
+            self.window.keyboard.bindings["paste"] = {"combo": "ctrl+v", "enabled": True}
+            with patch("mod_manager.ui.controllers.keyboard_controller.clipboard_has_image", return_value=False), patch(
+                    "mod_manager.ui.controllers.keyboard_controller.clipboard_has_files", return_value=False), patch.object(
+                    self.controller.artwork, "paste") as paste:
+                self.assertFalse(self.window.keyboard.eventFilter(self.editor.name_edit, event))
+            paste.assert_not_called()
+
+    def test_icon_editor_wraps_groups_only_when_available_width_requires_it(self):
+        self.open_label("Combat")
+        self.show_editor()
+        artwork = self.editor.artwork
+        layout = artwork.layout()
+        natural = layout.sizeHint().width()
+        layout.setGeometry(QtCore.QRect(0, 0, natural, 100))
+        self.assertEqual(layout.itemAt(0).geometry().top(), layout.itemAt(1).geometry().top())
+        narrow = max(layout.itemAt(0).sizeHint().width(), layout.itemAt(1).sizeHint().width())
+        layout.setGeometry(QtCore.QRect(0, 0, narrow, 200))
+        self.assertGreater(layout.itemAt(1).geometry().top(), layout.itemAt(0).geometry().bottom())
+
+    def test_paste_without_a_selected_label_or_during_a_barrier_does_not_read_the_clipboard(self):
+        from tests.gui_background import DeferredRunner
+
+        self.open_label("Combat")
+        with patch("mod_manager.ui.controllers.label_artwork_controller.clipboard_source") as read:
+            selected = self.controller.selected
+            self.controller.selected = ""
+            self.window._handle_paste()
+            self.controller.selected = selected
+            background = self.window.runner.background
+            deferred = DeferredRunner()
+            self.window.runner.background = deferred.background
+            self.window.runner.run("Synthetic barrier", lambda: None, barrier=True, blocking=False)
+            try:
+                self.window._handle_paste()
+            finally:
+                deferred.complete()
+                self.window.runner.background = background
+        read.assert_not_called()
+        self.assertEqual(self.controller.state.definitions["Combat"].icon, "")
 
     def tearDown(self):
         super().tearDown()
@@ -100,8 +312,9 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(self.editor.matches_model.names, ["combat.pak", "ui.pak"])
         self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["ui", "skin", "pak"])
-        self.assertEqual(fragments.new_edit.text(), " pak ")
-        self.assertEqual(fragments.model.rowCount(), 2)
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual(fragments.model.rowCount(), 3)
+        self.assertEqual(fragments.model.index(2, 1).data(), "pak")
 
     def test_fragment_row_edit_save_and_enter_return_to_new_input(self):
         self.open_label("Looks")
@@ -135,8 +348,9 @@ class LabelsGuiTests(WindowTestCase):
         fragments.new_edit.setText("pak")
         self.controller.flush()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
-        self.assertEqual(fragments.draft.editing, 0)
-        self.assertEqual(fragments.new_edit.text(), "pak")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertEqual([fragments.model.index(row, 1).data() for row in range(2)], ["combat", "pak"])
 
     def test_fragment_actions_support_keyboard_activation_and_escape_cancels_edit(self):
         self.open_label("Looks")
@@ -248,20 +462,22 @@ class LabelsGuiTests(WindowTestCase):
         self.assertEqual(fragments.model.index(0, 1).data(), "ui")
         self.window.cfg["active_game_profile_id"] = first
         self.open_label("Looks")
-        self.assertEqual(fragments.new_edit.text(), "  pak  ")
-        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "combat")
+        self.assertEqual(fragments.new_edit.text(), "")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertEqual([fragments.model.index(row, 1).data() for row in range(2)], ["combat", "pak"])
         self.controller._rebuild("Combat")
         self.controller.save()
         self.assertEqual(self.persisted.definitions["Looks"].terms, ["combat", "pak"])
 
-    def test_unchanged_open_fragment_editor_is_retained_on_reactivation(self):
+    def test_unchanged_open_fragment_is_committed_on_navigation(self):
         self.open_label("Looks")
         fragments = self.editor.terms_edit
         fragments.start_edit(0)
         self.window._navigate("library")
         self.open_label("Looks")
-        self.assertEqual(fragments.draft.editing, 0)
-        self.assertEqual(fragments.view.indexWidget(fragments.model.index(0, 1)).text(), "ui")
+        self.assertIsNone(fragments.draft.editing)
+        self.assertIsNone(fragments.view.indexWidget(fragments.model.index(0, 1)))
+        self.assertEqual(fragments.model.index(0, 1).data(), "ui")
 
     def test_delete_renumbers_all_match_ids_and_empty_automatic_cannot_save(self):
         self.open_label("Looks")
@@ -528,7 +744,7 @@ class LabelsGuiTests(WindowTestCase):
         bottom = self.editor.matches_view.mapTo(frame, self.editor.matches_view.rect().bottomLeft()).y()
         self.assertLessEqual(frame.height() - bottom, tokens.DETAIL_MARGIN + 1)
 
-    def test_compact_label_list_shows_mode_icon_and_count_and_restores_names(self):
+    def test_compact_label_list_shows_only_icon_and_restores_names(self):
         self.open_label("Looks")
         self.show_editor()
         view = self.editor.list_view
@@ -542,7 +758,7 @@ class LabelsGuiTests(WindowTestCase):
             option = QtWidgets.QStyleOptionViewItem()
             option.initFrom(view)
             view.itemDelegate().initStyleOption(option, index)
-            self.assertEqual(option.text, "1")
+            self.assertEqual(option.text, "")
             self.assertFalse(option.icon.isNull())
             self.assertIn(name, index.data(QtCore.Qt.ToolTipRole))
             self.assertIn("Matching mods: 1", index.data(QtCore.Qt.ToolTipRole))
@@ -557,7 +773,7 @@ class LabelsGuiTests(WindowTestCase):
         self.assertIn("Looks", option.text)
         self.assertIn("Automatic", option.text)
 
-    def test_compact_minimum_fits_large_font_and_multi_digit_counts(self):
+    def test_compact_minimum_fits_icon_and_moves_multi_digit_counts_to_tooltip(self):
         self.mods.extend(mod_item(f"ui_{number}.pak") for number in range(120))
         self.window.refresh_mods()
         self.open_label("Looks")
@@ -571,7 +787,9 @@ class LabelsGuiTests(WindowTestCase):
                 self.editor.splitter.setSizes([view.minimumWidth(), self.editor.splitter.width()])
                 self.qt_app.processEvents()
                 self.assertTrue(view.compact)
-                self.assertGreaterEqual(view.viewport().width(), view.fontMetrics().horizontalAdvance("121") + tokens.ICON_SIZE)
+                self.assertGreaterEqual(view.viewport().width(), tokens.ICON_SIZE)
+                self.assertLess(view.viewport().width(), view.fontMetrics().horizontalAdvance("121") + tokens.ICON_SIZE)
+                self.assertIn("Matching mods: 121", view.currentIndex().data(QtCore.Qt.ToolTipRole))
                 self.assertGreater(view.width(), 0)
                 self.assertEqual(view.currentIndex().data(QtCore.Qt.UserRole), "Looks")
 
@@ -727,10 +945,10 @@ class LabelsGuiTests(WindowTestCase):
             self.window._add_label_selected()
         error.assert_called_once()
         change.assert_not_called()
-        with patch("mod_manager.ui.dialogs.prompts.choose_item", return_value=("Combat", True)) as choose, patch.object(
+        with patch("mod_manager.ui.dialogs.prompts.choose_label", return_value=("Combat", True)) as choose, patch.object(
             self.window, "_change_label_selected") as change:
             self.window._assign_existing_label()
-        self.assertEqual(choose.call_args.args[3], ["Combat"])
+        self.assertEqual(choose.call_args.args[1], ["Combat"])
         change.assert_called_once_with("Combat")
 
     def test_label_menu_dismissal_and_refresh_release_and_invalidate_actions(self):

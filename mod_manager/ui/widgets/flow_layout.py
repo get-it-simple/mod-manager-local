@@ -5,6 +5,26 @@ from PySide6 import QtCore, QtWidgets
 from ..theme import tokens
 
 
+class WrappingWidget(QtWidgets.QWidget):
+    def _update_height(self):
+        if self.layout() is not None:
+            self.setMinimumHeight(max(0, self.heightForWidth(self.width())))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_height()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_height()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QtCore.QEvent.FontChange, QtCore.QEvent.StyleChange) and self.layout() is not None:
+            self.layout().invalidate()
+            self._update_height()
+
+
 class FlowLayout(QtWidgets.QLayout):
     def __init__(self, parent=None, constrain_items: bool = False):
         super().__init__(parent)

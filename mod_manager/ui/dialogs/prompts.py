@@ -79,8 +79,29 @@ def choose_item(parent, title: str, label: str, items: list[str], current: int =
     return QtWidgets.QInputDialog.getItem(parent, title, label, items, current, False)
 
 
+def choose_label(parent, names, definitions=None) -> tuple[str, bool]:
+    from .label_choice import LabelChoiceDialog
+
+    dialog = LabelChoiceDialog(parent, names, definitions)
+    try:
+        accepted = dialog.exec() == QtWidgets.QDialog.Accepted
+        return dialog.selected_label, accepted
+    finally:
+        dialog.deleteLater()
+
+
 def choose_text(parent, title: str, label: str, text: str = "") -> tuple[str, bool]:
     return QtWidgets.QInputDialog.getText(parent, title, label, text=text)
+
+
+def choose_mod_name(parent, mod) -> tuple[str, bool]:
+    from .rename_mod import RenameModDialog
+    dialog = RenameModDialog(parent, mod)
+    try:
+        accepted = dialog.exec() == QtWidgets.QDialog.Accepted
+        return dialog.new_name, accepted
+    finally:
+        dialog.deleteLater()
 
 
 def choose_import_conflict(parent, name: str) -> str:

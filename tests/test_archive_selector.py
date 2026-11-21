@@ -74,7 +74,8 @@ class ArchiveSelectorTests(unittest.TestCase):
 
     def test_many_archives_keep_minimum_width_and_last_selection_visible(self):
         self.show_names([f"archive-{row}.zip" for row in range(2000)])
-        self.assertTrue(self.selector.horizontalScrollBar().isVisible())
+        self.assertFalse(self.selector.horizontalScrollBar().isVisible())
+        self.assertTrue(self.selector._overlay_scrollbars.horizontal.isVisible())
         self.selector.setCurrentIndex(self.selector.model().index(1999))
         self.app.processEvents()
         rect = self.selector.visualRect(self.selector.currentIndex())
@@ -225,7 +226,8 @@ class ArchiveSelectorTests(unittest.TestCase):
                         self.assertEqual(self.selector.viewport().height(), rect.height())
                         self.assertGreaterEqual(rect.height(), self.selector.fontMetrics().height())
                         self.assertTrue(self.selector.viewport().rect().contains(rect))
-                        self.assertEqual(self.selector.horizontalScrollBar().isVisible(), count > 2)
+                        self.assertFalse(self.selector.horizontalScrollBar().isVisible())
+                        self.assertEqual(self.selector._overlay_scrollbars.horizontal.isVisible(), count > 2)
 
     def test_keyboard_focus_changes_outline_without_moving_text(self):
         theme = self.apply_theme("light")

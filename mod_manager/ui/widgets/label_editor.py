@@ -13,6 +13,7 @@ from .toolbar import IconToolbar
 from .completer import FullTextDelegate
 from .label_fragments import FragmentEditor
 from .label_fields import LabelFields
+from .label_icon_editor import LabelIconEditor
 from .label_lists import LabelListView, LabelMatchesModel, matching_mods_view
 from .buttons import icon_button
 
@@ -75,6 +76,8 @@ class LabelEditor(QtWidgets.QWidget):
         self.details.add_heading(t('label_settings'))
         self.fields = LabelFields(self.name_edit, self.mode_box)
         self.details.add_widget(self.fields)
+        self.artwork = LabelIconEditor()
+        self.details.add_widget(self.artwork)
         self.details.add_widget(self.terms_edit)
         self.details.layout.setAlignment(QtCore.Qt.Alignment())
         self.search_edit = QtWidgets.QLineEdit()

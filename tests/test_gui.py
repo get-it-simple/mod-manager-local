@@ -18,7 +18,7 @@ from tests.window_fixture import base_config
 from mod_manager.ui.theme import tokens
 
 try:
-    from PySide6 import QtCore, QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
     from mod_manager.ui.dialogs.game_profile import GameProfileDialog
 except ModuleNotFoundError:
@@ -378,8 +378,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.tiles_view.model(), self.window.mods_model)
         self.assertTrue(self.window.view_tiles_button.isChecked())
         self.assertFalse(self.window.view_list_button.isChecked())
-        self.assertEqual(self.window.tile_delegate._label_badge_text("123456789"), "12345678")
-        self.assertEqual(self.window.tile_delegate._label_badge_text("-"), "")
+        self.assertEqual(self.window.tile_delegate._labels(self.window.mods_model.index(0, 0)), ("combat",))
         metrics = QtGui.QFontMetrics(self.window.tiles_view.font())
         long_name = "very-long-mod-name-that-needs-one-line.pak"
         elided = self.window.tile_delegate._elided_mod_name(metrics, long_name, 48)
@@ -400,7 +399,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.filters.labels, ())
         refresh_mods.assert_called_once_with()
 
-    def test_tile_tooltips_show_full_text_only_when_badges_are_truncated(self):
+    def test_tile_tooltips_show_full_labels_and_actions_and_only_truncated_mod_names(self):
         long_mod = self.mod_item("very-long-mod-name-that-needs-one-line.pak")
         self.window.mods_model.set_data([long_mod], {long_mod.name: "longlabelname"}, {})
         option = QtWidgets.QStyleOptionViewItem()
@@ -410,51 +409,42 @@ class GuiTests(unittest.TestCase):
         metrics = QtGui.QFontMetrics(option.font)
         rect = self.window.tile_delegate._content_rect(option)
         image_rect = self.window.tile_delegate._image_rect(rect)
-        label_rect = self.window.tile_delegate._label_badge_rect(rect, metrics, "longlabe")
+        label_rect = self.window.tile_delegate._label_badges(option, index)[0][0]
         name_rect = self.window.tile_delegate._name_badge_rect(rect, image_rect)
 
-        self.assertEqual(self.window.tile_delegate._tooltip_for_pos(option, index, label_rect.center()), "longlabelname")
+        self.assertIn("longlabelname", self.window.tile_delegate._tooltip_for_pos(option, index, label_rect.center()))
+        self.assertIn("Shift-click", self.window.tile_delegate._tooltip_for_pos(option, index, label_rect.center()))
         self.assertEqual(self.window.tile_delegate._tooltip_for_pos(option, index, name_rect.center()), long_mod.name)
 
         self.window.mods_model.set_data([self.mod_item("short.pak")], {"short.pak": "short"}, {})
         short_index = self.window.mods_model.index(0, 0)
-        self.assertEqual(self.window.tile_delegate._tooltip_for_pos(option, short_index, label_rect.center()), "")
+        label_rect = self.window.tile_delegate._label_badges(option, short_index)[0][0]
+        self.assertIn("short", self.window.tile_delegate._tooltip_for_pos(option, short_index, label_rect.center()))
         self.assertEqual(self.window.tile_delegate._tooltip_for_pos(option, short_index, name_rect.center()), "")
 
-    def test_tile_label_badge_click_toggles_label_filter(self):
+    def test_tile_label_badge_click_filters_and_shift_click_toggles_label_filter(self):
         self.window._set_view_mode("tiles")
-        option = QtWidgets.QStyleOptionViewItem()
-        option.font = self.window.tiles_view.font()
-        option.rect = QtCore.QRect(0, 0, 168, 198)
-        index = self.window.mods_model.index(0, 0)
-        rect = self.window.tile_delegate._content_rect(option)
-        metrics = QtGui.QFontMetrics(option.font)
-        label_pos = self.window.tile_delegate._label_badge_rect(rect, metrics, "combat").center()
-        event = QtGui.QMouseEvent(
-            QtCore.QEvent.MouseButtonPress,
-            QtCore.QPointF(label_pos),
-            QtCore.Qt.LeftButton,
-            QtCore.Qt.LeftButton,
-            QtCore.Qt.NoModifier,
-        )
+        self.window._set_details_visible(False)
+        self.window.show()
+        self.qt_app.processEvents()
+        view = self.window.tiles_view
 
-        with patch.object(self.window.tiles_view, "indexAt", return_value=index), patch.object(
-            self.window.tiles_view, "visualRect", return_value=option.rect
-        ), patch.object(self.window, "refresh_mods") as refresh_mods:
-            handled = self.window.eventFilter(self.window.tiles_view.viewport(), event)
+        def position():
+            index = self.window.mods_model.index(0, 0)
+            option = QtWidgets.QStyleOptionViewItem()
+            option.initFrom(view)
+            option.font = view.font()
+            option.rect = view.visualRect(index)
+            return self.window.tile_delegate._label_badges(option, index)[0][0].center()
 
-        self.assertTrue(handled)
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, position())
         self.assertEqual(self.window.filters.labels, ("combat",))
-        refresh_mods.assert_called_once_with()
-
-        with patch.object(self.window.tiles_view, "indexAt", return_value=index), patch.object(
-            self.window.tiles_view, "visualRect", return_value=option.rect
-        ), patch.object(self.window, "refresh_mods") as refresh_mods:
-            handled = self.window.eventFilter(self.window.tiles_view.viewport(), event)
-
-        self.assertTrue(handled)
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, position())
         self.assertEqual(self.window.filters.labels, ())
-        refresh_mods.assert_called_once_with()
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.ShiftModifier, position())
+        self.assertEqual(self.window.filters.labels, ("combat",))
+        QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.ShiftModifier, position())
+        self.assertEqual(self.window.filters.labels, ())
 
     def test_double_click_toggles_mods_in_list_and_tile_views(self):
         with patch.object(self.window, "_toggle_selected_mods") as toggle:
