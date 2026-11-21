@@ -39,8 +39,7 @@ class QuickToolsGuiTests(WindowTestCase):
     def update_tools(self, tools: list[dict]) -> None:
         storage.update_game_profile(self.window.cfg, self.profile_id, {"quick_tools": tools})
         self.window._sync_workspace()
-        self.qt_app.processEvents()
-        self.qt_app.processEvents()
+        self.qt_app.processEvents(QtCore.QEventLoop.AllEvents, 1000)
 
     def test_profile_editor_saves_added_tools_and_discards_cancelled_changes(self):
         original = self.tool("Original", "first.exe")
@@ -104,26 +103,24 @@ class QuickToolsGuiTests(WindowTestCase):
         bar = window.quick_tools
         tools = [self.tool(f"Mod management application {index + 1}", f"tool{index}.exe") for index in range(12)]
         self.show_library()
+        controls = (window.details_button, window.library_scroll, window.mods_actions)
+        scrollbar = bar.scroll.horizontalScrollBar()
         for width, font_size in ((tokens.DEFAULT_WIDTH, 10), (tokens.MIN_WIDTH, 17)):
             with self.subTest(width=width, font_size=font_size):
                 window.cfg["gui_font_size"] = font_size
                 window._refresh_theme()
                 window.resize(width, tokens.MIN_HEIGHT)
                 self.update_tools([])
-                details = window.details_button.geometry()
-                body = window.library_scroll.geometry()
-                footer = window.mods_actions.geometry()
+                baseline = [control.geometry() for control in controls]
                 self.update_tools(tools[:1])
-                scrollbar = bar.scroll.horizontalScrollBar()
                 self.assertEqual(scrollbar.maximum(), 0)
                 self.assertFalse(bar.scroll._overlay_scrollbars.horizontal.isVisible())
+                self.assertEqual([control.geometry() for control in controls], baseline)
                 self.update_tools(tools)
                 self.assertGreater(scrollbar.maximum(), 0)
                 self.assertTrue(bar.scroll._overlay_scrollbars.horizontal.isVisible())
-                self.assertEqual(window.details_button.geometry(), details)
-                self.assertEqual(window.library_scroll.geometry(), body)
-                self.assertEqual(window.mods_actions.geometry(), footer)
-                self.assertLess(bar.geometry().right(), details.left())
+                self.assertEqual([control.geometry() for control in controls], baseline)
+                self.assertLess(bar.geometry().right(), window.details_button.geometry().left())
                 last = bar.buttons[-1]
                 bar.buttons[-2].setFocus()
                 QtTest.QTest.keyClick(bar.buttons[-2], QtCore.Qt.Key_Tab)
