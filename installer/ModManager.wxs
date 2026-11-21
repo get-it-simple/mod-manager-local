@@ -1,0 +1,33 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="$(AppName)" Manufacturer="Get it Simple" Version="$(AppVersion)"
+           Language="1033" Scope="perMachine" ProductCode="$(ProductCode)" UpgradeCode="$(UpgradeCode)">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of Mod Manager is already installed." />
+    <Launch Condition="ALLUSERS = &quot;1&quot;"
+            Message="Mod Manager must be installed for all users." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="ModManagerIcon" SourceFile="!(bindpath.Project)\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ModManagerIcon" />
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="$(AppName)">
+        <Directory Id="RuntimeFolder" Name="_internal" />
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Main" Title="$(AppName)">
+      <Component Directory="INSTALLFOLDER">
+        <File Source="!(bindpath.Payload)\mod-manager-gui.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="$(AppName)"
+                    Advertise="yes" WorkingDirectory="INSTALLFOLDER" Icon="ModManagerIcon" />
+        </File>
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Source="!(bindpath.Project)\LICENSE" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Source="$(InstallMarker)" KeyPath="yes" />
+      </Component>
+      <Files Directory="RuntimeFolder" Include="!(bindpath.Runtime)\**" />
+    </Feature>
+  </Package>
+</Wix>

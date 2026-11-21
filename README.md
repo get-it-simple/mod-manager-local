@@ -12,6 +12,29 @@ A symlink-based mod manager for Unreal Engine games and most other engines, supp
 ---
 
 <details>
+<summary>Installing on Windows</summary>
+
+Download the x64 MSI from GitHub Releases and open it to install Mod Manager
+for all users. Administrator approval is required during installation. Open
+Mod Manager from the Start menu after setup.
+
+Once the package is available in the WinGet community catalog, install it with
+`winget install --id GetItSimple.ModManager --exact --scope machine`.
+
+The MSI installation stores settings, profiles, and the log in
+`%LOCALAPPDATA%\Mod Manager` for each Windows account. Updating or uninstalling
+the MSI preserves this directory. The portable EXE is also available in GitHub
+Releases and keeps these files beside the executable.
+
+To move data from a portable copy, finish any pending operations and close
+both copies. Back up any existing settings in `%LOCALAPPDATA%\Mod Manager`,
+then copy `config.json`, `profiles/` and, if present, `presets.json` and
+`labels.json` from the portable folder into that directory. Keep your mod and
+game folders at their configured paths.
+
+</details>
+
+<details>
 <summary>Running from source</summary>
 
 
@@ -223,6 +246,8 @@ pip install -r requirements.txt
 <details>
 <summary>Data Files</summary>
 
+For a machine MSI installation these files live in `%LOCALAPPDATA%\Mod Manager`.
+For source and portable launches they live beside the application.
 
 - `config.json` stores application settings and game profile definitions.
 - `profiles/<profile-id>-presets.json` stores named mod sets for each game profile.

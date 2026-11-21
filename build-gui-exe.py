@@ -6,9 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
+from app_paths import APP_NAME, APP_VERSION
 from tools.prepare_build import prepare_archive_backend, verify_archive_backend
 
 REQUIRED_RUNTIME_PACKAGES = {"PySide6": "PySide6>=6.7.0"}
@@ -103,8 +105,26 @@ def _build_exe(onefile: bool) -> int:
     if assets_dir.is_dir():
         cmd += ["--add-data", f"{assets_dir}{os.pathsep}assets"]
     cmd += ["--collect-data", "mod_manager.i18n"]
-    cmd.append("mod-manager-gui.py")
-    return subprocess.call(cmd)
+    for distribution in ("PySide6", "PySide6-Essentials", "shiboken6"):
+        cmd += ["--copy-metadata", distribution]
+    if os.name != "nt":
+        return subprocess.call([*cmd, "mod-manager-gui.py"])
+    with tempfile.TemporaryDirectory() as directory:
+        version_file = Path(directory) / "version.txt"
+        version = tuple(map(int, APP_VERSION.split("."))) + (0,)
+        version_file.write_text(
+            "VSVersionInfo(\n"
+            f"  ffi=FixedFileInfo(filevers={version}, prodvers={version}),\n"
+            "  kids=[StringFileInfo([StringTable('040904B0', [\n"
+            f"    StringStruct('FileDescription', {APP_NAME!r}),\n"
+            f"    StringStruct('ProductName', {APP_NAME!r}),\n"
+            f"    StringStruct('FileVersion', {APP_VERSION!r}),\n"
+            f"    StringStruct('ProductVersion', {APP_VERSION!r}),\n"
+            "  ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]\n"
+            ")\n",
+            encoding="utf-8",
+        )
+        return subprocess.call([*cmd, "--version-file", str(version_file), "mod-manager-gui.py"])
 
 
 def _verify_archive_backend() -> bool:

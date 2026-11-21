@@ -13,3 +13,27 @@ runs:
     - name: Prepare archive backend
       shell: pwsh
       run: python build-gui-exe.py --prepare-only
+    - name: Audit changed dependencies
+      shell: pwsh
+      env:
+        PUSH_BEFORE: ${{ github.event.before }}
+      run: |
+        $before = $env:PUSH_BEFORE
+        $hasPushBase = $false
+        if ($before -and $before -notmatch '^0+$') {
+          git cat-file -e "$before^{commit}" 2>$null
+          $hasPushBase = $LASTEXITCODE -eq 0
+        }
+        $changed = if ($hasPushBase) {
+          git diff --name-only $before HEAD
+        } else {
+          git diff-tree --root --diff-merges=first-parent --no-commit-id --name-only -r HEAD
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Could not determine changed files." }
+        if ($changed -notcontains "requirements.txt") {
+          Write-Host "requirements.txt not modified, skipping audit."
+          return
+        }
+        $PSNativeCommandUseErrorActionPreference = $true
+        python -m pip install pip-audit
+        python -m pip_audit -r requirements.txt

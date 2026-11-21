@@ -37,6 +37,7 @@ def load_json(path: Path, default):
 def save_json(path: Path, data) -> None:
     temporary = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False) as stream:
             temporary = Path(stream.name)
             json.dump(data, stream, ensure_ascii=False, indent=2)

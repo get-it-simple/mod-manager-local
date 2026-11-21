@@ -2,12 +2,22 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
+import os
 import sys
 from mod_manager.keyboard import default_bindings
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.42"
+APP_VERSION = "1.2.43"
+INSTALL_MARKER = "mod-manager.machine"
+
+
+def data_directory(app_dir: Path, *, frozen: bool) -> Path:
+    if os.name == "nt" and frozen and (app_dir / INSTALL_MARKER).is_file():
+        local_data = os.environ.get("LOCALAPPDATA")
+        return (Path(local_data) if local_data else Path.home() / "AppData" / "Local") / APP_NAME
+    return app_dir
+
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -15,10 +25,11 @@ elif Path(sys.argv[0]).suffix.lower() == ".pyz":
     APP_DIR = Path(sys.argv[0]).resolve().parent
 else:
     APP_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "config.json"
-PRESETS_PATH = APP_DIR / "presets.json"
-LABELS_PATH = APP_DIR / "labels.json"
-PROFILE_DATA_DIR = APP_DIR / "profiles"
+DATA_DIR = data_directory(APP_DIR, frozen=getattr(sys, "frozen", False))
+CONFIG_PATH = DATA_DIR / "config.json"
+PRESETS_PATH = DATA_DIR / "presets.json"
+LABELS_PATH = DATA_DIR / "labels.json"
+PROFILE_DATA_DIR = DATA_DIR / "profiles"
 
 PAGE_SIZE = 10
 

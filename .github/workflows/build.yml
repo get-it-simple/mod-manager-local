@@ -10,6 +10,10 @@ on:
       - "!tests/**"
       - "!tools/**"
       - "tools/prepare_build.py"
+      - "tools/release.py"
+      - "tools/publish_release.py"
+      - "tools/*.ps1"
+      - "installer/**"
       - "requirements.txt"
       - "pytest.ini"
       - "assets/**"
@@ -17,7 +21,7 @@ on:
       - ".github/actions/prepare-build/**"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-release
@@ -26,7 +30,7 @@ concurrency:
 jobs:
   tests:
     name: Python pytest
-    runs-on: windows-latest
+    runs-on: windows-2025
 
     steps:
       - name: Checkout
@@ -43,30 +47,6 @@ jobs:
 
       - name: Prepare build dependencies
         uses: ./.github/actions/prepare-build
-
-      - name: Audit dependencies
-        shell: pwsh
-        env:
-          PUSH_BEFORE: ${{ github.event.before }}
-        run: |
-          $before = $env:PUSH_BEFORE
-          $hasPushBase = $false
-          if ($before -and $before -notmatch '^0+$') {
-            git cat-file -e "$before^{commit}" 2>$null
-            $hasPushBase = $LASTEXITCODE -eq 0
-          }
-          $changed = if ($hasPushBase) {
-            git diff --name-only $before HEAD
-          } else {
-            git diff-tree --root --diff-merges=first-parent --no-commit-id --name-only -r HEAD
-          }
-          if ($LASTEXITCODE -ne 0) { throw "Could not determine changed files." }
-          if ($changed -notcontains "requirements.txt") {
-            Write-Host "requirements.txt not modified, skipping audit."
-            return
-          }
-          python -m pip install pip-audit
-          python -m pip_audit -r requirements.txt
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -75,9 +55,81 @@ jobs:
         run: python -m pytest
 
   build:
-    name: Build and release
+    name: Build and test installers
     needs: tests
-    runs-on: windows-latest
+    runs-on: windows-2025
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+          architecture: x64
+          check-latest: true
+          cache: pip
+
+      - name: Prepare build dependencies
+        uses: ./.github/actions/prepare-build
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Set up WiX
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install pinned WiX
+        run: dotnet tool install wix --tool-path build/tools --version 6.0.2
+
+      - name: Build executable formats
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python build-gui-exe.py --exe --onedir
+          python build-gui-exe.py --exe --onefile --no-clean-before
+
+      - name: Build and smoke-test release assets
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = python -c 'from app_paths import APP_VERSION; print(APP_VERSION)'
+          ./tools/smoke_release.ps1 -Version $version
+          $wix = (Resolve-Path build/tools/wix.exe).Path
+          $installer = python -m tools.release build-msi --wix $wix | Select-Object -Last 1
+          $olderInstaller = python -m tools.release build-msi --wix $wix --upgrade-fixture --output build/upgrade-fixture | Select-Object -Last 1
+          ./tools/smoke_release.ps1 -Version $version -Installer $installer -OlderInstaller $olderInstaller
+          Copy-Item -LiteralPath dist/mod-manager-gui.exe -Destination "dist/release/mod-manager-gui-v$version.exe"
+
+      - name: Store verified binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-release-binaries
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+
+      - name: Store MSI smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: msi-smoke-logs
+          path: build/smoke-*/msi-*.log
+          if-no-files-found: ignore
+          overwrite: true
+
+  publish:
+    name: Validate WinGet and publish release
+    needs: build
+    runs-on: windows-2025
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -90,73 +142,33 @@ jobs:
         with:
           python-version: "3.x"
           check-latest: true
-          cache: pip
 
-      - name: Prepare build dependencies
-        uses: ./.github/actions/prepare-build
+      - name: Download verified binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-release-binaries
+          path: dist/release
 
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Build executable
-        run: python build-gui-exe.py --exe --onefile
-
-      - name: Publish release
+      - name: Ensure WinGet supports schema 1.28.0
         shell: pwsh
+        run: |
+          $clientVersion = if (Get-Command winget -ErrorAction SilentlyContinue) { winget --version }
+          if ($clientVersion -notmatch '^v?(\d+\.\d+\.\d+)$' -or [version]$Matches[1] -lt [version]'1.29.380') {
+            Install-Module -Name Microsoft.WinGet.Client -Repository PSGallery -Scope CurrentUser -Force
+            Repair-WinGetPackageManager -AllUsers -Version '1.29.380'
+          }
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet is unavailable.' }
+
+      - name: Validate and publish assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
+        run: python -m tools.publish_release
 
-          $match = Select-String -Path app_paths.py -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
-          $version = $match.Matches[0].Groups[1].Value
-          $versionTag = "v$version"
-          $title = "Mod Manager $versionTag"
-          $releasePages = gh api --paginate --slurp 'repos/{owner}/{repo}/releases?per_page=100' |
-            ConvertFrom-Json -NoEnumerate
-          $matchingReleases = @(
-            foreach ($page in $releasePages) {
-              $page | Where-Object { $_.name -ceq $title -or $_.tag_name -ceq $versionTag }
-            }
-          )
-          if ($matchingReleases.Count -gt 1) { throw "More than one release matches $title." }
-          $release = $matchingReleases | Select-Object -First 1
-
-          $tag = $versionTag
-          if ($release) {
-            $tag = $release.tag_name
-          } elseif ((git tag --list $tag) -and -not (git tag --points-at HEAD --list $tag)) {
-            $tag = "$versionTag-$(git rev-parse --short HEAD)"
-          }
-          $prev = git tag --list 'v*' --merged HEAD --sort=-creatordate |
-            Where-Object { $_ -ne $tag -and $_ -ne $versionTag -and $_ -notlike "$versionTag-*" } |
-            Select-Object -First 1
-          $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
-          $repoUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
-          $commit = $env:GITHUB_SHA
-          $lines = @("Built from [``$commit``]($repoUrl/commit/$commit).", "", "## Commits", "")
-          git log $range --no-merges --format="%H%x09%h%x09%s" | ForEach-Object {
-            $sha, $short, $subject = $_ -split "`t", 3
-            $lines += "- [``$short``]($repoUrl/commit/$sha) $subject"
-          }
-          if ($prev) {
-            $lines += ""
-            $lines += "Previous release: [$prev]($repoUrl/releases/tag/$prev)"
-          }
-          $lines | Set-Content notes.md -Encoding utf8
-          $assetPrefix = "mod-manager-gui-$versionTag"
-          $asset = "$assetPrefix-run-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.exe"
-          Move-Item dist/mod-manager-gui.exe "dist/$asset"
-
-          if (-not $release) {
-            gh release create $tag "dist/$asset" --target $commit --title $title --notes-file notes.md
-            return
-          }
-
-          gh release upload $tag "dist/$asset"
-          gh release edit $tag --notes-file notes.md
-          $managedAssetPattern = "^$([regex]::Escape($assetPrefix))(-[0-9a-f]{7,40}|-run-\d+-\d+)?\.exe$"
-          foreach ($oldAsset in $release.assets | Where-Object { $_.name -cmatch $managedAssetPattern }) {
-            gh release delete-asset $tag $oldAsset.name --yes
-          }
+      - name: Store WinGet submission files
+        uses: actions/upload-artifact@v7
+        with:
+          name: winget-manifests
+          path: dist/winget/*.zip
+          if-no-files-found: error
+          overwrite: true
