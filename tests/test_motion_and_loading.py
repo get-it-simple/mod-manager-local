@@ -60,14 +60,43 @@ class StartupAndMotionTests(WindowTestCase):
 
     def test_buttons_created_during_palette_changes_have_one_feedback_owner(self):
         buttons = []
-        for _ in range(20):
+        for index in range(20):
             button = QtWidgets.QPushButton("Synthetic action", self.window)
             buttons.append(button)
             button.ensurePolished()
+            if index == 0:
+                self.window.theme.cfg["gui_theme"] = "light"
+            elif index == 10:
+                self.window.theme.cfg["gui_theme"] = "dark"
             self.window.theme.apply()
         self.qt_app.processEvents()
+        self.assertTrue(self.window.theme.palette.is_dark)
         for button in buttons:
             self.assertEqual(len(button.findChildren(ButtonFeedback)), 1)
+
+    def test_reapplying_theme_only_restyles_widgets_when_the_stylesheet_changes(self):
+        style_changes = []
+
+        class StyleWatcher(QtCore.QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QtCore.QEvent.StyleChange:
+                    style_changes.append(event.type())
+                return False
+
+        self.window.theme.cfg["gui_theme"] = "light"
+        self.window.theme.apply()
+        button = QtWidgets.QPushButton("Synthetic action", self.window)
+        button.ensurePolished()
+        watcher = StyleWatcher(button)
+        button.installEventFilter(watcher)
+
+        self.window.theme.cfg["gui_theme"] = "dark"
+        self.window.theme.apply()
+        self.assertTrue(style_changes)
+        style_changes.clear()
+
+        self.window.theme.apply()
+        self.assertEqual(style_changes, [])
 
     def test_construction_never_shows_a_top_level_child(self):
         shown = []

@@ -8,7 +8,7 @@ from mod_manager.keyboard import default_bindings
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.44"
+APP_VERSION = "1.2.45"
 INSTALL_MARKER = "mod-manager.machine"
 
 

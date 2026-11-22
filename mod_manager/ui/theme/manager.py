@@ -127,7 +127,8 @@ class ThemeManager(QtCore.QObject):
             if app is not None:
                 app.setPalette(self.qt_palette(theme))
                 app.setFont(build_font(self.cfg, self._base_font) or QtGui.QFont(self._base_font))
-                app.setStyleSheet(self._stylesheet)
+                if app.styleSheet() != self._stylesheet:
+                    app.setStyleSheet(self._stylesheet)
         finally:
             self._applying = False
         self.changed.emit()
