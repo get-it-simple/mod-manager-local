@@ -152,13 +152,38 @@ jobs:
       - name: Ensure WinGet supports schema 1.28.0
         shell: pwsh
         run: |
-          $clientVersion = if (Get-Command winget -ErrorAction SilentlyContinue) { winget --version }
-          if ($clientVersion -notmatch '^v?(\d+\.\d+\.\d+)$' -or [version]$Matches[1] -lt [version]'1.29.380') {
-            Install-Module -Name Microsoft.WinGet.Client -Repository PSGallery -Scope CurrentUser -Force
-            Repair-WinGetPackageManager -AllUsers -Version '1.29.380'
+          function Get-WinGetClientVersion {
+            if (Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue) {
+              [string]$output = winget.exe --version
+              if ($LASTEXITCODE -eq 0 -and $output -match '^v?(\d+\.\d+\.\d+)$') {
+                return [version]$Matches[1]
+              }
+            }
           }
-          winget --version
-          if ($LASTEXITCODE -ne 0) { throw 'WinGet is unavailable.' }
+
+          $minimumVersion = [version]'1.29.380'
+          $clientVersion = Get-WinGetClientVersion
+          if ($clientVersion -lt $minimumVersion) {
+            $releaseUrl = "https://github.com/microsoft/winget-cli/releases/download/v$minimumVersion"
+            $downloadDir = Join-Path $env:RUNNER_TEMP "winget-$minimumVersion"
+            New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+            $bundleName = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
+            $dependencyName = 'DesktopAppInstaller_Dependencies.zip'
+            $bundle = Join-Path $downloadDir $bundleName
+            $dependencyZip = Join-Path $downloadDir $dependencyName
+            Invoke-WebRequest -Uri "$releaseUrl/$bundleName" -OutFile $bundle
+            Invoke-WebRequest -Uri "$releaseUrl/$dependencyName" -OutFile $dependencyZip
+            Expand-Archive -LiteralPath $dependencyZip -DestinationPath $downloadDir -Force
+            $dependencies = (Get-ChildItem -LiteralPath (Join-Path $downloadDir 'x64') -File).FullName
+            Import-Module Appx -UseWindowsPowerShell
+            Add-AppxPackage -Path $bundle -DependencyPath $dependencies
+            $clientVersion = Get-WinGetClientVersion
+          }
+
+          if ($clientVersion -lt $minimumVersion) {
+            throw "WinGet $minimumVersion or later is required. Detected version: $clientVersion"
+          }
+          Write-Host "WinGet $clientVersion"
 
       - name: Validate and publish assets
         env:
