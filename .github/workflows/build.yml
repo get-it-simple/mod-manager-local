@@ -150,7 +150,7 @@ jobs:
           path: dist/release
 
       - name: Ensure WinGet supports schema 1.28.0
-        shell: pwsh
+        shell: powershell
         run: |
           function Get-WinGetClientVersion {
             if (Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue) {
@@ -171,11 +171,11 @@ jobs:
             $dependencyName = 'DesktopAppInstaller_Dependencies.zip'
             $bundle = Join-Path $downloadDir $bundleName
             $dependencyZip = Join-Path $downloadDir $dependencyName
-            Invoke-WebRequest -Uri "$releaseUrl/$bundleName" -OutFile $bundle
-            Invoke-WebRequest -Uri "$releaseUrl/$dependencyName" -OutFile $dependencyZip
+            Invoke-WebRequest -Uri "$releaseUrl/$bundleName" -OutFile $bundle -UseBasicParsing
+            Invoke-WebRequest -Uri "$releaseUrl/$dependencyName" -OutFile $dependencyZip -UseBasicParsing
             Expand-Archive -LiteralPath $dependencyZip -DestinationPath $downloadDir -Force
-            $dependencies = (Get-ChildItem -LiteralPath (Join-Path $downloadDir 'x64') -File).FullName
-            Import-Module Appx -UseWindowsPowerShell
+            [string[]]$dependencies = (Get-ChildItem -LiteralPath (Join-Path $downloadDir 'x64') -File).FullName
+            Import-Module Appx
             Add-AppxPackage -Path $bundle -DependencyPath $dependencies
             $clientVersion = Get-WinGetClientVersion
           }
